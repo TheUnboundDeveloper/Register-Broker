@@ -13,6 +13,14 @@
 >   likely broken on multi-controller ones. True device addresses are at **0x50+**.
 > - The **liquidctl issue threads are out of date / incorrect** — untrustworthy.
 >
+> **Why it was removed (not just shelved):** beyond the unreliable sources, the
+> Gigabyte register system itself is overly complex and considerably more fragile
+> than the average motherboard — intermodal controllers whose active interface
+> varies per board, a programming/debug port (0x28) that looks like a control path
+> but isn't, and per-board firmware differences that only board-level reverse
+> engineering settles. In a project whose core promise is "bounded access that
+> cannot brick hardware," that risk/benefit didn't justify keeping the code.
+>
 > The sources were removed from the tree; this document (including the expert
 > corrections summarized above) is the surviving **design record** of the original
 > (hardware-unvalidated) approach and the starting point if support returns.
