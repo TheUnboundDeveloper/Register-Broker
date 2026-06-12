@@ -68,3 +68,32 @@ internal static class SensorDecode
         return reg * 0.0625;
     }
 }
+
+/*---------------------------------------------------------------------------*\
+| DecoderRegistry — decoder coverage by raw-id prefix                         |
+|                                                                            |
+|   Maps every raw-id prefix the ChannelRegistry owns to the proven source    |
+|   its decode was ported from. The selftest walks every registered channel   |
+|   and asserts its prefix is covered here — a chipset PR that adds channels  |
+|   without declaring (and citing) a decoder fails the gate. The decode       |
+|   functions themselves stay above (compile-time-bound in the channel        |
+|   builders); this registry is the completeness/provenance check.            |
+\*---------------------------------------------------------------------------*/
+internal static class DecoderRegistry
+{
+    /// <summary>Raw-id prefix → the proven source the decode is ported from.</summary>
+    public static readonly IReadOnlyDictionary<string, string> Sources = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["smu."]      = "Linux k10temp (AmdCpuTctlC / AmdCcdTempC)",
+        ["nct6687d."] = "Linux nct6683 + Fred78290/nct6687d (NctTempC / NctFanRpm / NctVoltageMv)",
+        ["nct6775."]  = "Linux nct6775-core (NctTempC / NctFanRpm / Nct6775VoltageMv)",
+        ["dimm."]     = "Linux jc42 (Jc42TempC)",
+    };
+
+    public static bool Covers(string rawId)
+        => Sources.Keys.Any(p => rawId.StartsWith(p, StringComparison.Ordinal));
+
+    /// <summary>First registered channel without decoder coverage, or null when complete.</summary>
+    public static string? FirstUncovered(IEnumerable<RawChannel> channels)
+        => channels.Select(c => c.RawId).FirstOrDefault(id => !Covers(id));
+}

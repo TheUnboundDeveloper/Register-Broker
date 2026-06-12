@@ -5,8 +5,8 @@ namespace BrokerSensorBridge;
 |                                                                            |
 |   The broker's served set of named, read-only sensors — now ASSEMBLED from  |
 |   two layers (see CALIBRATION-AND-REGISTRY-PLAN.md):                        |
-|     * raw channels (ChipChannels) — stable ids + base values, from the       |
-|       trusted chip backends; carry no labels.                               |
+|     * raw channels (ChannelRegistry) — stable ids + base values, declared    |
+|       per backend in the signed code table; carry no labels.                |
 |     * board calibration (CalibrationStore) — labels + per-rail scales,       |
 |       DATA keyed by board DMI; can only rename/rescale/hide, never address. |
 |                                                                            |
@@ -50,8 +50,8 @@ internal static class SensorCatalog
 
     private static IReadOnlyList<SensorCatalogEntry> BuildEntries(CalibrationStore store)
     {
-        var list = new List<SensorCatalogEntry>(ChipChannels.All.Count);
-        foreach (RawChannel ch in ChipChannels.All)
+        var list = new List<SensorCatalogEntry>(ChannelRegistry.All.Count);
+        foreach (RawChannel ch in ChannelRegistry.All)
         {
             ChannelOverride cal = store.Resolve(ch.RawId);
             if (cal.Hidden) continue;                                   // calibration can hide a channel

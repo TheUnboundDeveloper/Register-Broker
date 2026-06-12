@@ -47,6 +47,21 @@ internal sealed class MockSmbusBackend : ISmbusBackend
 
     public bool DimmTempPresent(int index) => false;
 
+    /// <summary>
+    /// Mirrors the driver's compiled-in registry (the names must match the kernel's
+    /// g_SmbusBackends / g_SuperioBackends + the SMU entry exactly — the selftest uses
+    /// this to pin the broker↔driver name contract). Active flags derive from the
+    /// mock's configured state via the same ChipFamilies gates the catalog uses.
+    /// </summary>
+    public IReadOnlyList<BackendInfo> EnumerateBackends() => new[]
+    {
+        new BackendInfo("AMD FCH",    BackendClass.Smbus,   Available, 0),
+        new BackendInfo("Intel i801", BackendClass.Smbus,   false,     0),
+        new BackendInfo("AMD SMU",    BackendClass.Smu,     SmuAvailable, 0),
+        new BackendInfo("NCT668x EC", BackendClass.Superio, SuperioAvailable && ChipFamilies.IsNctEc(SuperioChipId),   (uint)SuperioChipId),
+        new BackendInfo("NCT6775",    BackendClass.Superio, SuperioAvailable && ChipFamilies.IsNct6775(SuperioChipId), (uint)SuperioChipId),
+    };
+
     public bool TryReadDimmTempRaw(int index, out uint raw, out SmbusStatus status)
     {
         raw = 0; status = SmbusStatus.NotImplemented; return false;

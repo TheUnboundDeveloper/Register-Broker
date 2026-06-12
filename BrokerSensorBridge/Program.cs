@@ -646,6 +646,12 @@ internal static class Program
               (docs/SUPERIO-NCT6683-NCT6686.md / SUPERIO-NCT6775-FAMILY.md). --*/
         failures += SelfTestChipsetGates();
 
+        /*-- Registry integrity: the channel registry validates (unique names/ids, prefix
+              ownership), every channel has decoder coverage, and the broker registry's
+              driver-backend names match what the (mock) driver enumerates — the contract
+              that keeps the broker and kernel tables from drifting apart. --*/
+        failures += SelfTestBackendRegistry();
+
         /*-- Server 1: enforcement OFF (audit only) -- hello & scope cases --*/
         const string pipeAudit = "SensorBrokerTest.audit";
         var auditAuth = new ClientAuthorization(false, null, null, m => Console.WriteLine("[audit-srv] " + m));
@@ -831,6 +837,63 @@ internal static class Program
         catch (Exception ex)
         {
             Console.WriteLine($"  [FAIL] chipset: threw {ex.Message}");
+            failures++;
+        }
+
+        return failures;
+    }
+
+    /*-----------------------------------------------------------*\
+    | Backend/decoder registry integrity (Phase 3 of the           |
+    | calibration plan). Asserts:                                  |
+    |   * ChannelRegistry.Validate() is clean,                     |
+    |   * every registered channel has decoder coverage,           |
+    |   * every DriverBackends name the broker table declares      |
+    |     exists in the driver's enumeration (mock mirrors the     |
+    |     kernel registry names — the name contract),              |
+    |   * enumeration Active flags track the detected chip id.     |
+    \*-----------------------------------------------------------*/
+    private static int SelfTestBackendRegistry()
+    {
+        int failures = 0;
+        void Check(string name, bool ok)
+        {
+            Console.WriteLine($"  [{(ok ? "PASS" : "FAIL")}] registry: {name}");
+            if (!ok) failures++;
+        }
+
+        try
+        {
+            string? invalid = ChannelRegistry.Validate();
+            Check($"channel registry validates{(invalid == null ? "" : $" ({invalid})")}", invalid == null);
+
+            string? uncovered = DecoderRegistry.FirstUncovered(ChannelRegistry.All);
+            Check($"decoder coverage complete{(uncovered == null ? "" : $" (missing: {uncovered})")}", uncovered == null);
+
+            var nctEc = new MockSmbusBackend(available: true, smuAvailable: true,
+                                             superioAvailable: true, superioChipId: 0xD592);
+            IReadOnlyList<BackendInfo> enumerated = nctEc.EnumerateBackends();
+            var enumeratedNames = new HashSet<string>(enumerated.Select(b => b.Name), StringComparer.Ordinal);
+
+            string? unknown = ChannelRegistry.Backends
+                .SelectMany(d => d.DriverBackends)
+                .FirstOrDefault(n => !enumeratedNames.Contains(n));
+            Check($"broker registry names exist in driver enumeration{(unknown == null ? "" : $" (unknown: {unknown})")}",
+                  unknown == null);
+
+            Check("NCT6687D id -> 'NCT668x EC' active, 'NCT6775' inactive",
+                  enumerated.Single(b => b.Name == "NCT668x EC").Active &&
+                  !enumerated.Single(b => b.Name == "NCT6775").Active);
+
+            var nct6775 = new MockSmbusBackend(available: true, superioAvailable: true, superioChipId: 0xD428);
+            IReadOnlyList<BackendInfo> enum6775 = nct6775.EnumerateBackends();
+            Check("NCT6798 id -> 'NCT6775' active, 'NCT668x EC' inactive",
+                  enum6775.Single(b => b.Name == "NCT6775").Active &&
+                  !enum6775.Single(b => b.Name == "NCT668x EC").Active);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  [FAIL] registry: threw {ex.Message}");
             failures++;
         }
 

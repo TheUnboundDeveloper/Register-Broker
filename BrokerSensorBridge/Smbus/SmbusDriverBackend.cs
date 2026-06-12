@@ -41,6 +41,13 @@ internal sealed class SmbusDriverBackend : ISmbusBackend, IDisposable
     private const uint IOCTL_SMU     = (0x8000u << 16) | (0x802u << 2);
     private const uint IOCTL_SUPERIO = (0x8000u << 16) | (0x803u << 2);
     private const uint IOCTL_WRITE   = (0x8000u << 16) | (0x804u << 2);
+    private const uint IOCTL_ENUM    = (0x8000u << 16) | (0x805u << 2);
+
+    /* BROKER_ENUM_BACKENDS_RESPONSE layout (packed): Version(4) Count(4) then
+       BROKER_ENUM_BACKENDS_MAX entries of Name[32] + Class(4) + Active(4) + Detail(4). */
+    private const int ENUM_NAME_MAX   = 32;
+    private const int ENUM_ENTRY_SIZE = ENUM_NAME_MAX + 12;
+    private const int ENUM_MAX        = 16;
 
     private readonly SafeFileHandle? _device;
     private readonly Action<string> _log;
@@ -66,6 +73,12 @@ internal sealed class SmbusDriverBackend : ISmbusBackend, IDisposable
     /// <summary>True when the driver reports the brick-guarded SMBus write path (CAP_WRITE).</summary>
     public bool WriteAvailable { get; }
     public string Describe { get; }
+
+    /* The driver's backend registry, queried once at open. Diagnostic only: the CAP_*
+       bits and SuperioChipId stay authoritative for gating, so a driver that predates
+       ENUM_BACKENDS (empty list) changes nothing about what is served. */
+    private readonly BackendInfo[] _backends = Array.Empty<BackendInfo>();
+    public IReadOnlyList<BackendInfo> EnumerateBackends() => _backends;
 
     public SmbusDriverBackend(Action<string> log)
     {
@@ -103,6 +116,50 @@ internal sealed class SmbusDriverBackend : ISmbusBackend, IDisposable
                 : "SMBus driver present but INFO query failed";
         }
         _log("[smbus] " + Describe);
+
+        _backends = QueryBackends();
+        if (_backends.Length > 0)
+        {
+            string active = string.Join(", ", _backends.Where(b => b.Active)
+                .Select(b => b.Detail != 0 ? $"{b.Name} (0x{b.Detail:X})" : b.Name));
+            _log("[smbus] Detected backends: " + (active.Length > 0 ? active : "none")
+               + " | registered: " + string.Join(", ", _backends.Select(b => b.Name)));
+        }
+    }
+
+    /// <summary>
+    /// Queries the driver's backend registry (IOCTL_BROKER_ENUM_BACKENDS). Returns an
+    /// empty array on a driver that predates the op (the IOCTL fails with
+    /// ERROR_INVALID_FUNCTION) — callers already treat enumeration as diagnostic.
+    /// </summary>
+    private BackendInfo[] QueryBackends()
+    {
+        if (_device is null || _device.IsInvalid) return Array.Empty<BackendInfo>();
+
+        byte[] resp = new byte[8 + ENUM_MAX * ENUM_ENTRY_SIZE];
+        if (!DeviceIoControl(_device, IOCTL_ENUM, Array.Empty<byte>(), 0, resp, (uint)resp.Length, out uint got, IntPtr.Zero)
+            || got < 8)
+        {
+            _log("[smbus] driver predates ENUM_BACKENDS (IOCTL 0x805); backend enumeration unavailable");
+            return Array.Empty<BackendInfo>();
+        }
+
+        uint count = Math.Min(ReadU32(resp, 4), ENUM_MAX);
+        var list = new List<BackendInfo>((int)count);
+        for (int i = 0; i < count; i++)
+        {
+            int off = 8 + i * ENUM_ENTRY_SIZE;
+            if (off + ENUM_ENTRY_SIZE > got) break;             // trust only bytes the driver returned
+
+            int nul = Array.IndexOf(resp, (byte)0, off, ENUM_NAME_MAX);
+            int nameLen = nul < 0 ? ENUM_NAME_MAX : nul - off;
+            list.Add(new BackendInfo(
+                System.Text.Encoding.ASCII.GetString(resp, off, nameLen),
+                (BackendClass)ReadU32(resp, off + ENUM_NAME_MAX),
+                ReadU32(resp, off + ENUM_NAME_MAX + 4) != 0,
+                ReadU32(resp, off + ENUM_NAME_MAX + 8)));
+        }
+        return list.ToArray();
     }
 
     public SmbusResult Read(int bus, int address, int command, SmbusOp op, int length)

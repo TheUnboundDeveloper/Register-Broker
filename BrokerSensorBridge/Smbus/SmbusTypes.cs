@@ -27,6 +27,20 @@ internal readonly record struct SmbusResult(SmbusStatus Status, byte[] Data)
     public static SmbusResult Fail(SmbusStatus s) => new(s, Array.Empty<byte>());
 }
 
+/// <summary>Backend classes reported by IOCTL_BROKER_ENUM_BACKENDS (mirror BROKER_BACKEND_CLASS_*).</summary>
+internal enum BackendClass
+{
+    Smbus   = 0,   // SMBus host controller (Detail: PCI device id)
+    Smu     = 1,   // CPU SMU/SMN sensors   (Detail: (CpuFamily << 8) | CpuModel)
+    Superio = 2    // Super-I/O sensors     (Detail: SIO chip id)
+}
+
+/// <summary>
+/// One registered driver backend (an IOCTL_BROKER_ENUM_BACKENDS entry): every backend
+/// the driver compiled in, with Active set on the ones that claimed hardware at detect.
+/// </summary>
+internal readonly record struct BackendInfo(string Name, BackendClass Class, bool Active, uint Detail);
+
 internal interface ISmbusBackend
 {
     /// <summary>True only when a usable SMBus driver is present and reports a read capability.</summary>
@@ -49,6 +63,14 @@ internal interface ISmbusBackend
 
     /// <summary>Human-readable backend state for logs / health.</summary>
     string Describe { get; }
+
+    /// <summary>
+    /// The driver's registered hardware backends (its compiled-in detection registry) with
+    /// per-entry Active flags. Empty when no driver is present or the driver predates
+    /// IOCTL_BROKER_ENUM_BACKENDS — callers must treat enumeration as diagnostic, never
+    /// as the availability gate (the CAP_* bits and chip id above remain authoritative).
+    /// </summary>
+    IReadOnlyList<BackendInfo> EnumerateBackends();
 
     SmbusResult Read(int bus, int address, int command, SmbusOp op, int length);
 
