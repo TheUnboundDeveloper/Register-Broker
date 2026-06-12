@@ -23,6 +23,16 @@ static NTSTATUS BrokerSmbusCreateControlDevice(_In_ WDFDRIVER Driver);
 /* Detected once at load; read-only thereafter. */
 static SMBUS_CONTROLLER g_Controller;
 
+/* Bounded ASCII copy for ENUM_BACKENDS names (always null-terminates). */
+static VOID BrokerCopyBackendName(_Out_writes_(BROKER_BACKEND_NAME_MAX) CHAR* Dest,
+                                  _In_z_ const CHAR* Src)
+{
+    ULONG i;
+    for (i = 0; i + 1 < BROKER_BACKEND_NAME_MAX && Src[i] != '\0'; i++)
+        Dest[i] = Src[i];
+    Dest[i] = '\0';
+}
+
 _Use_decl_annotations_
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 {
@@ -45,13 +55,11 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
     /* Independently detect the AMD SMU CPU-temperature path (CPUID-gated). */
     SmuAmdDetect(&g_Controller);
 
-    /* Independently detect a Super-I/O for board temps/fans over LPC. Try the
-       NCT668x EC family (6683/6686/6687D — MSI), then the NCT6775 bank-select
-       family (6779/6791..6798 — ASUS/ASRock/Gigabyte/EVGA). Each probe no-ops
-       if an earlier one claimed a chip, so a board matches exactly one backend.
-       The ITE (IT87xx) backend was archived 2026-06-11 — see _archive_gigabyte\. */
-    SuperioNctDetect(&g_Controller);
-    SuperioNct6775Detect(&g_Controller);
+    /* Independently detect a Super-I/O for board temps/fans over LPC. Probes run
+       in registry order (g_SuperioBackends in SuperioNct.c: NCT668x EC family,
+       then the NCT6775 bank-select family); the first probe to claim a chip wins,
+       so a board matches exactly one backend. */
+    SuperioDetectAll(&g_Controller);
 
     return BrokerSmbusCreateControlDevice(driver);
 }
@@ -149,7 +157,9 @@ VOID BrokerSmbusEvtIoDeviceControl(WDFQUEUE Queue, WDFREQUEST Request,
         info->Capabilities = (g_Controller.ReadImplemented  ? BROKER_SMBUS_CAP_READ    : 0)
                            | (g_Controller.SmuAvailable     ? BROKER_SMBUS_CAP_SMU     : 0)
                            | (g_Controller.SuperioAvailable ? BROKER_SMBUS_CAP_SUPERIO : 0)
-                           | ((g_Controller.Vendor == SmbusVendorAmd && g_Controller.ReadImplemented)
+                           | ((g_Controller.Backend != NULL &&
+                               g_Controller.Backend->WriteImplemented &&
+                               g_Controller.ReadImplemented)
                                                             ? BROKER_SMBUS_CAP_WRITE   : 0);
         info->Vendor       = (UINT32)g_Controller.Vendor;
         for (ULONG bi = 0; bi < 8; bi++)
@@ -237,6 +247,55 @@ VOID BrokerSmbusEvtIoDeviceControl(WDFQUEUE Queue, WDFREQUEST Request,
             resp->Status = SuperioReadDispatch(&g_Controller, reqLocal.Kind, reqLocal.Index, &raw);
             resp->Raw    = raw;
         }
+        bytesReturned = sizeof(*resp);
+        status        = STATUS_SUCCESS;
+        break;
+    }
+    case IOCTL_BROKER_ENUM_BACKENDS:
+    {
+        BROKER_ENUM_BACKENDS_RESPONSE* resp;
+        ULONG i;
+
+        status = WdfRequestRetrieveOutputBuffer(Request, sizeof(*resp), &outBuf, &bufLen);
+        if (!NT_SUCCESS(status)) break;
+
+        /* Output-only (like INFO): reports the detect-time registry state; touches
+           no hardware. Built straight from the backend tables, so this can never
+           drift from what the driver actually compiled in. */
+        resp = (BROKER_ENUM_BACKENDS_RESPONSE*)outBuf;
+        RtlZeroMemory(resp, sizeof(*resp));
+        resp->Version = BROKER_SMBUS_PROTOCOL_VERSION;
+
+        for (i = 0; i < g_SmbusBackendCount && resp->Count < BROKER_ENUM_BACKENDS_MAX; i++)
+        {
+            BROKER_BACKEND_INFO* e = &resp->Backends[resp->Count++];
+            BrokerCopyBackendName(e->Name, g_SmbusBackends[i].Name);
+            e->Class  = BROKER_BACKEND_CLASS_SMBUS;
+            e->Active = (g_Controller.Backend == &g_SmbusBackends[i]) ? 1u : 0u;
+            e->Detail = e->Active ? g_Controller.PciDeviceId : 0u;
+        }
+
+        /* The SMU path is CPUID-gated (not PCI/SIO-probed) — a single fixed entry. */
+        if (resp->Count < BROKER_ENUM_BACKENDS_MAX)
+        {
+            BROKER_BACKEND_INFO* e = &resp->Backends[resp->Count++];
+            BrokerCopyBackendName(e->Name, "AMD SMU");
+            e->Class  = BROKER_BACKEND_CLASS_SMU;
+            e->Active = g_Controller.SmuAvailable ? 1u : 0u;
+            e->Detail = e->Active
+                ? (((UINT32)g_Controller.CpuFamily << 8) | g_Controller.CpuModel) : 0u;
+        }
+
+        for (i = 0; i < g_SuperioBackendCount && resp->Count < BROKER_ENUM_BACKENDS_MAX; i++)
+        {
+            BROKER_BACKEND_INFO* e = &resp->Backends[resp->Count++];
+            BrokerCopyBackendName(e->Name, g_SuperioBackends[i].Name);
+            e->Class  = BROKER_BACKEND_CLASS_SUPERIO;
+            e->Active = (g_Controller.SuperioAvailable &&
+                         g_Controller.SuperioKind == g_SuperioBackends[i].Kind) ? 1u : 0u;
+            e->Detail = e->Active ? g_Controller.SuperioChipId : 0u;
+        }
+
         bytesReturned = sizeof(*resp);
         status        = STATUS_SUCCESS;
         break;

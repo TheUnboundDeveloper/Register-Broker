@@ -27,6 +27,9 @@ typedef struct _SMBUS_BUS
     UCHAR  PortSelect;   /* AMD FCH port-select value; unused on Intel */
 } SMBUS_BUS;
 
+/* Defined below; the controller records which backend claimed it. */
+struct _SMBUS_BACKEND_DESCRIPTOR;
+
 typedef struct _SMBUS_CONTROLLER
 {
     SMBUS_VENDOR Vendor;
@@ -46,11 +49,57 @@ typedef struct _SMBUS_CONTROLLER
     USHORT       SuperioBase;               /* EC base I/O port (from LD-HWM / LD-EC)        */
     USHORT       SuperioChipId;             /* detected SIO chip id (e.g. 0xD592, 0x8688)   */
     UCHAR        SuperioKind;               /* BROKER_SUPERIO_KIND_NCT / _ITE / _NONE      */
+    const struct _SMBUS_BACKEND_DESCRIPTOR* Backend;   /* SMBus backend that claimed the
+                                               controller at detect; NULL if none */
 } SMBUS_CONTROLLER;
+
+/*---------------------------------------------------------------------------*\
+| Backend registry (the Phase-3 detector registry).                           |
+|                                                                             |
+|   Detection and dispatch are table-driven: adding a backend = one source    |
+|   file + one descriptor row. Table order IS detection order. The tables     |
+|   live next to their dispatch (SMBus: SmbusDetect.c; Super-I/O:             |
+|   SuperioNct.c) and are also what IOCTL_BROKER_ENUM_BACKENDS reports.       |
+\*---------------------------------------------------------------------------*/
+
+/* An SMBus host-controller backend. Claimed by PCI vendor id of the SMBus-class
+   device; Vendor is the wire value INFO reports for it. */
+typedef struct _SMBUS_BACKEND_DESCRIPTOR
+{
+    const CHAR*   Name;                     /* short ASCII name (ENUM_BACKENDS)      */
+    SMBUS_VENDOR  Vendor;                   /* BROKER_SMBUS_VENDOR_* reported by INFO */
+    const USHORT* PciVendorIds;             /* PCI vendor ids this backend claims     */
+    ULONG         PciVendorIdCount;
+    BOOLEAN       WriteImplemented;         /* advertises BROKER_SMBUS_CAP_WRITE      */
+    NTSTATUS (*DiscoverBuses)(_Inout_ SMBUS_CONTROLLER* Controller);
+    UINT32   (*Read)(_In_ const SMBUS_CONTROLLER*, _In_ const BROKER_SMBUS_XFER_REQUEST*, _Out_ BROKER_SMBUS_XFER_RESPONSE*);
+    UINT32   (*Write)(_In_ const SMBUS_CONTROLLER*, _In_ const BROKER_SMBUS_WRITE_REQUEST*);
+} SMBUS_BACKEND_DESCRIPTOR;
+
+/* A Super-I/O sensor backend. Detect probes the SIO chip id and claims the
+   controller on a gate match (it MUST no-op if SuperioAvailable is already set);
+   Kind is the wire value its reads dispatch on. */
+typedef struct _SUPERIO_BACKEND_DESCRIPTOR
+{
+    const CHAR* Name;                       /* short ASCII name (ENUM_BACKENDS) */
+    UCHAR       Kind;                       /* BROKER_SUPERIO_KIND_* it claims  */
+    VOID   (*Detect)(_Inout_ SMBUS_CONTROLLER* Controller);
+    UINT32 (*Read)(_In_ const SMBUS_CONTROLLER*, _In_ UINT32 Kind, _In_ UINT32 Index, _Out_ UINT32* Raw);
+} SUPERIO_BACKEND_DESCRIPTOR;
+
+/* The registries (SmbusDetect.c / SuperioNct.c). */
+extern const SMBUS_BACKEND_DESCRIPTOR   g_SmbusBackends[];
+extern const ULONG                      g_SmbusBackendCount;
+extern const SUPERIO_BACKEND_DESCRIPTOR g_SuperioBackends[];
+extern const ULONG                      g_SuperioBackendCount;
 
 /* One-time detection: scan PCI, identify the vendor, discover base(s). Safe to
    call at DriverEntry. Leaves Vendor = Unknown if no SMBus controller is found. */
 NTSTATUS SmbusDetectController(_Out_ SMBUS_CONTROLLER* Controller);
+
+/* Run every registered Super-I/O probe in table order; first claim wins (a board
+   has one Super-I/O HWM, so later probes are skipped once one claims the chip). */
+VOID SuperioDetectAll(_Inout_ SMBUS_CONTROLLER* Controller);
 
 /* Vendor-dispatched bounded read. Returns an BROKER_SMBUS_STATUS value. */
 UINT32 SmbusReadXfer(

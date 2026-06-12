@@ -200,16 +200,40 @@ UINT32 SuperioNctRead(const SMBUS_CONTROLLER* Controller, UINT32 Kind, UINT32 In
     return BrokerSmbusOk;
 }
 
-/* Backend dispatch used by the IOCTL handler. The ITE backend was archived
-   2026-06-11 (see _archive_gigabyte\) — BROKER_SUPERIO_KIND_ITE (2) stays
-   reserved in the protocol header so the wire value is never reused. */
+/*---------------------------------------------------------------------------*\
+| Super-I/O backend registry + dispatch.                                      |
+|                                                                             |
+|   Adding a Super-I/O backend = one SuperioXxx.c file + one row here. Table  |
+|   order is DETECTION order; first probe to claim the chip wins (a board has |
+|   one Super-I/O HWM). The ITE backend was archived 2026-06-11 —             |
+|   BROKER_SUPERIO_KIND_ITE (2) stays reserved in the protocol header so the  |
+|   wire value is never reused.                                               |
+\*---------------------------------------------------------------------------*/
+const SUPERIO_BACKEND_DESCRIPTOR g_SuperioBackends[] =
+{
+    { "NCT668x EC", BROKER_SUPERIO_KIND_NCT,     SuperioNctDetect,     SuperioNctRead     },
+    { "NCT6775",    BROKER_SUPERIO_KIND_NCT6775, SuperioNct6775Detect, SuperioNct6775Read },
+};
+const ULONG g_SuperioBackendCount = RTL_NUMBER_OF(g_SuperioBackends);
+
+VOID SuperioDetectAll(SMBUS_CONTROLLER* Controller)
+{
+    ULONG i;
+    for (i = 0; i < g_SuperioBackendCount; i++)
+    {
+        if (Controller->SuperioAvailable)
+            break;                        /* claimed by an earlier probe — done */
+        g_SuperioBackends[i].Detect(Controller);
+    }
+}
+
+/* Backend dispatch used by the IOCTL handler. Kind NONE (0) matches no row. */
 UINT32 SuperioReadDispatch(const SMBUS_CONTROLLER* Controller, UINT32 Kind, UINT32 Index, UINT32* Raw)
 {
+    ULONG i;
     *Raw = 0;
-    switch (Controller->SuperioKind)
-    {
-        case BROKER_SUPERIO_KIND_NCT:     return SuperioNctRead(Controller, Kind, Index, Raw);
-        case BROKER_SUPERIO_KIND_NCT6775: return SuperioNct6775Read(Controller, Kind, Index, Raw);
-        default:                           return BrokerSmbusNotImplemented;
-    }
+    for (i = 0; i < g_SuperioBackendCount; i++)
+        if (g_SuperioBackends[i].Kind == Controller->SuperioKind)
+            return g_SuperioBackends[i].Read(Controller, Kind, Index, Raw);
+    return BrokerSmbusNotImplemented;
 }

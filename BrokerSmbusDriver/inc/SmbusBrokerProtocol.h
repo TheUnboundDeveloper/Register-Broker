@@ -51,6 +51,12 @@
    KERNEL, independent of the caller. This is the one write surface — kept tiny. */
 #define IOCTL_BROKER_SMBUS_WRITE \
     CTL_CODE(FILE_DEVICE_BROKER_SMBUS, 0x804, METHOD_BUFFERED, FILE_ANY_ACCESS)
+/* Enumerate the driver's registered hardware backends (read-only, no hardware
+   touched — reports the detect-time state). Lists every backend COMPILED IN, with
+   an Active flag for the ones that claimed hardware, so the broker can log/serve
+   coverage truthfully without hard-coding the backend list a second time. */
+#define IOCTL_BROKER_ENUM_BACKENDS \
+    CTL_CODE(FILE_DEVICE_BROKER_SMBUS, 0x805, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
 /* Read-only operations in Phase B. Writes are intentionally not defined yet:
    they are the brick-risk surface and arrive only with the address allowlist
@@ -221,6 +227,29 @@ typedef struct _BROKER_SMBUS_WRITE_RESPONSE
 {
     UINT32 Status;         /* BROKER_SMBUS_STATUS (Forbidden if address not on RGB range) */
 } BROKER_SMBUS_WRITE_RESPONSE;
+
+/* Backend classes reported by IOCTL_BROKER_ENUM_BACKENDS. */
+#define BROKER_BACKEND_CLASS_SMBUS    0u   /* SMBus host controller (Detail: PCI device id)        */
+#define BROKER_BACKEND_CLASS_SMU      1u   /* CPU SMU/SMN sensors  (Detail: (CpuFamily<<8)|Model)  */
+#define BROKER_BACKEND_CLASS_SUPERIO  2u   /* Super-I/O sensors    (Detail: SIO chip id)           */
+
+#define BROKER_BACKEND_NAME_MAX       32u
+#define BROKER_ENUM_BACKENDS_MAX      16u
+
+typedef struct _BROKER_BACKEND_INFO
+{
+    CHAR   Name[BROKER_BACKEND_NAME_MAX];   /* ASCII, null-terminated         */
+    UINT32 Class;                           /* BROKER_BACKEND_CLASS_*         */
+    UINT32 Active;                          /* 1 = claimed hardware at detect */
+    UINT32 Detail;                          /* class-specific id; 0 if inactive */
+} BROKER_BACKEND_INFO;
+
+typedef struct _BROKER_ENUM_BACKENDS_RESPONSE
+{
+    UINT32 Version;        /* BROKER_SMBUS_PROTOCOL_VERSION */
+    UINT32 Count;          /* valid entries in Backends[]    */
+    BROKER_BACKEND_INFO Backends[BROKER_ENUM_BACKENDS_MAX];
+} BROKER_ENUM_BACKENDS_RESPONSE;
 
 #include <poppack.h>
 

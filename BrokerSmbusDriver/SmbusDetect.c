@@ -1,26 +1,44 @@
 /*---------------------------------------------------------------------------*\
-| SmbusDetect.c — chipset auto-detection + vendor dispatch                    |
+| SmbusDetect.c — chipset auto-detection + backend registry/dispatch          |
 |                                                                            |
 |   Scans PCI bus 0 for the SMBus host controller (PCI class 0x0C0500),       |
-|   identifies the vendor from the PCI vendor id, and hands off to the        |
-|   vendor backend to discover the I/O base(s). PCI config reads are          |
-|   read-only and low risk; the vendor-specific base discovery and the actual |
-|   transaction are in SmbusAmd.c / SmbusIntel.c.                            |
+|   matches the PCI vendor id against the backend registry below, and hands   |
+|   off to the matched backend to discover the I/O base(s). PCI config reads  |
+|   are read-only and low risk; the vendor-specific base discovery and the    |
+|   actual transaction are in SmbusAmd.c / SmbusIntel.c.                     |
+|                                                                            |
+|   Adding an SMBus host backend = one SmbusXxx.c file + one descriptor row   |
+|   in g_SmbusBackends. Table order is match order.                           |
 \*---------------------------------------------------------------------------*/
 #include "SmbusController.h"
 
 /* PCI base-class 0x0C (serial bus), sub-class 0x05 (SMBus). */
 #define PCI_SMBUS_CLASSCODE 0x0C0500u
 
-static SMBUS_VENDOR SmbusVendorFromPciId(USHORT VendorId)
+/*-- The SMBus host-controller backend registry. --*/
+
+static const USHORT g_AmdPciVendorIds[]   = { 0x1022, 0x1002 };   /* AMD, ATI/AMD (older FCH) */
+static const USHORT g_IntelPciVendorIds[] = { 0x8086 };
+
+/* WriteImplemented: only the AMD path's bounded brick-guarded write is validated;
+   Intel's write returns NotImplemented, so it must not advertise CAP_WRITE. */
+const SMBUS_BACKEND_DESCRIPTOR g_SmbusBackends[] =
 {
-    switch (VendorId)
-    {
-        case 0x8086: return SmbusVendorIntel;   /* Intel            */
-        case 0x1022: return SmbusVendorAmd;     /* AMD              */
-        case 0x1002: return SmbusVendorAmd;     /* ATI/AMD (older FCH) */
-        default:     return SmbusVendorUnknown;
-    }
+    { "AMD FCH",    SmbusVendorAmd,   g_AmdPciVendorIds,   RTL_NUMBER_OF(g_AmdPciVendorIds),
+      TRUE,  SmbusAmdDiscoverBuses,   SmbusAmdRead,   SmbusAmdWrite   },
+    { "Intel i801", SmbusVendorIntel, g_IntelPciVendorIds, RTL_NUMBER_OF(g_IntelPciVendorIds),
+      FALSE, SmbusIntelDiscoverBuses, SmbusIntelRead, SmbusIntelWrite },
+};
+const ULONG g_SmbusBackendCount = RTL_NUMBER_OF(g_SmbusBackends);
+
+static const SMBUS_BACKEND_DESCRIPTOR* SmbusBackendFromPciId(USHORT VendorId)
+{
+    ULONG i, v;
+    for (i = 0; i < g_SmbusBackendCount; i++)
+        for (v = 0; v < g_SmbusBackends[i].PciVendorIdCount; v++)
+            if (g_SmbusBackends[i].PciVendorIds[v] == VendorId)
+                return &g_SmbusBackends[i];
+    return NULL;
 }
 
 NTSTATUS SmbusDetectController(SMBUS_CONTROLLER* Controller)
@@ -53,19 +71,17 @@ NTSTATUS SmbusDetectController(SMBUS_CONTROLLER* Controller)
             if ((classReg >> 8) != PCI_SMBUS_CLASSCODE)
                 continue;                          /* not the SMBus controller */
 
-            Controller->Vendor      = SmbusVendorFromPciId(vid);
+            Controller->Backend     = SmbusBackendFromPciId(vid);
+            Controller->Vendor      = Controller->Backend ? Controller->Backend->Vendor
+                                                          : SmbusVendorUnknown;
             Controller->PciDevice   = dev;
             Controller->PciFunction = fn;
             Controller->PciVendorId = vid;
             Controller->PciDeviceId = did;
             Controller->PciRevision = (UCHAR)(classReg & 0xFF);
 
-            switch (Controller->Vendor)
-            {
-                case SmbusVendorAmd:   return SmbusAmdDiscoverBuses(Controller);
-                case SmbusVendorIntel: return SmbusIntelDiscoverBuses(Controller);
-                default:               return STATUS_NOT_SUPPORTED;
-            }
+            return Controller->Backend ? Controller->Backend->DiscoverBuses(Controller)
+                                       : STATUS_NOT_SUPPORTED;
         }
     }
 
@@ -79,12 +95,8 @@ UINT32 SmbusReadXfer(const SMBUS_CONTROLLER* Controller,
     if (Req->BusIndex >= Controller->BusCount)
         return BrokerSmbusBadRequest;
 
-    switch (Controller->Vendor)
-    {
-        case SmbusVendorAmd:   return SmbusAmdRead(Controller, Req, Resp);
-        case SmbusVendorIntel: return SmbusIntelRead(Controller, Req, Resp);
-        default:               return BrokerSmbusNotImplemented;
-    }
+    return Controller->Backend ? Controller->Backend->Read(Controller, Req, Resp)
+                               : BrokerSmbusNotImplemented;
 }
 
 UINT32 SmbusWriteXfer(const SMBUS_CONTROLLER* Controller,
@@ -93,10 +105,6 @@ UINT32 SmbusWriteXfer(const SMBUS_CONTROLLER* Controller,
     if (Req->BusIndex >= Controller->BusCount)
         return BrokerSmbusBadRequest;
 
-    switch (Controller->Vendor)
-    {
-        case SmbusVendorAmd:   return SmbusAmdWrite(Controller, Req);
-        case SmbusVendorIntel: return SmbusIntelWrite(Controller, Req);
-        default:               return BrokerSmbusNotImplemented;
-    }
+    return Controller->Backend ? Controller->Backend->Write(Controller, Req)
+                               : BrokerSmbusNotImplemented;
 }
