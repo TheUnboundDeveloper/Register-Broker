@@ -64,6 +64,26 @@ audited broker. Privilege is scoped to one small service instead of every consum
 
 Full inventory: [docs/SENSOR-CHIPSET-INVENTORY.md](docs/SENSOR-CHIPSET-INVENTORY.md) · Read the inventory for complete per-backend chipset details.
 
+## RGB status (read this before expecting your build to light up)
+
+RGB support is deliberately narrow today:
+
+- **Supported hardware: ENE/Aura-protocol DRAM over SMBus only** (validated on
+  G.Skill DDR4 modules). That is the one controller family the in-kernel write
+  allow-list ("brick guard") covers. Motherboard headers, GPUs, AIOs, and USB/HID
+  controllers are **not** supported.
+- **Colors only, no effects.** `rgb.set` writes static per-LED colors atomically.
+  Animation, breathing, rainbow, music sync — any effect — is the **consumer's job**:
+  render frames client-side and send colors at your own rate (the control service
+  allows 120 ops/s, burst 240). The broker will never host an effects engine.
+- **Extensible by interface.** New controller families implement
+  `IRgbController` ([BrokerSensorBridge/Rgb/IRgbController.cs](BrokerSensorBridge/Rgb/IRgbController.cs));
+  the reference implementation is the ENE/Aura controller. Every new write target
+  also requires a matching in-kernel allow-list entry — write capability is never
+  data-driven. See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) §5.
+- **Future:** broader controller coverage is planned as a separate, license-isolated
+  sidecar process (post-1.0) — see [docs/BROKER-ROADMAP.md](docs/BROKER-ROADMAP.md).
+
 ## Security model (the point of the project)
 
 - **Narrow Ring 0.** The driver exposes a handful of bounded IOCTLs — named-register
@@ -110,8 +130,7 @@ Details: [docs/USER-GUIDE.md](docs/USER-GUIDE.md) (run it) ·
   probes no-op after first match.
 - **SMU PM-table metrics** (CPU power, clocks, voltage) — separate mailbox mechanism,
   deliberately deferred.
-- **Version control**: repo is not yet initialized with `git` (strongly recommended
-  before the next session).
+- **RGB scope**: ENE/Aura DRAM only, colors only — see [RGB status](#rgb-status-read-this-before-expecting-your-build-to-light-up).
 
 ## Documentation map
 

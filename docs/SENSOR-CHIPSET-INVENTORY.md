@@ -29,6 +29,7 @@
 - **What:** board temperatures, fan tachometers, voltages.
 - **How:** `IOCTL_BROKER_SUPERIO_READ` → `SuperioNct.c`. LPC SIO detect, HWM LDN `0x0B`, EC page/index/data window, banks `0x100`/`0x120`/`0x140`.
 - **Chips / ids (masked `0xFFF0`):** NCT6683 `0xC730` 🟡 · NCT6686 `0xD440` 🟡 · NCT6687D/DR `0xD590`/`0xD592` ✅.
+  The 🟡 siblings are register-identical ports — **community testing needed** (see `docs/TESTING.md`).
 - **Channels:** `nct6687d.temp.*` / `.fan.*` / `.volt.*` (the `nct6687d.*` ids are the stable key for the whole EC family).
 - **Detail:** `docs/SUPERIO-NCT6683-NCT6686.md`. **Source:** Linux `nct6683.c`, `Fred78290/nct6687d`.
 
@@ -39,6 +40,9 @@
 - **Channels:** `nct6775.temp.0..5`, `nct6775.fan.0..6`, `nct6775.volt.0..15`.
 - **Detail:** `docs/SUPERIO-NCT6775-FAMILY.md`. **Source:** Linux `nct6775-core.c` / `nct6775-platform.c`.
 - **Not yet covered (documented):** older NCT6775F/6776F; rarer NCT6799D/6701D/5585D.
+- **Validation:** none of these chips has been exercised on real hardware yet — **community
+  testing needed** (ASUS/ASRock/Gigabyte/EVGA/Biostar boards). See `docs/TESTING.md` for the
+  step-by-step report procedure. Treat readings as provisional until a board checks out.
 
 ### DIMM temperature — JEDEC JC42.4 / TSE2004av (SMBus) · ✅ Validated
 - **What:** per-DIMM thermal sensor.

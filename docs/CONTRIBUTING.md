@@ -3,11 +3,13 @@
 How to build the project, make a change cleanly, and add the two things people most often
 want to add — a **new sensor** and a **new RGB device**.
 
-> This tree is **not a single git repo with one build system**; it's two source trees
-> (the .NET broker, the C kernel driver) plus PowerShell tooling. "Send a
-> change" means: keep the diff small and reviewable, follow the per-tree conventions below,
-> and keep the security guardrails intact. The hard rules live in
-> [`../CLAUDE.md`](../CLAUDE.md) — read it before touching anything.
+> This tree is two source trees (the .NET broker, the C kernel driver) plus PowerShell
+> tooling. "Send a change" means: keep the diff small and reviewable, follow the
+> per-tree conventions below, and keep the security guardrails (§3) intact — read them
+> before touching anything.
+>
+> Adding hardware support? The deep walkthrough is
+> [CONTRIBUTING-CHIPSET.md](CONTRIBUTING-CHIPSET.md).
 
 ---
 
@@ -44,7 +46,6 @@ at it) — run `.\scripts\Stop-BrokerServices.ps1` before rebuilding the driver.
 | `BrokerSmbusDriver/` | the kernel driver (C) + sign/install scripts | ✅ |
 | `scripts/` | build / install / lifecycle tooling | ✅ |
 | `docs/`, `*.md` (root) | documentation | ✅ |
-| `_archive_gigabyte/` | archived ITE IT87xx / IT8297 support (awaiting re-validation) | ❌ archive, don't extend |
 
 A map of the broker's C# files and the driver's C files is in
 [IMPLEMENTATION.md](IMPLEMENTATION.md) §"File map".
@@ -90,7 +91,9 @@ Calibration entries carry **labels + scales only, no addresses**. To support a n
 known chip, add/extend a calibration entry — nothing to do in the driver.
 
 ### 4b. The reading needs the kernel driver (a new privileged source)
-Follow the proven template (this is exactly how CPU-temp and board-temp were added):
+Follow the proven template (this is exactly how CPU-temp and board-temp were added);
+the full walkthrough with templates and checklists is
+[CONTRIBUTING-CHIPSET.md](CONTRIBUTING-CHIPSET.md):
 
 1. **(driver)** Add a *named* sensor to the IOCTL contract — extend the relevant enum in
    [`BrokerSmbusDriver/inc/SmbusBrokerProtocol.h`](../BrokerSmbusDriver/inc/SmbusBrokerProtocol.h)

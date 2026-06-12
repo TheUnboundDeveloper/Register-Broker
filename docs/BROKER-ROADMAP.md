@@ -229,10 +229,42 @@ entirely**. The broker has zero third-party hardware libraries.
 - **Production code signing** (EV cert + Microsoft attestation, Phase E in
   `BROKER-DESIGN.md`) and **flipping `RequireAuthorizedClient` on** with a pinned
   production signer.
-- **Phase 3 of `CALIBRATION-AND-REGISTRY-PLAN.md`** — the detector/backend registry;
-  adding a chip is still a code change in the detect dispatch.
+- **Phase 3 of `CALIBRATION-AND-REGISTRY-PLAN.md`** — the detector/backend registry —
+  is **IN PROGRESS (started 2026-06-12)**: table-driven probe/build descriptors in the
+  driver, a backend-enumeration IOCTL, and a broker-side channel registry keyed by the
+  enumerated backends (a C# code table — channel definitions stay in signed code, per
+  the calibration plan's never-do). Goal: adding a chip = one backend file + one
+  descriptor row + one channel-table row, reviewable as a small PR.
 - **SMBus writes outside the RGB windows** — deliberately **never** (in-kernel
   brick-guard: writes only to `0x70–0x77` and `0x39–0x3A`).
+
+---
+
+## Deferred designs (post-1.0, documented only — no code exists)
+
+### RGB sidecar (broader controller coverage without license contamination)
+
+Today's RGB scope is ENE/Aura DRAM over SMBus, implemented clean-room from the
+publicly documented protocol. Most other controller knowledge in the ecosystem lives
+in GPL-2.0 codebases, which the AGPL-3.0 + commercial-exception broker cannot absorb.
+The plan, when demand justifies it:
+
+- A **separate sidecar process** hosts GPL-derived controller code under its own
+  license; it is optional, separately distributed, and never linked into the broker
+  or driver.
+- The broker keeps the same client-facing ops (`rgb.list` / `rgb.set`) and forwards
+  to the sidecar over local IPC when a device belongs to it; broker + driver remain
+  license-clean and signable.
+- Kernel guardrails do not move: any SMBus-side writes still go through the in-kernel
+  allow-list; USB/HID-side controllers are the sidecar's own transport and never touch
+  the driver.
+
+### Effects / animation protocol
+
+Effects stay **consumer-side** by design — the broker writes colors, it does not
+animate. If a shared effects engine is ever wanted, the path is new protocol ops in
+`CLIENT-PROTOCOL.md` dispatched to the sidecar (or `not-supported` without it), never
+an engine inside the broker service.
 
 ---
 
