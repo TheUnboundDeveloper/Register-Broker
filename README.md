@@ -121,13 +121,11 @@ Details: [docs/USER-GUIDE.md](docs/USER-GUIDE.md) (run it) ·
 ## Known limitations (not yet done)
 
 - **Hardware validation pending** for Intel i801 SMBus host, entire NCT6775 family
-  (6779, 6791–6798), and NCT6683/6686 EC siblings (6687D is validated).
+  (6779, 6791–6798), and NCT6683/6686 EC siblings (6687D is validated). Want to help?
+  See [docs/TESTING.md](docs/TESTING.md).
 - **Production code signing** (EV certificate + attestation) — currently test-signed.
   Hardened client authentication (`RequireAuthorizedClient`) is off by default; will
   require production cert + pinned signer thumbprint.
-- **Phase 3 calibration**: automatic detector/backend registry (adding a chip = one
-  backend file + one registry line). Detection is currently hand-wired; detection
-  probes no-op after first match.
 - **SMU PM-table metrics** (CPU power, clocks, voltage) — separate mailbox mechanism,
   deliberately deferred.
 - **RGB scope**: ENE/Aura DRAM only, colors only — see [RGB status](#rgb-status-read-this-before-expecting-your-build-to-light-up).
@@ -145,6 +143,8 @@ Details: [docs/USER-GUIDE.md](docs/USER-GUIDE.md) (run it) ·
 | [docs/SIGNING-AND-DEPLOYMENT.md](docs/SIGNING-AND-DEPLOYMENT.md) | test vs production signing, hardened install |
 | [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) / [docs/REFERENCE.md](docs/REFERENCE.md) | internals + full reference |
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | guardrails for adding chips/sensors |
+| [docs/CONTRIBUTING-CHIPSET.md](docs/CONTRIBUTING-CHIPSET.md) | full chipset-porting walkthrough |
+| [docs/TESTING.md](docs/TESTING.md) | hardware validation guide (community testers) |
 
 ## License
 

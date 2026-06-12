@@ -166,6 +166,13 @@ all bound what a write can touch. SPD and arbitrary SMBus writes are **not** rea
 way. The control service allows a higher op rate than the sensor broker (120 ops/s, burst 240)
 so per-LED frame updates aren't rate-limited.
 
+> **`rgb.set` is colors only — there are no effect ops.** Animation (breathing, rainbow,
+> music sync) is deliberately the consumer's job: render frames client-side and send
+> per-LED `rgb.set` updates at your own cadence within the rate limit. The broker hosts
+> no effects engine; if effect ops ever exist they will be additive ops dispatched to a
+> separate sidecar process (see `BROKER-ROADMAP.md`, deferred designs), never an engine
+> inside the broker.
+
 ## 7. Minimal client flow (pseudocode)
 
 ```

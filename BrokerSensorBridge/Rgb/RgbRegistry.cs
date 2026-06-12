@@ -11,9 +11,9 @@ namespace BrokerSensorBridge;
 |   This is the auto-detect merge point: each transport contributes devices   |
 |   only when its hardware is found, so nothing appears on the wrong board.    |
 |                                                                              |
-|   The Gigabyte IT8297 USB-HID transport was ARCHIVED 2026-06-11 pending      |
-|   board-level verification (see _archive_gigabyte\README.md); the registry   |
-|   stays transport-agnostic so a corrected version can plug back in.          |
+|   The Gigabyte IT8297 USB-HID transport was retired 2026-06-11 after expert  |
+|   corrections (design record: docs/GIGABYTE-SUPPORT.md); the registry stays  |
+|   transport-agnostic so a corrected version can plug back in.                |
 \*---------------------------------------------------------------------------*/
 internal sealed class RgbRegistry
 {

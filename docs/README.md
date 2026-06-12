@@ -9,6 +9,8 @@ that matches what you want to do.
 |---|---|
 | **Use it** — read my PC sensors / control my RGB as a normal (non-admin) user | [USER-GUIDE.md](USER-GUIDE.md) |
 | **Contribute** — build it, add a sensor or RGB device, send a change | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| **Port a chipset** — add support for a new Super-I/O / SMBus host chip | [CONTRIBUTING-CHIPSET.md](CONTRIBUTING-CHIPSET.md) |
+| **Test on my hardware** — validate an unvalidated chipset and report results | [TESTING.md](TESTING.md) |
 | **Understand how it's built** — the layers, the trust boundaries, the data flow | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | **Read the internals** — how auth, the pipe protocol, the driver IOCTLs, and the decode actually work | [IMPLEMENTATION.md](IMPLEMENTATION.md) |
 | **Look something up** — what a config key, scope, status code, or service name means | [REFERENCE.md](REFERENCE.md) |
@@ -63,6 +65,5 @@ These predate the guides and remain the source of truth for design decisions:
 - [`SENSOR-CHIPSET-INVENTORY.md`](SENSOR-CHIPSET-INVENTORY.md) — hardware support by chipset and vendor.
 - [`CALIBRATION-AND-REGISTRY-PLAN.md`](CALIBRATION-AND-REGISTRY-PLAN.md) — data-driven board calibration (labels/scales as data) + the plan to scale to many chips.
 - [`CODE-REVIEW.md`](CODE-REVIEW.md) — review findings and design notes.
-- [`../CLAUDE.md`](../CLAUDE.md) — engineering guardrails for working in this repo.
 
 > Target platform is **Windows x64**. Built with **.NET 8** (broker) and **WDK 10.0.26100** (KMDF kernel driver).

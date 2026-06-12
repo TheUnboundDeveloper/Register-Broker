@@ -289,9 +289,9 @@ Driver surface — narrow IOCTLs only, **no memory/MSR/arbitrary-port primitives
     Linux `nct6775`): NCT6779/6791/6792/6793/6795/6796/6797/6798 (kernel mask `0xFFF8`),
     with the IO-space-lock clear on 6791+. `KIND_NCT6775 = 3`. **Built,
     hardware-unvalidated.**
-  - *Archived 2026-06-11:* the ITE IT87xx backend (and the companion Gigabyte IT8297
-    USB-HID RGB path) was moved to `_archive_gigabyte\` after a domain expert's
-    corrections; `KIND_ITE = 2` stays reserved.
+  - *Retired 2026-06-11:* the ITE IT87xx backend (and the companion Gigabyte IT8297
+    USB-HID RGB path) was removed from the tree after a domain expert's corrections
+    (design record: `GIGABYTE-SUPPORT.md`); `KIND_ITE = 2` stays reserved.
 - `WRITE` — brick-guarded SMBus write (byte/word, plus **block** `op=5` writing 1..32
   bytes atomically, added 2026-06-11; the request struct gained an appended
   `Length` + `Block[32]`, and the 24-byte V1 prefix is still accepted for byte/word).

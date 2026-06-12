@@ -140,9 +140,9 @@ UINT32 SuperioNctRead(_In_ const SMBUS_CONTROLLER* Controller, _In_ UINT32 Kind,
 VOID   SuperioNct6775Detect(_Inout_ SMBUS_CONTROLLER* Controller);
 UINT32 SuperioNct6775Read(_In_ const SMBUS_CONTROLLER* Controller, _In_ UINT32 Kind, _In_ UINT32 Index, _Out_ UINT32* Raw);
 
-/* The ITE IT87xx backend (SuperioIte.c) was ARCHIVED 2026-06-11 pending board-level
-   verification (see _archive_gigabyte\README.md). BROKER_SUPERIO_KIND_ITE stays
-   reserved in the protocol header so the wire value is never reused. */
+/* The ITE IT87xx backend (SuperioIte.c) was retired 2026-06-11 after expert
+   corrections (design record: docs/GIGABYTE-SUPPORT.md). BROKER_SUPERIO_KIND_ITE
+   stays reserved in the protocol header so the wire value is never reused. */
 
 /* Dispatch a Super-I/O read to whichever backend was detected. Implemented in
    SuperioNct.c. Driver.c calls this so the IOCTL handler stays backend-agnostic. */

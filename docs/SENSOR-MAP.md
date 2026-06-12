@@ -37,8 +37,8 @@ page(`+0x04`)/index(`+0x05`)/data(`+0x06`). The NCT6775 bank-select family is ga
 chip-id set; the two Nuvoton families are disjoint, so no chip ever lights both channel sets.
 Register facts ported from the Linux hwmon drivers (`nct6687d`, `nct6775`).
 
-The ITE IT87xx backend (`it87.*` channels) was **removed/archived 2026-06-11**
-(`_archive_gigabyte\`), along with its `board.ite.*` aliases.
+The ITE IT87xx backend (`it87.*` channels) was **retired 2026-06-11** (removed from the
+tree; design record `GIGABYTE-SUPPORT.md`), along with its `board.ite.*` aliases.
 
 ## Config / identification (not a live metric)
 

@@ -162,7 +162,8 @@ writes via the driver's `WriteBlock` op).
   must stay green. Add a self-test case when you add a control op or auth rule.
 - **Driver / hardware paths** can only be validated on real silicon. Bring up read paths on
   **SPD (`0x50`, non-destructive) first**, then the specific sensor; compare temps against a
-  known tool (HWiNFO) to the degree. The dev probes ([DEV-GUIDE.md](DEV-GUIDE.md)) exist for
+  known tool (HWiNFO) to the degree — the full procedure and report template are in
+  [TESTING.md](TESTING.md). The dev probes ([DEV-GUIDE.md](DEV-GUIDE.md)) exist for
   exactly this.
 - **Live broker test:** start the broker, run `--client --op=sensor.list` / `sensor.read` from
   a non-admin shell, and confirm `elevated=False`.

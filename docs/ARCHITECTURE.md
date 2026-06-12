@@ -196,6 +196,7 @@ atomic block write; DIRECT mode + APPLY are latched once per controller).
 | **In-kernel brick-guard** | The kernel refuses writes outside the RGB window regardless of the broker, so a broker bug can't brick a DIMM's SPD. |
 | **Two services (sensor vs control)** | The sensor broker never holds the write capability; RGB write is an opt-in, separately-scoped process. |
 | **Sequential IOCTL queue** | SMBus/SMU/EC share firmware state; serializing all IOCTLs is the single hardware lock. |
+| **RGB is one thin layer; effects are consumer-side** | The broker writes colors (`rgb.set`), nothing more. Animation lives in the consumer, which renders frames and streams per-LED updates — so the privileged surface never grows an effects engine, and every consumer can have its own. Broader controller coverage is planned as a separate license-isolated sidecar process (see `BROKER-ROADMAP.md`), not as broker code. |
 
 ---
 
@@ -207,8 +208,9 @@ identity-authenticated pipe, and the Windows-service packaging.
 
 Built but **not hardware-validated**: the **Intel i801** SMBus backend and the **NCT6775
 bank-select Super-I/O family** (NCT6683/6686 are register-identical to the validated 6687D
-but also unvalidated). The ITE IT87xx / Gigabyte USB-HID RGB backends were **archived
-2026-06-11** (`_archive_gigabyte\`) pending board-level verification.
+but also unvalidated) — community testing welcome, see [TESTING.md](TESTING.md). The ITE
+IT87xx / Gigabyte USB-HID backends were retired 2026-06-11 after expert corrections and are
+no longer in the tree (the `KIND_ITE` wire value stays reserved so it is never reused).
 
 Not yet done: **production driver signing** (today's driver is test-signed — lab machines
 only), flipping `RequireAuthorizedClient` on by default (still audit-only), SMU PM-table

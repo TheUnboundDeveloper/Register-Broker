@@ -138,8 +138,8 @@ unvalidated). New `SuperioNct6775.c` adds the bank-select family
 (6779/6791/6792/6793/6795/6796/6797/6798, kernel mask `0xFFF8`, IO-space-lock clear on
 6791+, `KIND_NCT6775=3`) — **built, hardware-unvalidated**. `--selftest` covers the
 chipset gates (NCT6775 decode + EC/6775 mutual exclusion). The ITE IT87xx + Gigabyte
-IT8297 USB-HID paths were **archived** the same day (`_archive_gigabyte\`; `KIND_ITE=2`
-reserved) after a domain expert's corrections.
+IT8297 USB-HID paths were **retired** the same day after a domain expert's corrections
+(removed from the tree; design record `GIGABYTE-SUPPORT.md`; `KIND_ITE=2` reserved).
 
 ### Per-LED RGB quality — block write + latch fix  ✅ done (2026-06-11)
 Driver `WRITE` gained an atomic **WriteBlock** op (1..32 bytes; appended `Length` +
@@ -230,11 +230,18 @@ entirely**. The broker has zero third-party hardware libraries.
   `BROKER-DESIGN.md`) and **flipping `RequireAuthorizedClient` on** with a pinned
   production signer.
 - **Phase 3 of `CALIBRATION-AND-REGISTRY-PLAN.md`** — the detector/backend registry —
-  is **IN PROGRESS (started 2026-06-12)**: table-driven probe/build descriptors in the
-  driver, a backend-enumeration IOCTL, and a broker-side channel registry keyed by the
-  enumerated backends (a C# code table — channel definitions stay in signed code, per
-  the calibration plan's never-do). Goal: adding a chip = one backend file + one
-  descriptor row + one channel-table row, reviewable as a small PR.
+  **DONE (2026-06-12)**: table-driven probe/dispatch descriptors in the driver
+  (`g_SmbusBackends` / `g_SuperioBackends`), the `IOCTL_BROKER_ENUM_BACKENDS`
+  enumeration op, and the broker-side `ChannelRegistry` + `DecoderRegistry` C# code
+  tables (channel definitions stay in signed code, per the calibration plan's
+  never-do), all selftest-gated and live-verified on the dev box. Adding a chip =
+  one backend file + one kernel descriptor row + one channel-table entry + a decoder.
+- **Community validation campaign** (after the GitHub release): recruit testers for
+  the unvalidated backends via Overclock.net, r/overclocking / r/buildapc, and
+  hardware Discords; pin a "Hardware Validation Campaign" tracking issue; testers
+  follow `docs/TESTING.md` (build, `--calibration`, `sensor.readall` vs HWiNFO,
+  report template). Message hook: "non-admin sensor reading, validated on AMD +
+  NCT6687D — help us validate Intel i801 and the NCT6775 family on your board."
 - **SMBus writes outside the RGB windows** — deliberately **never** (in-kernel
   brick-guard: writes only to `0x70–0x77` and `0x39–0x3A`).
 

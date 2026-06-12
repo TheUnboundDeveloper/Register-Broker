@@ -142,8 +142,8 @@ Shipped as: identical behavior on the dev box, but now driven through the calibr
   unchanged. The broker + driver link **no** GPL code; the IPC pipe is the license boundary.
 - RGB board calibration (zone names, LED counts, byte order) follows the same data pattern where
   the source tables don't already supply it.
-- The IT8297 USB-HID path that was built earlier is **archived** (removed with the Gigabyte
-  backend, `_archive_gigabyte\`, 2026-06-11); if revived it can stay native in the broker
+- The IT8297 USB-HID path that was built earlier is **retired** (removed with the Gigabyte
+  backend 2026-06-11; design record `GIGABYTE-SUPPORT.md`); if revived it can stay native in the broker
   (license-clean re-port) or move into the sidecar — decide per-chip; native stays for the ones
   we ported ourselves.
 - **Before shipping:** a real license review of the IPC-boundary position.

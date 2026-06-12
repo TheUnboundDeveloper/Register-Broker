@@ -139,8 +139,8 @@ typedef enum _BROKER_SUPERIO_KIND
 /* Detected Super-I/O backend family (the broker derives decode/labels from the raw
    SuperioChipId; these document the ranges). NCT668x EC ids: 0xC73x/0xD44x/0xD59x.
    NCT6775-family ids: 0xC56x/0xC80x/0xC91x/0xD12x/0xD35x/0xD42x/0xD45x.
-   KIND_ITE (2) is RESERVED — the ITE backend was archived 2026-06-11
-   (_archive_gigabyte\); never reuse the wire value. */
+   KIND_ITE (2) is RESERVED — the ITE backend was retired 2026-06-11 (design
+   record: docs/GIGABYTE-SUPPORT.md); never reuse the wire value. */
 #define BROKER_SUPERIO_KIND_NONE     0u
 #define BROKER_SUPERIO_KIND_NCT      1u
 #define BROKER_SUPERIO_KIND_ITE      2u   /* reserved (archived backend) */

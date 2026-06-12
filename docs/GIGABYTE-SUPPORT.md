@@ -13,11 +13,11 @@
 >   likely broken on multi-controller ones. True device addresses are at **0x50+**.
 > - The **liquidctl issue threads are out of date / incorrect** — untrustworthy.
 >
-> The sources were **archived, not deleted** — see `_archive_gigabyte\README.md`
-> (corrections recorded verbatim) for what was removed and how it can return.
+> The sources were removed from the tree; this document (including the expert
+> corrections summarized above) is the surviving **design record** of the original
+> (hardware-unvalidated) approach and the starting point if support returns.
 > `BROKER_SUPERIO_KIND_ITE` stays reserved in the protocol so the wire value is
-> never reused. The rest of this document is kept as the **design record** of the
-> original (hardware-unvalidated) approach.
+> never reused.
 
 > Original status banner (2026-06-10): NEW, gated, hardware-UNVALIDATED. Authored to be
 > tested on a real Gigabyte board by a third party, then "baked in" once confirmed.

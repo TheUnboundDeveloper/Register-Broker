@@ -129,6 +129,13 @@ offline, no-admin inspector that prints your board's DMI identity and the resolv
 Requires the control service (`-WithRgbControl` at install) and a driver with the write
 capability.
 
+> **RGB scope today: ENE/Aura-protocol DRAM over SMBus only** (validated on G.Skill
+> DDR4) — motherboard headers, GPUs, AIOs, and USB/HID controllers are not supported.
+> And it's **colors only**: effects (breathing, rainbow, music sync) are the consumer
+> app's job — render frames and send `rgb.set` updates at your own rate. The broker
+> will never host an effects engine. Full statement: the "RGB status" section of the
+> main [README](../README.md).
+
 ```powershell
 cd "publish\BrokerSensorBridge"
 

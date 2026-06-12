@@ -178,9 +178,9 @@ still send only the original 24-byte V1 prefix (`BROKER_SMBUS_WRITE_REQUEST_V1_S
 
 ### Super-I/O backend family (`BROKER_SUPERIO_KIND_*`)
 `NONE = 0`, `NCT = 1` (NCT668x EC family: chip ids masked `0xFFF0` — NCT6683 `0xC730`,
-NCT6686 `0xD440`, NCT6687D `0xD590`), `ITE = 2` (**reserved** — the ITE backend was archived
-2026-06-11 to `_archive_gigabyte\`; never reuse the wire value), `NCT6775 = 3` (bank-select
-family: NCT6779/6791/6792/6793/6795/6796/6797/6798).
+NCT6686 `0xD440`, NCT6687D `0xD590`), `ITE = 2` (**reserved** — the ITE backend was retired
+2026-06-11, design record `GIGABYTE-SUPPORT.md`; never reuse the wire value), `NCT6775 = 3`
+(bank-select family: NCT6779/6791/6792/6793/6795/6796/6797/6798).
 
 ### Protected vs writable SMBus addresses
 | Range | Status |

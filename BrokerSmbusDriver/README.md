@@ -48,8 +48,8 @@ what makes it *not* WinRing0. See
 | `BrokerSmbus.vcxproj` | KMDF project (MSBuild route; needs the WDK VS extension) |
 | `scripts/*.ps1` | Build / test-sign / install / uninstall |
 
-(`SuperioIte.c` — ITE IT87xx — was archived to `_archive_gigabyte\` on 2026-06-11;
-its `KIND_ITE` wire value stays reserved.)
+(`SuperioIte.c` — ITE IT87xx — was retired 2026-06-11 and removed from the tree;
+design record: `docs/GIGABYTE-SUPPORT.md`. Its `KIND_ITE` wire value stays reserved.)
 
 ## Prerequisites
 

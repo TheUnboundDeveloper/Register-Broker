@@ -596,7 +596,7 @@ internal static class Program
 
         /* Build the RGB device registry from whatever transports are present — currently
            ENE/Aura DRAM over the kernel driver (needs CAP_WRITE). The Gigabyte USB-HID
-           transport was archived 2026-06-11 (_archive_gigabyte\). */
+           transport was retired 2026-06-11 (design record: docs/GIGABYTE-SUPPORT.md). */
         var rgb = RgbRegistry.Build(smbus, Log);
         if (!rgb.Any)
         {

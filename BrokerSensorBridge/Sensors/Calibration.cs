@@ -200,7 +200,7 @@ internal sealed class CalibrationStore
         for (int i = 0; i < 8; i++) a[$"cpu.ccd{i}.temp"] = $"smu.ccd.{i}";
         for (int i = 0; i < 8; i++) a[$"fan{i}"] = $"nct6687d.fan.{i}";
         for (int i = 0; i < 8; i++) a[$"dimm{i}.temp"] = $"dimm.{i}";
-        // The board.ite.* legacy aliases left with the archived Gigabyte backend (_archive_gigabyte\).
+        // The board.ite.* legacy aliases left with the retired Gigabyte backend (docs/GIGABYTE-SUPPORT.md).
         return a;
     }
 }

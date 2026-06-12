@@ -54,8 +54,8 @@ internal static class SensorDecode
     /// </summary>
     public static int Nct6775VoltageMv(uint raw) => (int)(raw & 0xFF) * 8;
 
-    /* The ITE IT87xx decoders left with the archived Gigabyte backend
-       (_archive_gigabyte\) — restore them alongside SuperioIte.c if it returns. */
+    /* The ITE IT87xx decoders left with the retired Gigabyte backend (design record:
+       docs/GIGABYTE-SUPPORT.md) — restore them alongside SuperioIte.c if it returns. */
 
     /// <summary>
     /// JEDEC JC42.4 / TSE2004av DIMM thermal-sensor decode (Linux jc42): 0.0625 °C/LSB, 13-bit
