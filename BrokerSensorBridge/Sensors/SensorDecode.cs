@@ -1,0 +1,70 @@
+namespace BrokerSensorBridge;
+
+/*---------------------------------------------------------------------------*\
+| SensorDecode                                                              |
+|                                                                            |
+|   Pure per-chip raw->engineering-unit decoders, ported from the Linux      |
+|   hwmon drivers (k10temp, nct6687d, jc42). These convert the RAW           |
+|   register bytes the kernel returns into a BASE value in the chip's native  |
+|   unit (°C / RPM / volts-at-pin). Board calibration (label + scale) is      |
+|   applied on TOP of this in SensorCatalog; the decoders themselves are      |
+|   board-independent and carry no labels.                                   |
+\*---------------------------------------------------------------------------*/
+internal static class SensorDecode
+{
+    /// <summary>
+    /// AMD Family 17h/19h reported-temperature decode (k10temp). Tctl = (raw>>21)·0.125,
+    /// minus 49 °C when the range-select bit is set; Tdie = Tctl − offset (0 on most desktop Ryzen).
+    /// </summary>
+    public static double AmdCpuTctlC(uint raw, double tctlOffset = 0.0)
+    {
+        double t = ((raw >> 21) & 0x7FF) * 0.125;
+        if ((raw & (1u << 19)) != 0) t -= 49.0;
+        return t - tctlOffset;
+    }
+
+    /// <summary>AMD per-CCD die temperature (k10temp ZEN_CCD_TEMP): °C = (raw &amp; 0x7FF)·0.125 − 49.</summary>
+    public static double AmdCcdTempC(uint raw) => (raw & 0x7FF) * 0.125 - 49.0;
+
+    /// <summary>k10temp CCD valid bit (BIT 11). The catalog checks this before exposing a CCD.</summary>
+    public const uint AmdCcdValid = 0x800;
+
+    /// <summary>NCT6687D temperature: low byte = signed °C, high byte bit 7 = +0.5 °C (raw = value | half&lt;&lt;8).</summary>
+    public static double NctTempC(uint raw)
+    {
+        sbyte value = (sbyte)(raw & 0xFF);
+        int half = (int)((raw >> 8) >> 7) & 1;
+        return value + 0.5 * half;
+    }
+
+    /// <summary>NCT6687D fan tachometer: raw is the 16-bit RPM directly.</summary>
+    public static int NctFanRpm(uint raw) => (int)(raw & 0xFFFF);
+
+    /// <summary>
+    /// NCT6687D voltage ADC reading in millivolts at the chip pin (nct6687d):
+    /// mV = (highByte·16) + (lowByte>>4), where raw = (high&lt;&lt;8) | low. This is the PIN reading;
+    /// the per-rail divider multiplier is the board calibration's scale, applied later.
+    /// </summary>
+    public static int NctVoltageMv(uint raw)
+        => (int)((raw >> 8) & 0xFF) * 16 + ((int)(raw & 0xFF) >> 4);
+
+    /// <summary>
+    /// NCT6775-family voltage ADC reading (Linux nct6775 in_from_reg): one byte at 8 mV/LSB.
+    /// This is the PIN reading; rails behind a board divider carry it as the calibration scale.
+    /// </summary>
+    public static int Nct6775VoltageMv(uint raw) => (int)(raw & 0xFF) * 8;
+
+    /* The ITE IT87xx decoders left with the archived Gigabyte backend
+       (_archive_gigabyte\) — restore them alongside SuperioIte.c if it returns. */
+
+    /// <summary>
+    /// JEDEC JC42.4 / TSE2004av DIMM thermal-sensor decode (Linux jc42): 0.0625 °C/LSB, 13-bit
+    /// two's-complement in bits 12:0 (raw is the 16-bit reg packed MSB-first).
+    /// </summary>
+    public static double Jc42TempC(uint raw)
+    {
+        int reg = (int)(raw & 0x1FFF);
+        if ((reg & 0x1000) != 0) reg -= 0x2000;
+        return reg * 0.0625;
+    }
+}

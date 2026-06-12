@@ -1,0 +1,47 @@
+{
+  // ====================================================================================
+  //  Broker — USER calibration override (example / template)
+  //
+  //  This file is OPTIONAL and layers ON TOP of calibration.default.json: any channel you
+  //  set here overrides the default (last file wins). It is DATA ONLY — label, scale,
+  //  offset, hidden. There is no address/register field, so this file can never touch
+  //  hardware; it only renames/rescales a reading the broker already produced.
+  //
+  //  To use it (operates exactly as the finished product):
+  //    1. Find your board identity:   BrokerSensorBridge.exe --calibration > out.txt
+  //       (look at "Board identity (DMI) : <manufacturer> / <product>")
+  //    2. Copy this file to:          C:\ProgramData\SensorBroker\calibration.user.json
+  //    3. Put your exact manufacturer/product in "match" below, and set the labels/scales.
+  //    4. Re-run  --calibration  (or restart the broker service) and confirm your labels show.
+  //
+  //  rawId is the stable channel key. Run --calibration to see every rawId your board exposes
+  //  (nct6687d.* on the Nuvoton EC family, nct6775.* on the bank-select family, smu.*, dimm.*).
+  //  Match a voltage rail's "scale" to its divider so the value matches HWiNFO (e.g. a +12V
+  //  rail read at ~1.0V -> 12).
+  // ====================================================================================
+  "schema": 1,
+
+  "boards": [
+    {
+      "match": { "manufacturer": "Micro-Star International Co., Ltd.", "product": "MAG B550 TOMAHAWK (MS-7C91)" },
+      "channels": [
+        // --- NCT6687D board temps (map each index to your HWiNFO label) ---
+        { "rawId": "nct6687d.temp.0", "label": "CPU Temperature (board)" },
+        { "rawId": "nct6687d.temp.1", "label": "System Temperature" },
+        { "rawId": "nct6687d.temp.2", "label": "VRM MOS Temperature" },
+
+        // --- fans (name the headers) ---
+        { "rawId": "nct6687d.fan.0", "label": "CPU Fan" },
+        { "rawId": "nct6687d.fan.1", "label": "Pump Fan" },
+
+        // --- voltages: set scale to the rail divider so the value matches HWiNFO ---
+        { "rawId": "nct6687d.volt.0", "label": "+12V",      "scale": 12 },
+        { "rawId": "nct6687d.volt.1", "label": "+5V",       "scale": 5 },
+        { "rawId": "nct6687d.volt.4", "label": "CPU Vcore", "scale": 1 },
+
+        // --- hide a channel that reads garbage on this board ---
+        { "rawId": "nct6687d.volt.10", "hidden": true }
+      ]
+    }
+  ]
+}

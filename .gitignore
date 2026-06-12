@@ -1,0 +1,39 @@
+# ---------------------------------------------------------------------------
+# Register Broker — repository ignore rules
+# ---------------------------------------------------------------------------
+
+# --- Internal engineering log (dev-box paths, session history) ---
+CLAUDE.md
+
+# --- .NET (BrokerSensorBridge) ---
+bin/
+obj/
+publish/
+*.user
+*.suo
+.vs/
+
+# --- WDK / kernel driver (BrokerSmbusDriver) build output ---
+x64/
+*.sys
+*.pdb
+*.obj
+sdv/
+*.sdf
+*.VC.db
+
+# --- Signing material: certificates and private keys are NEVER committed ---
+*.cer
+*.pfx
+*.p12
+
+# --- Machine-local configuration / scratch ---
+calibration.user.json
+out.txt
+*.log
+SHA256SUMS.local.txt
+
+# --- OS noise ---
+Thumbs.db
+desktop.ini
+.DS_Store

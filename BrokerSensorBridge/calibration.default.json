@@ -1,0 +1,111 @@
+{
+  // Register Broker board-calibration defaults.
+  //
+  // DATA ONLY: each entry can rename (label), rescale (scale/offset), or hide a channel that the
+  // chip backend already produces. There is deliberately NO address/register field — calibration
+  // can never reach hardware, only relabel a reading. A user override file may add/replace boards.
+  //
+  // rawId is the stable channel key ({chip}.{kind}.{index}); legacy ids (board.12v.volt) resolve
+  // to these via the built-in alias map in code. To label YOUR board, copy the matched identity
+  // printed at broker startup ("[calib] board '<mfr> / <product>' ...") into a new "boards" entry.
+  "schema": 1,
+
+  "defaults": [
+    { "rawId": "smu.cpu.temp", "label": "CPU Temperature" },
+    { "rawId": "smu.ccd.0", "label": "CPU CCD0 Temperature" },
+    { "rawId": "smu.ccd.1", "label": "CPU CCD1 Temperature" },
+    { "rawId": "smu.ccd.2", "label": "CPU CCD2 Temperature" },
+    { "rawId": "smu.ccd.3", "label": "CPU CCD3 Temperature" },
+    { "rawId": "smu.ccd.4", "label": "CPU CCD4 Temperature" },
+    { "rawId": "smu.ccd.5", "label": "CPU CCD5 Temperature" },
+    { "rawId": "smu.ccd.6", "label": "CPU CCD6 Temperature" },
+    { "rawId": "smu.ccd.7", "label": "CPU CCD7 Temperature" },
+
+    { "rawId": "nct6687d.temp.0", "label": "Board Temp 0" },
+    { "rawId": "nct6687d.temp.1", "label": "Board Temp 1" },
+    { "rawId": "nct6687d.temp.2", "label": "Board Temp 2" },
+    { "rawId": "nct6687d.temp.3", "label": "Board Temp 3" },
+    { "rawId": "nct6687d.temp.4", "label": "Board Temp 4" },
+    { "rawId": "nct6687d.temp.5", "label": "Board Temp 5" },
+    { "rawId": "nct6687d.fan.0", "label": "Fan 0" },
+    { "rawId": "nct6687d.fan.1", "label": "Fan 1" },
+    { "rawId": "nct6687d.fan.2", "label": "Fan 2" },
+    { "rawId": "nct6687d.fan.3", "label": "Fan 3" },
+    { "rawId": "nct6687d.fan.4", "label": "Fan 4" },
+    { "rawId": "nct6687d.fan.5", "label": "Fan 5" },
+    { "rawId": "nct6687d.fan.6", "label": "Fan 6" },
+    { "rawId": "nct6687d.fan.7", "label": "Fan 7" },
+
+    { "rawId": "nct6775.temp.0", "label": "Monitor Temp 0" },
+    { "rawId": "nct6775.temp.1", "label": "Monitor Temp 1" },
+    { "rawId": "nct6775.temp.2", "label": "Monitor Temp 2" },
+    { "rawId": "nct6775.temp.3", "label": "Monitor Temp 3" },
+    { "rawId": "nct6775.temp.4", "label": "Monitor Temp 4" },
+    { "rawId": "nct6775.temp.5", "label": "CPU Temperature (PECI)" },
+    { "rawId": "nct6775.fan.0", "label": "Fan 0" },
+    { "rawId": "nct6775.fan.1", "label": "Fan 1" },
+    { "rawId": "nct6775.fan.2", "label": "Fan 2" },
+    { "rawId": "nct6775.fan.3", "label": "Fan 3" },
+    { "rawId": "nct6775.fan.4", "label": "Fan 4" },
+    { "rawId": "nct6775.fan.5", "label": "Fan 5" },
+    { "rawId": "nct6775.fan.6", "label": "Fan 6" },
+    { "rawId": "nct6775.volt.0", "label": "Voltage 0 (unconfirmed)" },
+    { "rawId": "nct6775.volt.1", "label": "Voltage 1 (unconfirmed)" },
+    { "rawId": "nct6775.volt.2", "label": "Voltage 2 (unconfirmed)" },
+    { "rawId": "nct6775.volt.3", "label": "Voltage 3 (unconfirmed)" },
+    { "rawId": "nct6775.volt.4", "label": "Voltage 4 (unconfirmed)" },
+    { "rawId": "nct6775.volt.5", "label": "Voltage 5 (unconfirmed)" },
+    { "rawId": "nct6775.volt.6", "label": "Voltage 6 (unconfirmed)" },
+    { "rawId": "nct6775.volt.7", "label": "Voltage 7 (unconfirmed)" },
+    { "rawId": "nct6775.volt.8", "label": "Voltage 8 (unconfirmed)" },
+    { "rawId": "nct6775.volt.9", "label": "Voltage 9 (unconfirmed)" },
+    { "rawId": "nct6775.volt.10", "label": "Voltage 10 (unconfirmed)" },
+    { "rawId": "nct6775.volt.11", "label": "Voltage 11 (unconfirmed)" },
+    { "rawId": "nct6775.volt.12", "label": "Voltage 12 (unconfirmed)" },
+    { "rawId": "nct6775.volt.13", "label": "Voltage 13 (unconfirmed)" },
+    { "rawId": "nct6775.volt.14", "label": "Voltage 14 (unconfirmed)" },
+    { "rawId": "nct6775.volt.15", "label": "Voltage 15 (unconfirmed)" },
+
+    { "rawId": "dimm.0", "label": "DIMM 0 Temperature" },
+    { "rawId": "dimm.1", "label": "DIMM 1 Temperature" },
+    { "rawId": "dimm.2", "label": "DIMM 2 Temperature" },
+    { "rawId": "dimm.3", "label": "DIMM 3 Temperature" },
+    { "rawId": "dimm.4", "label": "DIMM 4 Temperature" },
+    { "rawId": "dimm.5", "label": "DIMM 5 Temperature" },
+    { "rawId": "dimm.6", "label": "DIMM 6 Temperature" },
+    { "rawId": "dimm.7", "label": "DIMM 7 Temperature" }
+  ],
+
+  "boards": [
+    {
+      // MSI B550I dev box — the HWiNFO-validated NCT6687D map (ported out of SensorCatalog.cs).
+      // Matched exactly against this board's DMI (BaseBoardManufacturer / BaseBoardProduct from the
+      // BIOS registry key), confirmed via `--calibration` on 2026-06-10.
+      "match": { "manufacturer": "Micro-Star International Co., Ltd.", "product": "MPG B550I GAMING EDGE MAX WIFI (MS-7C92)" },
+      "channels": [
+        { "rawId": "nct6687d.temp.0", "label": "CPU Temperature (board)" },
+        { "rawId": "nct6687d.temp.1", "label": "System Temperature" },
+        { "rawId": "nct6687d.temp.2", "label": "VRM MOS Temperature" },
+        { "rawId": "nct6687d.temp.3", "label": "Chipset Temperature" },
+        { "rawId": "nct6687d.temp.4", "label": "CPU Socket Temperature" },
+        { "rawId": "nct6687d.temp.5", "label": "PCIE_1 Temperature" },
+
+        { "rawId": "nct6687d.volt.0",  "label": "+12V",       "scale": 12 },
+        { "rawId": "nct6687d.volt.1",  "label": "+5V",        "scale": 5  },
+        { "rawId": "nct6687d.volt.2",  "label": "CPU NB/SoC", "scale": 1  },
+        { "rawId": "nct6687d.volt.3",  "label": "DRAM",       "scale": 2  },
+        { "rawId": "nct6687d.volt.4",  "label": "CPU Vcore",  "scale": 1  },
+        { "rawId": "nct6687d.volt.5",  "label": "Voltage 5",  "scale": 1  },
+        { "rawId": "nct6687d.volt.6",  "label": "Voltage 6",  "scale": 1  },
+        { "rawId": "nct6687d.volt.7",  "label": "Voltage 7",  "scale": 1  },
+        { "rawId": "nct6687d.volt.8",  "label": "+3.3V",      "scale": 1  },
+        { "rawId": "nct6687d.volt.9",  "label": "CPU +1.8V",  "scale": 1  },
+        { "rawId": "nct6687d.volt.10", "label": "Voltage 10", "scale": 1  },
+        { "rawId": "nct6687d.volt.11", "label": "3VSB",       "scale": 1  },
+        { "rawId": "nct6687d.volt.12", "label": "AVSB",       "scale": 1  },
+        { "rawId": "nct6687d.volt.13", "label": "VTT",        "scale": 1  },
+        { "rawId": "nct6687d.volt.14", "label": "VBat",       "scale": 1  }
+      ]
+    }
+  ]
+}

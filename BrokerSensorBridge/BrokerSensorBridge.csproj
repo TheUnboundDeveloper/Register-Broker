@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework Condition="'$(TargetFramework)' == ''">net8.0-windows</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>BrokerSensorBridge</AssemblyName>
+    <RootNamespace>BrokerSensorBridge</RootNamespace>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained Condition="'$(SelfContained)' == ''">false</SelfContained>
+  </PropertyGroup>
+
+  <!-- Raw hardware bring-up probes (the smbus-read / smu-read / superio-read / ene-read /
+       ene-set commands) bypass the broker and take raw addresses. They are COMPILE-TIME GATED
+       and excluded from a normal build. Opt in for dev/bring-up ONLY by passing
+       DevProbes=true to dotnet build/publish. A dev-enabled build prints a loud DEV BUILD
+       banner at startup and in the selftest. -->
+  <PropertyGroup Condition="'$(DevProbes)' == 'true'">
+    <DefineConstants>$(DefineConstants);BROKER_DEV_PROBES</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Windows Service host (SCM integration + graceful shutdown). Pinned to the
+         net8.0 line so it matches the target framework; brings the hosting stack. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
+  </ItemGroup>
+
+  <!-- No third-party hardware libraries: all sensor/RGB access goes through the
+       project's own BrokerSmbus kernel driver (LibreHardwareMonitor and HidSharp
+       were fully removed 2026-06-11; the framework builds and runs without them). -->
+
+  <ItemGroup>
+    <None Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="calibration.default.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="calibration.user.example.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

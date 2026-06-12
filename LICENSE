@@ -1,0 +1,102 @@
+Register Broker — Universal Low-Level Hardware Access Framework
+===============================================================
+
+--------------------------------------------------------------------------------
+COMMERCIAL EXCEPTION (Dual Licensing)
+--------------------------------------------------------------------------------
+
+This Software is distributed under the GNU Affero General Public License v3.0
+(AGPL-3.0) with a **Commercial Exception**: you may obtain a separate commercial
+license that allows use without the copyleft requirements of AGPL-3.0.
+
+For users / deployers who do NOT need a commercial license:
+  - The Software is free under AGPL-3.0 (see below).
+  - You must comply with AGPL-3.0, including sharing improvements back to the
+    community if you deploy the Software to third parties.
+
+For vendors / integrators who DO need a commercial license:
+  - Contact the Licensor to negotiate a commercial license that waives the
+    copyleft requirement.
+  - This allows you to embed and monetize the Software without the obligation
+    to share modifications.
+
+        Software:  Register Broker — Universal Low-Level Hardware Access Framework
+        Licensor:  nvaitehiarna
+        Contact:   TheUnboundDeveloper@outlook.com
+
+--------------------------------------------------------------------------------
+SCOPE
+--------------------------------------------------------------------------------
+
+This License covers the framework (the "Software") — the original code of:
+
+        BrokerSensorBridge/        (the user-mode broker + control service)
+        BrokerSmbusDriver/         (the narrow KMDF kernel driver)
+        scripts/                   (build / install / lifecycle tooling)
+        docs/                      (design + reference documentation)
+        root build tooling         (Build-All.ps1, etc.)
+
+The Software reproduces publicly-documented hardware register maps and access
+sequences that were verified against open-source reference drivers (the Linux
+kernel hwmon / i2c subsystems). Hardware register facts are not themselves
+copyrightable; no third-party source code or binary is distributed as part of
+the Software. Attribution for every referenced project is in
+THIRD-PARTY-NOTICES.md.
+
+Any other directories that may exist in a local working copy are NOT part of the
+Software and are NOT distributed under these terms.
+
+--------------------------------------------------------------------------------
+GNU AFFERO GENERAL PUBLIC LICENSE v3.0
+--------------------------------------------------------------------------------
+
+Copyright (c) 2026 nvaitehiarna
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+---
+
+TERMS:
+
+1. SOURCE CODE: If you modify this program and deploy it to third parties (over
+   a network or otherwise), you must provide those parties with access to the
+   complete, corresponding source code of your modified version, under the same
+   AGPL-3.0 license terms.
+
+2. NETWORK USE: If you run this program as a service for others (e.g., as a
+   hosted service, through a network interface, or embedded in a product offered
+   to third parties), you must also provide the source code to all network users
+   under the same AGPL-3.0 terms. This is the "AGPL Clause."
+
+3. COPYLEFT: Any improvement, bug fix, or enhancement you make to the Software
+   must be shared back to the community under the same AGPL-3.0 license when
+   you deploy it to others. This ensures that improvements benefit everyone.
+
+4. COMMERCIAL EXCEPTION: You may obtain a commercial license from the Licensor
+   that waives the copyleft requirements of AGPL-3.0. This allows proprietary
+   use without the obligation to share source code or improvements. Contact the
+   Licensor for commercial licensing terms.
+
+For the full legal text of AGPL-3.0, see: <https://www.gnu.org/licenses/agpl-3.0.html>
+
+--------------------------------------------------------------------------------
+ADDITIONAL DISCLAIMER (Hardware Risk)
+--------------------------------------------------------------------------------
+
+The Software performs low-level access to system hardware (SMBus, Super-I/O,
+and SMN/PCI sensor registers) through a kernel driver. Although the driver is
+deliberately narrow and applies in-kernel address allow-listing ("brick
+guards") to its single bounded write path, low-level bus access carries
+inherent risk to hardware. The Software is provided without warranty as stated
+above; you assume all risk of running it on your hardware.

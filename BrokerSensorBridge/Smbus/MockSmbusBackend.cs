@@ -1,0 +1,91 @@
+namespace BrokerSensorBridge;
+
+/*---------------------------------------------------------------------------*\
+| MockSmbusBackend                                                           |
+|                                                                            |
+|   Deterministic in-memory backend used by --selftest so the smbus:read     |
+|   scope plumbing and op routing can be verified without a real driver.     |
+|   Returns a value derived from the request so tests can assert round-trip. |
+\*---------------------------------------------------------------------------*/
+internal sealed class MockSmbusBackend : ISmbusBackend
+{
+    private readonly uint _smuRaw;
+    private readonly uint _superioRaw;
+
+    public bool Available { get; }
+    public bool SmuAvailable { get; }
+    public string Describe => Available ? "mock SMBus backend (available)" : "mock SMBus backend (unavailable)";
+
+    public MockSmbusBackend(bool available, bool smuAvailable = false, uint smuRaw = 0x69BB0000,
+                            bool superioAvailable = false, int superioChipId = 0, uint superioRaw = 0)
+    {
+        Available = available;
+        SmuAvailable = smuAvailable;
+        _smuRaw = smuRaw;
+        SuperioAvailable = superioAvailable;
+        SuperioChipId = superioChipId;
+        _superioRaw = superioRaw;
+    }
+
+    public bool TryReadSmuRaw(uint sensor, out uint raw, out SmbusStatus status)
+    {
+        if (!SmuAvailable) { raw = 0; status = SmbusStatus.NotImplemented; return false; }
+        raw = _smuRaw; status = SmbusStatus.Ok; return true;   // 0x69BB0000 decodes to 56.62 C
+    }
+
+    public bool CcdTempPresent(int ccd) => false;
+
+    public bool SuperioAvailable { get; }
+
+    public int SuperioChipId { get; }
+
+    public bool TryReadSuperioRaw(uint kind, uint index, out uint raw, out SmbusStatus status)
+    {
+        if (!SuperioAvailable) { raw = 0; status = SmbusStatus.NotImplemented; return false; }
+        raw = _superioRaw; status = SmbusStatus.Ok; return true;
+    }
+
+    public bool DimmTempPresent(int index) => false;
+
+    public bool TryReadDimmTempRaw(int index, out uint raw, out SmbusStatus status)
+    {
+        raw = 0; status = SmbusStatus.NotImplemented; return false;
+    }
+
+    public bool WriteAvailable => Available;   // mock: writes succeed when the mock is "available"
+
+    public bool TryWrite(int bus, int address, int command, int data, bool word, out SmbusStatus status)
+    {
+        status = Available ? SmbusStatus.Ok : SmbusStatus.Unavailable;
+        return Available;
+    }
+
+    public bool TryWriteBlock(int bus, int address, int command, ReadOnlySpan<byte> data, out SmbusStatus status)
+    {
+        if (data.Length is < 1 or > 32) { status = SmbusStatus.BadRequest; return false; }
+        status = Available ? SmbusStatus.Ok : SmbusStatus.Unavailable;
+        return Available;
+    }
+
+    public SmbusResult Read(int bus, int address, int command, SmbusOp op, int length)
+    {
+        if (!Available) return SmbusResult.Fail(SmbusStatus.Unavailable);
+
+        byte seed = (byte)((bus + address + command) & 0xFF);
+        return op switch
+        {
+            SmbusOp.ReadByte  => new SmbusResult(SmbusStatus.Ok, new[] { seed }),
+            SmbusOp.ReadWord  => new SmbusResult(SmbusStatus.Ok, new[] { seed, (byte)(seed + 1) }),
+            SmbusOp.ReadBlock => new SmbusResult(SmbusStatus.Ok, MakeBlock(seed, length)),
+            _ => SmbusResult.Fail(SmbusStatus.BadRequest)
+        };
+    }
+
+    private static byte[] MakeBlock(byte seed, int length)
+    {
+        int n = Math.Clamp(length, 1, 32);
+        var data = new byte[n];
+        for (int i = 0; i < n; i++) data[i] = (byte)(seed + i);
+        return data;
+    }
+}
