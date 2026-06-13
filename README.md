@@ -71,7 +71,7 @@ RGB support is deliberately narrow today:
 - **Supported hardware: ENE/Aura-protocol DRAM over SMBus only** (validated on
   G.Skill DDR4 modules). That is the one controller family the in-kernel write
   allow-list ("brick guard") covers. Motherboard headers, GPUs, AIOs, and USB/HID
-  controllers are **not** supported.
+  controllers are **not** supported. (Comming Soon).
 - **Colors only, no effects.** `rgb.set` writes static per-LED colors atomically.
   Animation, breathing, rainbow, music sync — any effect — is the **consumer's job**:
   render frames client-side and send colors at your own rate (the control service
