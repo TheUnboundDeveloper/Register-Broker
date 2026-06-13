@@ -20,6 +20,12 @@ internal interface IRgbController
     /// <summary>Number of independently-addressable LEDs (1 for a solid-color zone).</summary>
     int LedCount { get; }
 
+    /// <summary>Capability class of this zone (DRAM / 12V header / addressable header), for rgb.list grouping.</summary>
+    RgbZoneKind Kind { get; }
+
+    /// <summary>The transport this zone is driven over (diagnostic; reported in rgb.list).</summary>
+    RgbTransport Transport { get; }
+
     /// <summary>Set every LED to one color. Returns false on any transport error.</summary>
     bool SetAll(byte r, byte g, byte b);
 

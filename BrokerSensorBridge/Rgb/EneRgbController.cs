@@ -18,13 +18,16 @@ internal sealed class EneRgbController : IRgbController
     public string Id { get; }
     public string Label { get; }
     public int LedCount { get; }
+    public RgbZoneKind Kind { get; }
+    public RgbTransport Transport => RgbTransport.SmbusEne;
 
-    public EneRgbController(ISmbusBackend backend, RgbDevice dev)
+    public EneRgbController(ISmbusBackend backend, RgbZone zone)
     {
-        _ene = new EneController(backend, dev.Bus, dev.Address);
-        Id = dev.Id;
-        Label = dev.Label;
-        LedCount = dev.LedCount;
+        _ene = new EneController(backend, zone.Bus, zone.Address);
+        Id = zone.Id;
+        Label = zone.Label;
+        LedCount = zone.LedCount;
+        Kind = zone.Kind;
     }
 
     public bool SetAll(byte r, byte g, byte b)

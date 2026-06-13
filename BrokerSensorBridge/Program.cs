@@ -50,6 +50,14 @@ internal static class Program
         if (args.Any(a => a.Equals("--calibration", StringComparison.OrdinalIgnoreCase) || a.Equals("--calib", StringComparison.OrdinalIgnoreCase)))
             return RunCalibrationInspect(args);
 
+        /* RGB USB-HID discovery (read-only): enumerate HID interfaces under a USB vendor id and print
+           PID + feature-report length, so the Mystic Light controller's PID can be pinned in the
+           profile (RgbZone.HidProductId). No pipe, no writes, no service restart. Close vendor RGB
+           apps (OpenRGB/MSI Center) first so the controller isn't being driven while you look.
+           WinExe: redirect output (`--hid-scan > hid.txt`). */
+        if (args.Any(a => a.Equals("--hid-scan", StringComparison.OrdinalIgnoreCase)))
+            return RunHidScan(args);
+
         /*-----------------------------------------------------------*\
         | Windows-Service routing. When launched by the SCM (or with  |
         | an explicit --service flag from the installer's binPath),    |
@@ -125,6 +133,44 @@ internal static class Program
     | pipe, no admin. `--user=<path>` points at a custom override   |
     | so you can test one from anywhere; default is ProgramData.    |
     \*-----------------------------------------------------------*/
+    /*-----------------------------------------------------------*\
+    | RGB USB-HID discovery (read-only). Enumerates HID interfaces |
+    | under a USB vendor id (default MSI 0x1462) and prints each    |
+    | one's product id + feature-report length + path. Use it to    |
+    | find the Mystic Light controller's PID, then pin it in the    |
+    | profile (RgbZone.HidProductId). Non-destructive: no writes,    |
+    | no pipe, no service restart. Close OpenRGB / MSI Center first  |
+    | so nothing is fighting for the device.                        |
+    |   BrokerSensorBridge.exe --hid-scan [--vid=1462] > hid.txt    |
+    \*-----------------------------------------------------------*/
+    private static int RunHidScan(string[] args)
+    {
+        string vidArg = args.FirstOrDefault(a => a.StartsWith("--vid=", StringComparison.OrdinalIgnoreCase))?["--vid=".Length..] ?? "1462";
+        if (!ushort.TryParse(vidArg, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out ushort vid))
+        {
+            Console.WriteLine($"bad --vid (expected hex, e.g. 1462): '{vidArg}'");
+            return 2;
+        }
+
+        Console.WriteLine($"Scanning HID interfaces at VID 0x{vid:X4}{(vid == 0x1462 ? " (MSI / Mystic Light)" : "")} ...");
+        IReadOnlyList<HidDevice> devs = HidDevice.OpenByVendor(vid, Console.WriteLine);
+        if (devs.Count == 0)
+        {
+            Console.WriteLine("No matching HID interfaces. Is the board's RGB controller present? Try a different --vid,");
+            Console.WriteLine("or check that a vendor RGB app isn't holding the device exclusively.");
+            return 1;
+        }
+
+        Console.WriteLine($"Found {devs.Count} interface(s) at VID 0x{vid:X4}:");
+        foreach (HidDevice d in devs)
+            Console.WriteLine($"  PID 0x{d.ProductId:X4}  featureReportLen={d.FeatureReportByteLength,-4}  {d.Path}");
+        Console.WriteLine();
+        Console.WriteLine("Pin the RGB controller's PID via HidProductId in the board's RgbBoardProfile (RgbCatalog.cs),");
+        Console.WriteLine("then rebuild the broker only. featureReportLen identifies the Mystic Light variant (185/162/112).");
+        foreach (HidDevice d in devs) d.Dispose();
+        return 0;
+    }
+
     private static int RunCalibrationInspect(string[] args)
     {
         BoardIdentity board = BoardIdentity.Detect();
@@ -594,13 +640,24 @@ internal static class Program
         if (smbus.WriteAvailable)
             Log("SMBus control: block-write capable (per-LED frames go out as atomic 3-byte blocks).");
 
-        /* Build the RGB device registry from whatever transports are present — currently
-           ENE/Aura DRAM over the kernel driver (needs CAP_WRITE). The Gigabyte USB-HID
-           transport was retired 2026-06-11 (design record: docs/GIGABYTE-SUPPORT.md). */
-        var rgb = RgbRegistry.Build(smbus, Log);
+        if (smbus.SuperioRgbAvailable)
+            Log("SMBus control: NCT6687 EC RGB write path available (motherboard 12V header).");
+
+        /* Build the RGB registry from the DMI-matched board profile crossed with the transports
+           present: ENE/Aura DRAM (CAP_WRITE), the NCT6687 EC 12V header (CAP_SUPERIO_RGB, inert
+           until HW-validated), and — when AllowHidRgb is set — the MSI Mystic Light USB-HID path
+           for addressable headers. Per-zone labels come from calibration (addresses-free). */
+        BoardIdentity board = BoardIdentity.Detect();
+        Log($"Board identity (DMI): {board}");
+        CalibrationStore calib = CalibrationStore.Load(board, Log,
+            Path.Combine(AppContext.BaseDirectory, "calibration.default.json"), UserCalibrationPath());
+        if (Config.AllowHidRgb)
+            Log("RGB: USB-HID (Mystic Light) transport ENABLED (AllowHidRgb) — reduced assurance, no kernel brick-guard.");
+
+        using var rgb = RgbRegistry.Build(smbus, board, calib, Config.AllowHidRgb, Log);
         if (!rgb.Any)
         {
-            Log("Control service: no RGB devices found (no driver write path [CAP_WRITE]). Nothing to serve.");
+            Log("Control service: no RGB devices found (no write transport available). Nothing to serve.");
             return 2;
         }
 
@@ -651,6 +708,11 @@ internal static class Program
               driver-backend names match what the (mock) driver enumerates — the contract
               that keeps the broker and kernel tables from drifting apart. --*/
         failures += SelfTestBackendRegistry();
+
+        /*-- RGB catalog: board-aware zone profiles validate, the MSI profile resolves the full
+              zone vocabulary, the generic fallback is DRAM-only, and label overrides + transport
+              gating build the expected device set. --*/
+        failures += SelfTestRgbCatalog();
 
         /*-- Server 1: enforcement OFF (audit only) -- hello & scope cases --*/
         const string pipeAudit = "SensorBrokerTest.audit";
@@ -900,6 +962,87 @@ internal static class Program
         return failures;
     }
 
+    /*-----------------------------------------------------------*\
+    | Board-aware RGB catalog integrity. Asserts:                  |
+    |   * RgbCatalog.Validate() is clean,                          |
+    |   * the MSI dev-box profile covers the full zone vocabulary  |
+    |     (Dram + Mb12V + MbArgb) — the "same features" parity,    |
+    |   * the generic fallback is DRAM-only,                       |
+    |   * the registry gates each transport (DRAM on CAP_WRITE; EC |
+    |     on CAP_SUPERIO_RGB; HID only when AllowHidRgb) and        |
+    |     applies calibration labels by zone id.                   |
+    \*-----------------------------------------------------------*/
+    private static int SelfTestRgbCatalog()
+    {
+        int failures = 0;
+        void Check(string name, bool ok)
+        {
+            Console.WriteLine($"  [{(ok ? "PASS" : "FAIL")}] rgb: {name}");
+            if (!ok) failures++;
+        }
+
+        try
+        {
+            string? invalid = RgbCatalog.Validate();
+            Check($"rgb catalog validates{(invalid == null ? "" : $" ({invalid})")}", invalid == null);
+
+            var msi = new BoardIdentity("Micro-Star International Co., Ltd.", "MPG B550I GAMING EDGE MAX WIFI (MS-7C92)");
+            RgbBoardProfile msiProfile = RgbCatalog.Resolve(msi);
+            Check("MSI B550I profile covers full zone vocabulary (parity)",
+                  !msiProfile.IsGeneric && RgbCatalog.MissingKinds(msiProfile).Count == 0);
+
+            RgbBoardProfile generic = RgbCatalog.Resolve(new BoardIdentity("Unknown", "Unknown Board"));
+            Check("unknown board -> generic DRAM-only fallback",
+                  generic.IsGeneric && generic.Zones.All(z => z.Kind == RgbZoneKind.Dram));
+
+            /* Window assertion (mirrors the kernel brick-guard): a real zone is in-window; a zone
+               that targets SPD (0x50) or an out-of-window EC address is refused at the broker. */
+            var ram0 = new RgbZone("ram0", "x", RgbZoneKind.Dram, RgbTransport.SmbusEne, 5, Bus: 0, Address: 0x39);
+            var spd  = new RgbZone("evil", "x", RgbZoneKind.Dram, RgbTransport.SmbusEne, 1, Bus: 0, Address: 0x50);
+            var ecBad = new RgbZone("ecbad", "x", RgbZoneKind.Mb12V, RgbTransport.SuperioEc, 1, EcAddress: 0x0100);
+            Check("in-window SMBus zone accepted", RgbCatalog.ZoneAddressFault(ram0) == null);
+            Check("out-of-window SMBus zone (SPD 0x50) refused", RgbCatalog.ZoneAddressFault(spd) != null);
+            Check("out-of-window EC zone (sensor bank 0x0100) refused", RgbCatalog.ZoneAddressFault(ecBad) != null);
+
+            /* USB-HID product-id pin: a pinned PID selects exactly that device; a pinned-but-absent
+               PID refuses (never falls back to another MSI HID); unpinned takes the first candidate. */
+            var pids = new ushort[] { 0x7C92, 0x1563 };
+            Check("HID pin selects the matching PID", RgbRegistry.SelectHidIndex(pids, 0x1563) == 1);
+            Check("HID pin absent -> refuse (no wrong-device fallback)", RgbRegistry.SelectHidIndex(pids, 0x9999) == -1);
+            Check("HID unpinned -> first candidate", RgbRegistry.SelectHidIndex(pids, 0) == 0);
+            Check("HID unpinned, none present -> refuse", RgbRegistry.SelectHidIndex(Array.Empty<ushort>(), 0) == -1);
+
+            /* DRAM write path only (no EC RGB, no HID): just the two DRAM zones appear. */
+            var smbusOnly = new MockSmbusBackend(available: true, superioAvailable: true, superioChipId: 0xD592);
+            using (RgbRegistry r = RgbRegistry.Build(smbusOnly, msi, CalibrationStore.Builtin, allowHidRgb: false, _ => { }))
+            {
+                Check("DRAM-only host -> 2 zones (ram0, ram1)",
+                      r.Devices.Count == 2 && r.Find("ram0") != null && r.Find("ram1") != null);
+                Check("EC 12V zone inert without CAP_SUPERIO_RGB", r.Find("mb.jrgb0") == null);
+                Check("HID ARGB zone absent without AllowHidRgb", r.Find("mb.argb0") == null);
+            }
+
+            /* EC RGB advertised (mock) -> the 12V header zone instantiates and a label override applies. */
+            var ecOn = new MockSmbusBackend(available: true, superioAvailable: true, superioChipId: 0xD592) { SuperioRgbAvailable = true };
+            string defaultCalib = Path.Combine(AppContext.BaseDirectory, "calibration.default.json");
+            CalibrationStore calib = CalibrationStore.Load(msi, _ => { }, defaultCalib);
+            using (RgbRegistry r = RgbRegistry.Build(ecOn, msi, calib, allowHidRgb: false, _ => { }))
+            {
+                IRgbController? jrgb = r.Find("mb.jrgb0");
+                Check("EC RGB advertised -> mb.jrgb0 present (Mb12V/SuperioEc)",
+                      jrgb != null && jrgb.Kind == RgbZoneKind.Mb12V && jrgb.Transport == RgbTransport.SuperioEc);
+                Check("calibration relabels zone id", jrgb != null && jrgb.Label == "Case 12V Strip (JRGB)");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  [FAIL] rgb: threw {ex.Message}");
+            failures++;
+        }
+
+        return failures;
+    }
+
     private static async Task<int> SelfTestRateLimitCase(string name, string pipeName)
     {
         try
@@ -1114,6 +1257,15 @@ internal sealed class BridgeConfig
     public int MaxSessionsPerIdentity { get; set; } = 8;
     public string AuditLogFile { get; set; } = "%LOCALAPPDATA%\\BrokerSensorBridge\\audit.log";
 
+    /*-----------------------------------------------------------*\
+    | Opt-in USB-HID RGB (MSI Mystic Light) for addressable        |
+    | motherboard headers. OFF by default: unlike the SMBus/EC     |
+    | paths it does NOT pass the kernel brick-guard, so the broker's|
+    | baked report builder is the only boundary (see SECURITY.md). |
+    | Enable via appsettings.json (installer flag) or --allow-hid-rgb.|
+    \*-----------------------------------------------------------*/
+    public bool AllowHidRgb { get; set; } = false;
+
     [JsonIgnore]
     public string LogFileExpanded => Environment.ExpandEnvironmentVariables(LogFile);
     [JsonIgnore]
@@ -1138,6 +1290,10 @@ internal sealed class BridgeConfig
                 log?.Invoke($"appsettings.json FAILED to parse ({ex.Message}); failing closed (RequireAuthorizedClient=ON).");
             }
         }
+
+        /* CLI override (handy for bring-up): --allow-hid-rgb forces the USB-HID RGB transport on. */
+        if (args.Any(a => a.Equals("--allow-hid-rgb", StringComparison.OrdinalIgnoreCase)))
+            cfg.AllowHidRgb = true;
 
         return cfg;
     }

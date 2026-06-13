@@ -25,9 +25,11 @@ given in the changelog and advisory unless you prefer otherwise.
 The interesting surface, in rough priority order:
 
 1. **Kernel driver (`BrokerSmbus`) IOCTL surface** — anything that escapes the bounded,
-   validated, named-register model: out-of-bounds access, write reachability outside the
-   in-kernel RGB allow-list (`0x70–0x77`, `0x39–0x3A`), SPD/JC42 write reachability,
-   pool corruption, type-confusion in the request structs.
+   validated, named-register model: out-of-bounds access, SMBus write reachability outside the
+   in-kernel RGB allow-list (`0x70–0x77`, `0x39–0x3A`), **EC RGB write reachability outside the
+   NCT6687 RGB register window** (`IOCTL_BROKER_SUPERIO_RGB_WRITE` — must never reach the EC
+   sensor/fan/voltage banks), SPD/JC42 write reachability, pool corruption, type-confusion in the
+   request structs.
 2. **Broker authentication / authorization** — bypassing the pipe DACL + peer-identity
    + signer-pin gate, scope escalation (e.g. reaching `rgb:write` ops over the sensor
    pipe), session-token forgery or cross-session reuse.
@@ -52,6 +54,12 @@ impact beyond what's described below and in `docs/ARCHITECTURE.md`:
   mode (a real posture reduction, documented loudly in `docs/TESTING.md`). Production
   signing (EV + attestation) is a tracked open item.
 - **PID-reuse TOCTOU** on peer-process identity is a documented, accepted residual.
+- **USB-HID RGB is a reduced-assurance transport, opt-in and off by default.** The MSI Mystic
+  Light path (motherboard ARGB headers) is user-mode: the broker talks to the controller
+  directly, so it does **not** pass the kernel brick-guard. Its boundaries are the broker's baked
+  report builder and a USB product-id pin (only the intended controller is driven). It is enabled
+  only by an explicit operator opt-in (`AllowHidRgb`). Its blast radius is the RGB controller
+  itself (no SPD/sensor bus); reports showing impact beyond confused LEDs are welcome.
 
 ## Supported versions
 

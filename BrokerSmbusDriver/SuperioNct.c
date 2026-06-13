@@ -109,6 +109,20 @@ static UCHAR EcRead(USHORT Base, USHORT Address)
     return PortIn((USHORT)(Base + EC_DATA_OFF));
 }
 
+/* Write one EC byte at a 16-bit EC address (page:index). Caller holds g_SuperioLock.
+   Mirrors EcRead exactly (page-select + index) but drives the data port instead. Only
+   ever reached for addresses the RGB brick-guard has already cleared. */
+static VOID EcWrite(USHORT Base, USHORT Address, UCHAR Value)
+{
+    UCHAR page  = (UCHAR)(Address >> 8);
+    UCHAR index = (UCHAR)(Address & 0xFF);
+
+    PortOut((USHORT)(Base + EC_PAGE_OFF), EC_PAGE_SELECT);
+    PortOut((USHORT)(Base + EC_PAGE_OFF), page);
+    PortOut((USHORT)(Base + EC_INDEX_OFF), index);
+    PortOut((USHORT)(Base + EC_DATA_OFF), Value);
+}
+
 VOID SuperioNctDetect(SMBUS_CONTROLLER* Controller)
 {
     static const USHORT ports[2] = { SIO_PORT_A, SIO_PORT_B };
@@ -118,6 +132,10 @@ VOID SuperioNctDetect(SMBUS_CONTROLLER* Controller)
     Controller->SuperioBase      = 0;
     Controller->SuperioChipId    = 0;
     Controller->SuperioKind      = BROKER_SUPERIO_KIND_NONE;
+    /* EC RGB write stays HW-unvalidated: never advertise CAP_SUPERIO_RGB or pass the RGB
+       guard until the register window is confirmed on hardware (see SmbusBrokerProtocol.h).
+       Flip to TRUE here, alongside a validated BROKER_NCT6687_RGB_ADDR_* window, to enable. */
+    Controller->SuperioRgbImplemented = FALSE;
 
     if (!g_SuperioLockReady)
     {
@@ -236,4 +254,53 @@ UINT32 SuperioReadDispatch(const SMBUS_CONTROLLER* Controller, UINT32 Kind, UINT
         if (g_SuperioBackends[i].Kind == Controller->SuperioKind)
             return g_SuperioBackends[i].Read(Controller, Kind, Index, Raw);
     return BrokerSmbusNotImplemented;
+}
+
+/*---------------------------------------------------------------------------*\
+| NCT6687 EC RGB register WRITE (motherboard-header RGB) + brick-guard.        |
+|                                                                             |
+|   The hard safety boundary for the EC write path, the EC analogue of        |
+|   BrokerSmbusWriteAddressAllowed (Smbus.c): the EC also drives fans and      |
+|   voltages, so writes are confined to the NCT6687 RGB register window and    |
+|   refused everywhere else, in the kernel, no matter what the broker sends.   |
+|   SuperioRgbImplemented gates the whole path off while the window is         |
+|   HW-unvalidated (FALSE today) — so this is present and bounded but inert.   |
+\*---------------------------------------------------------------------------*/
+static BOOLEAN SuperioRgbWriteAddressAllowed(const SMBUS_CONTROLLER* Controller, USHORT Address, UINT32 Length)
+{
+    USHORT last;
+
+    /* Runtime kill-switch: until the RGB window is validated on hardware this is FALSE,
+       so every EC RGB write is refused regardless of the placeholder window values. */
+    if (!Controller->SuperioRgbImplemented)            return FALSE;
+    if (Length == 0 || Length > BROKER_SMBUS_MAX_BLOCK) return FALSE;
+
+    last = (USHORT)(Address + (USHORT)(Length - 1));
+    if (last < Address)                                 return FALSE;   /* 16-bit wrap */
+
+    return (Address >= BROKER_NCT6687_RGB_ADDR_MIN && last <= BROKER_NCT6687_RGB_ADDR_MAX);
+}
+
+UINT32 SuperioRgbWrite(const SMBUS_CONTROLLER* Controller, const BROKER_SUPERIO_RGB_WRITE_REQUEST* Req)
+{
+    USHORT base = Controller->SuperioBase;
+    USHORT addr;
+    UINT32 i;
+
+    if (Req->Version != BROKER_SMBUS_PROTOCOL_VERSION)                      return BrokerSmbusBadRequest;
+    if (!Controller->SuperioAvailable ||
+        Controller->SuperioKind != BROKER_SUPERIO_KIND_NCT ||
+        !g_SuperioLockReady)                                               return BrokerSmbusNotImplemented;
+    if (Req->Address > 0xFFFF)                                              return BrokerSmbusBadRequest;
+
+    addr = (USHORT)Req->Address;
+    if (!SuperioRgbWriteAddressAllowed(Controller, addr, Req->Length))      return BrokerSmbusForbidden;
+
+    /* EC page/index/data is global controller state shared with the sensor reads — serialize. */
+    KeWaitForSingleObject(&g_SuperioLock, Executive, KernelMode, FALSE, NULL);
+    for (i = 0; i < Req->Length; i++)
+        EcWrite(base, (USHORT)(addr + i), Req->Block[i]);
+    KeReleaseMutex(&g_SuperioLock, FALSE);
+
+    return BrokerSmbusOk;
 }

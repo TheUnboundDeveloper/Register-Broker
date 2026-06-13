@@ -9,6 +9,39 @@ assembly version, git tags) and the **pipe protocol version** (currently `2`, se
 in the client hello — see `docs/CLIENT-PROTOCOL.md` §8) are independent. New sensors
 and additive ops do not bump the protocol version.
 
+## [1.1.0] — 2026-06-13
+
+### Added — motherboard-header RGB (board-aware, multi-transport)
+
+- **Board-aware RGB catalog.** `RgbCatalog` is now a DMI-matched board profile of *zones*
+  (`Rgb/RgbZone.cs`), each tagged with a `RgbZoneKind` (dram / mb12v / mbargb) and a
+  `RgbTransport`. Adding a board/zone is a **broker-only** change — the kernel exposes only
+  stable, class-wide write windows, so no driver recompile/re-sign.
+- **MSI Mystic Light over USB-HID** for addressable motherboard headers (JRAINBOW). The
+  185-byte `FeaturePacket` is ported from the public protocol; whole-device packet seeded via
+  `HidD_GetFeature` so editing one zone preserves the others. **Opt-in** (`AllowHidRgb`,
+  default off) and **reduced assurance** (user-mode, no kernel brick-guard). USB **product-id
+  pin** (`HidProductId`) drives only the intended controller. ✅ hardware-validated on
+  MSI MPG B550I GAMING EDGE MAX WIFI (PID `0x7C92`).
+- **NCT6687 EC 12V header (JRGB)** path: new brick-guarded `IOCTL_BROKER_SUPERIO_RGB_WRITE`
+  (op `0x806`) + `CAP_SUPERIO_RGB`. Wired and bounded but **inert** (`SuperioRgbImplemented`
+  off) until the EC RGB register window is hardware-validated.
+- **`--hid-scan`** — read-only USB-HID discovery (enumerate a vendor id, print PID + feature
+  length) to find and pin a controller. Minimal Win32 HID interop, no new dependency.
+- **Broker-side window assertion** mirroring the kernel guard: a zone whose baked address is
+  outside the kernel RGB window is refused at load (defense in depth).
+- Docs: `RGB-COMMANDS.md` (command syntax for users), `RGB-BOARD-BRINGUP.md` (collect the data
+  to add a board).
+
+### Changed
+
+- `rgb.list` gains additive `kind` and `transport` fields per device (protocol stays v2;
+  older clients unaffected).
+- RGB zone labels are settable via calibration by zone id (addresses-free, like sensors).
+- `Install-SensorBrokerService.ps1` gains **`-WithHidRgb`** — enables the USB-HID RGB transport
+  at install time (writes `AllowHidRgb=true`, implies `-WithRgbControl`), instead of a manual
+  `appsettings.json` edit.
+
 ## [1.0.0] — 2026-06-12
 
 First public release.
@@ -54,4 +87,5 @@ First public release.
 - 2026-06-07/08 — broker architecture locked; protocol v2 identity auth; first
   hardware validation pass; policy hardening.
 
+[1.1.0]: https://github.com/REPLACE-OWNER/register-broker/releases/tag/v1.1.0
 [1.0.0]: https://github.com/REPLACE-OWNER/register-broker/releases/tag/v1.0.0

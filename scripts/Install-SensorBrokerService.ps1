@@ -10,6 +10,9 @@
                        start order is driver -> broker.
     3. BrokerControl (optional, -WithRgbControl) — the write-only RGB control
                        service on \\.\pipe\BrokerControl (rgb:write scope).
+                       Add -WithHidRgb to also enable the USB-HID (MSI Mystic
+                       Light) motherboard-header transport (reduced assurance,
+                       opt-in; writes AllowHidRgb=true; implies -WithRgbControl).
 
   The broker/control services run the SAME published exe with --service; the
   process detects the SCM and hosts the long-running body under it (see
@@ -33,6 +36,11 @@ param(
     [string]$DriverServiceName  = "BrokerSmbus",
 
     [switch]$WithRgbControl,        # also install the write-only RGB control service
+    # Enable the opt-in USB-HID (MSI Mystic Light) RGB transport for motherboard headers
+    # (writes AllowHidRgb=true into the control service's appsettings.json). Reduced
+    # assurance (user-mode, no kernel brick-guard) — see docs/SECURITY.md. Implies the
+    # control service, so it turns on -WithRgbControl automatically.
+    [switch]$WithHidRgb,
     [switch]$SkipDriver,            # do not (re)register the kernel driver service
     [switch]$NoDriverDependency,    # do not make the broker depend on the driver service
     [switch]$NoStart,               # register but do not start the services
@@ -79,6 +87,13 @@ function Remove-ServiceIfPresent([string]$Name) {
 }
 
 Assert-Admin
+
+# USB-HID RGB is served by the control service, so it requires it. Turn it on automatically
+# rather than silently doing nothing.
+if ($WithHidRgb -and -not $WithRgbControl) {
+    Write-Host "[cfg] -WithHidRgb implies the control service; enabling -WithRgbControl."
+    $WithRgbControl = $true
+}
 
 #--------------------------------------------------------------------------
 # PREFLIGHT: validate the driver binary BEFORE tearing anything down.
@@ -153,29 +168,41 @@ $Exe = (Resolve-Path $Exe).Path
 #    HTTP/TCP surface to configure.
 #--------------------------------------------------------------------------
 $AppSettings = Join-Path $BridgeDir "appsettings.json"
-if ((Test-Path $AppSettings) -and ($RequireAuthorizedClient -or $AllowedClientSigners.Count -or $AllowedClientPaths.Count)) {
+$setAuth = ($RequireAuthorizedClient -or $AllowedClientSigners.Count -or $AllowedClientPaths.Count)
+if ((Test-Path $AppSettings) -and ($setAuth -or $WithHidRgb)) {
     Write-Host "[cfg] Updating $AppSettings"
 
-    # Validate inputs up front: a malformed thumbprint/path would silently produce a
-    # dead allowlist that locks out every client while RequireAuthorizedClient is ON.
-    foreach ($s in $AllowedClientSigners) {
-        if (($s -replace '[\s:-]', '') -notmatch '^[0-9A-Fa-f]{40}$') {
-            throw "AllowedClientSigners entry '$s' is not a 40-hex-char SHA-1 thumbprint."
+    $cfg = Get-Content $AppSettings -Raw | ConvertFrom-Json
+
+    # Auth/enforcement fields are written ONLY when an auth flag was supplied, so enabling
+    # -WithHidRgb alone never resets a deployment's existing RequireAuthorizedClient setting.
+    if ($setAuth) {
+        # Validate inputs up front: a malformed thumbprint/path would silently produce a
+        # dead allowlist that locks out every client while RequireAuthorizedClient is ON.
+        foreach ($s in $AllowedClientSigners) {
+            if (($s -replace '[\s:-]', '') -notmatch '^[0-9A-Fa-f]{40}$') {
+                throw "AllowedClientSigners entry '$s' is not a 40-hex-char SHA-1 thumbprint."
+            }
         }
-    }
-    foreach ($p in $AllowedClientPaths) {
-        if (-not [System.IO.Path]::IsPathRooted($p)) {
-            throw "AllowedClientPaths entry '$p' must be a full (rooted) image path."
+        foreach ($p in $AllowedClientPaths) {
+            if (-not [System.IO.Path]::IsPathRooted($p)) {
+                throw "AllowedClientPaths entry '$p' must be a full (rooted) image path."
+            }
+        }
+        $cfg | Add-Member -NotePropertyName RequireAuthorizedClient -NotePropertyValue ([bool]$RequireAuthorizedClient) -Force
+        $cfg | Add-Member -NotePropertyName AllowedClientSigners    -NotePropertyValue (@($AllowedClientSigners)) -Force
+        $cfg | Add-Member -NotePropertyName AllowedClientPaths      -NotePropertyValue (@($AllowedClientPaths))   -Force
+        if ($RequireAuthorizedClient -and -not ($AllowedClientSigners.Count -or $AllowedClientPaths.Count)) {
+            Write-Warning "RequireAuthorizedClient is ON but no signers/paths were supplied — every client will be rejected."
         }
     }
 
-    $cfg = Get-Content $AppSettings -Raw | ConvertFrom-Json
-    $cfg | Add-Member -NotePropertyName RequireAuthorizedClient -NotePropertyValue ([bool]$RequireAuthorizedClient) -Force
-    $cfg | Add-Member -NotePropertyName AllowedClientSigners    -NotePropertyValue (@($AllowedClientSigners)) -Force
-    $cfg | Add-Member -NotePropertyName AllowedClientPaths      -NotePropertyValue (@($AllowedClientPaths))   -Force
-    if ($RequireAuthorizedClient -and -not ($AllowedClientSigners.Count -or $AllowedClientPaths.Count)) {
-        Write-Warning "RequireAuthorizedClient is ON but no signers/paths were supplied — every client will be rejected."
+    # USB-HID RGB transport (motherboard headers). Reduced assurance (no kernel guard); opt-in.
+    if ($WithHidRgb) {
+        $cfg | Add-Member -NotePropertyName AllowHidRgb -NotePropertyValue $true -Force
+        Write-Host "[cfg] AllowHidRgb=true (USB-HID motherboard-header RGB enabled — reduced assurance, no kernel brick-guard)."
     }
+
     # Write BOM-less UTF-8 deterministically. Windows PowerShell 5.1 'Set-Content -Encoding UTF8'
     # emits a BOM; .NET tolerates it, but BOM-less keeps the file byte-identical across shells.
     [System.IO.File]::WriteAllText($AppSettings, ($cfg | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))

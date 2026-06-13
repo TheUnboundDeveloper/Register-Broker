@@ -3,23 +3,34 @@ namespace BrokerSensorBridge;
 /*---------------------------------------------------------------------------*\
 | RgbRegistry                                                                |
 |                                                                            |
-|   The control service's live set of drivable RGB devices, built at startup  |
-|   from whatever transports are actually present:                            |
-|     * ENE/Aura SMBus DRAM (RgbCatalog) — only when the kernel driver's       |
-|       brick-guarded write path is available (unchanged from before).        |
+|   The control service's live set of drivable RGB zones, built at startup    |
+|   from the DMI-matched board profile (RgbCatalog) crossed with the          |
+|   transports actually present:                                              |
+|     * SmbusEne  DRAM  — kernel SMBus write path (CAP_WRITE).                 |
+|     * SuperioEc 12V   — kernel NCT6687 EC RGB write path (CAP_SUPERIO_RGB;   |
+|                         inert until the EC RGB window is HW-validated).      |
+|     * UsbHid    ARGB  — MSI Mystic Light USB-HID, opt-in (AllowHidRgb).      |
 |                                                                            |
-|   This is the auto-detect merge point: each transport contributes devices   |
-|   only when its hardware is found, so nothing appears on the wrong board.    |
-|                                                                              |
-|   The Gigabyte IT8297 USB-HID transport was retired 2026-06-11 after expert  |
-|   corrections (design record: docs/GIGABYTE-SUPPORT.md); the registry stays  |
-|   transport-agnostic so a corrected version can plug back in.                |
+|   Each zone contributes a device only when its transport is available, so    |
+|   nothing appears on the wrong board / a host without that path. Per-zone    |
+|   labels come from calibration (addresses-free — relabel/hide only).         |
+|                                                                            |
+|   The MSI Mystic Light USB-HID transport is the corrected re-introduction    |
+|   of a user-mode HID path (the retired Gigabyte IT8297 stays retired —       |
+|   design record: docs/GIGABYTE-SUPPORT.md); it is gated and reduced-         |
+|   assurance (no kernel brick-guard), see SECURITY.md.                        |
 \*---------------------------------------------------------------------------*/
-internal sealed class RgbRegistry
+internal sealed class RgbRegistry : IDisposable
 {
-    private readonly List<IRgbController> _devices;
+    private const ushort MysticLightVendorId = 0x1462;
 
-    private RgbRegistry(List<IRgbController> devices) { _devices = devices; }
+    private readonly List<IRgbController> _devices;
+    private readonly List<HidDevice> _hid;
+
+    private RgbRegistry(List<IRgbController> devices, List<HidDevice> hid)
+    {
+        _devices = devices; _hid = hid;
+    }
 
     public IReadOnlyList<IRgbController> Devices => _devices;
     public bool Any => _devices.Count > 0;
@@ -27,16 +38,100 @@ internal sealed class RgbRegistry
     public IRgbController? Find(string id) =>
         _devices.FirstOrDefault(d => string.Equals(d.Id, id, StringComparison.OrdinalIgnoreCase));
 
-    public static RgbRegistry Build(ISmbusBackend smbus, Action<string> log)
+    public static RgbRegistry Build(ISmbusBackend smbus, BoardIdentity board, CalibrationStore calib,
+                                    bool allowHidRgb, Action<string> log)
     {
-        var list = new List<IRgbController>();
+        RgbBoardProfile profile = RgbCatalog.Resolve(board);
+        log($"[rgb] board profile: {(profile.IsGeneric ? "(generic fallback)" : $"{profile.Manufacturer} / {profile.Product}")}, {profile.Zones.Count} zone(s)");
 
-        // ENE/Aura DRAM over the kernel driver (same condition as before: needs CAP_WRITE).
-        if (smbus.WriteAvailable)
-            foreach (RgbDevice d in RgbCatalog.Devices)
-                list.Add(new EneRgbController(smbus, d));
+        string? invalid = RgbCatalog.Validate();
+        if (invalid != null) log($"[rgb] WARNING: RGB catalog invalid: {invalid}");
+
+        IReadOnlyList<RgbZoneKind> missing = RgbCatalog.MissingKinds(profile);
+        if (!profile.IsGeneric && missing.Count > 0)
+            log($"[rgb] parity: profile does not cover {string.Join(", ", missing)} (no hardware mapped on this board)");
+
+        var list = new List<IRgbController>();
+        var hidDevices = new List<HidDevice>();
+        IReadOnlyList<HidDevice>? hids = null;   // opened lazily, only if a UsbHid zone needs it
+
+        foreach (RgbZone z in profile.Zones)
+        {
+            ChannelOverride o = calib.Resolve(z.Id);
+            if (o.Hidden) { log($"[rgb] zone '{z.Id}' hidden by calibration; skipped"); continue; }
+            RgbZone zone = o.Label != null ? z with { Label = o.Label } : z;
+
+            /* Defense in depth: refuse to register a zone whose baked address is outside the kernel
+               write window for its transport (the kernel would Forbid it anyway). A malformed or
+               hostile profile can never even attempt an out-of-window target. */
+            string? fault = RgbCatalog.ZoneAddressFault(zone);
+            if (fault != null) { log($"[rgb] REFUSED zone '{zone.Id}': {fault}"); continue; }
+
+            switch (zone.Transport)
+            {
+                case RgbTransport.SmbusEne when smbus.WriteAvailable:
+                    list.Add(new EneRgbController(smbus, zone));
+                    break;
+
+                case RgbTransport.SuperioEc when smbus.SuperioRgbAvailable:
+                    list.Add(new MysticLightEcController(smbus, zone));
+                    break;
+
+                case RgbTransport.UsbHid when allowHidRgb:
+                    hids ??= OpenMysticLightHid(hidDevices, log);
+                    int sel = SelectHidIndex(hids.Select(h => h.ProductId).ToList(), zone.HidProductId);
+                    if (sel >= 0)
+                    {
+                        log($"[rgb] zone '{zone.Id}' -> HID PID 0x{hids[sel].ProductId:X4}"
+                          + (zone.HidProductId != 0 ? " (pinned)" : " (unpinned — pin HidProductId in the profile)"));
+                        list.Add(new MysticLightHidController(hids[sel], zone));
+                    }
+                    else if (zone.HidProductId != 0)
+                        log($"[rgb] zone '{zone.Id}': pinned Mystic Light PID 0x{zone.HidProductId:X4} not found at VID 0x{MysticLightVendorId:X4}; skipped");
+                    else
+                        log($"[rgb] zone '{zone.Id}': no Mystic Light HID device (VID 0x{MysticLightVendorId:X4}) found; skipped");
+                    break;
+
+                default:
+                    log($"[rgb] zone '{zone.Id}' ({zone.Kind}/{zone.Transport}) not available on this host; skipped");
+                    break;
+            }
+        }
 
         log($"[rgb] registry: {list.Count} device(s) [{string.Join(", ", list.Select(d => d.Id))}]");
-        return new RgbRegistry(list);
+        return new RgbRegistry(list, hidDevices);
+    }
+
+    private static IReadOnlyList<HidDevice> OpenMysticLightHid(List<HidDevice> sink, Action<string> log)
+    {
+        IReadOnlyList<HidDevice> devs = HidDevice.OpenByVendor(MysticLightVendorId, log);
+        sink.AddRange(devs);
+        string pids = devs.Count > 0 ? string.Join(", ", devs.Select(d => $"0x{d.ProductId:X4}")) : "none";
+        log($"[rgb] Mystic Light HID: {devs.Count} device(s) at VID 0x{MysticLightVendorId:X4} "
+          + $"[candidate PIDs: {pids}] (USB-HID transport — reduced assurance, no kernel brick-guard)");
+        return devs;
+    }
+
+    /// <summary>
+    /// Select which enumerated MSI HID device a zone drives. When <paramref name="pinnedPid"/> is
+    /// non-zero, returns the index of the candidate with that exact USB product id (or -1 if none —
+    /// the zone is refused rather than driving a wrong device). When 0 (unpinned), returns the first
+    /// candidate, or -1 if none. Pure/testable — no device handles.
+    /// </summary>
+    internal static int SelectHidIndex(IReadOnlyList<ushort> candidatePids, int pinnedPid)
+    {
+        if (pinnedPid != 0)
+        {
+            for (int i = 0; i < candidatePids.Count; i++)
+                if (candidatePids[i] == pinnedPid) return i;
+            return -1;   // pinned but absent: refuse, never fall back to a different device
+        }
+        return candidatePids.Count > 0 ? 0 : -1;
+    }
+
+    public void Dispose()
+    {
+        foreach (HidDevice h in _hid) h.Dispose();
+        _hid.Clear();
     }
 }

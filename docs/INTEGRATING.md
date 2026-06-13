@@ -171,7 +171,7 @@ requesting `rgb:write` (the deployment must have installed the control service â
 
 ```python
 rgb = RegisterBroker(pipe=r"\\.\pipe\BrokerControl", scope="rgb:write")
-devices = rgb.request("rgb.list")["devices"]            # e.g. ram0 / ram1, 5 LEDs each
+devices = rgb.request("rgb.list")["devices"]            # [{id,label,leds,kind,transport}, ...]
 rgb.request("rgb.set", device="ram0", color="00FF00")   # whole device
 rgb.request("rgb.set", device="ram0",                   # or per-LED, one frame
             colors=["FF0000", "00FF00", "0000FF", "FFFFFF", "FF00FF"])
@@ -179,6 +179,12 @@ rgb.request("rgb.set", device="ram0",                   # or per-LED, one frame
 
 Rules of the road for RGB consumers:
 
+- **Group by `kind`/`transport`.** Each device carries `kind` (`dram`/`mb12v`/`mbargb`) and
+  `transport` (`smbusene`/`superioec`/`usbhid`). The set is board-specific â€” motherboard-header
+  zones appear only on a supported board with that transport enabled (e.g. `mbargb` requires the
+  operator's `AllowHidRgb`). Don't hard-code `ram0`; enumerate `rgb.list`.
+- **Per-LED support varies by transport.** DRAM honors the full `colors` array; the USB-HID
+  motherboard zone currently applies the lead color (per-LED streaming there is a future item).
 - **Effects are your job.** The broker writes colors; it hosts no animation engine.
   Render frames in your app and send per-LED `rgb.set` calls at your own cadence.
 - The control pipe's rate limit (120 ops/s, burst 240) comfortably fits per-device

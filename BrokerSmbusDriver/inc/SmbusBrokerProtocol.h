@@ -57,6 +57,16 @@
    coverage truthfully without hard-coding the backend list a second time. */
 #define IOCTL_BROKER_ENUM_BACKENDS \
     CTL_CODE(FILE_DEVICE_BROKER_SMBUS, 0x805, METHOD_BUFFERED, FILE_ANY_ACCESS)
+/* Bounded Super-I/O (NCT6687 EC) RGB register WRITE — the motherboard-header RGB path.
+   Like IOCTL_BROKER_SMBUS_WRITE this is brick-guarded IN THE KERNEL: only the NCT6687
+   RGB register window is writable; the sensor banks (temps 0x100 / volts 0x120 / fans
+   0x140), the SIO config space, and everything else are refused, no matter what the
+   broker sends. The RGB window is a property of the NCT6687 SILICON (identical on every
+   board using the chip), so new boards/zones never need a driver change — the broker's
+   signed RgbBoardProfile carries the per-board specifics. SEPARATE from the SMBus write
+   path: motherboard headers are on the EC, not the SMBus. */
+#define IOCTL_BROKER_SUPERIO_RGB_WRITE \
+    CTL_CODE(FILE_DEVICE_BROKER_SMBUS, 0x806, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
 /* Read-only operations in Phase B. Writes are intentionally not defined yet:
    they are the brick-risk surface and arrive only with the address allowlist
@@ -85,6 +95,26 @@ typedef enum _BROKER_SMBUS_OP
 #define BROKER_SMBUS_RGB_ADDR_MAX   0x77u
 #define BROKER_SMBUS_DRAM_ADDR_MIN  0x39u   /* ENE DRAM on this AM4 board (0x39/0x3A) */
 #define BROKER_SMBUS_DRAM_ADDR_MAX  0x3Au
+
+/* NCT6687 EC RGB write window — the ONLY EC addresses the kernel will WRITE (16-bit
+   page:index EC addresses). This bounds the IOCTL_BROKER_SUPERIO_RGB_WRITE path the
+   same way the SMBus window bounds SMBus writes. The window MUST stay clear of the
+   sensor banks (temps 0x100 / volts 0x120 / fans 0x140) and the SIO config space.
+   Like the SMBus guard it constrains the EC ADDRESS region, not the value — any byte
+   in the window is writable, and the broker's signed RgbBoardProfile decides which
+   registers are actually written, so a new NCT6687 board needs no driver change.
+
+   HW-UNVALIDATED: the exact NCT6687 RGB register page/offsets are NOT yet confirmed on
+   hardware (OpenRGB drives MSI motherboard RGB over USB-HID, not the EC). Until they are
+   validated with the bring-up probes, the EC RGB write path is kept INERT at RUNTIME by
+   the SuperioRgbImplemented flag (always FALSE today) — the guard refuses every write
+   regardless of these window values, and CAP_SUPERIO_RGB stays off, so the path is
+   present and brick-guarded but cannot touch hardware. The window below is a documented
+   PLACEHOLDER; replace it with the validated region AND set SuperioRgbImplemented = TRUE
+   in SuperioNctDetect (a deliberate, re-validated, re-signed driver change) to enable it.
+   Widen/move deliberately. */
+#define BROKER_NCT6687_RGB_ADDR_MIN  0x0F00u   /* placeholder — NOT yet hardware-validated */
+#define BROKER_NCT6687_RGB_ADDR_MAX  0x0FFFu
 
 typedef enum _BROKER_SMBUS_STATUS
 {
@@ -228,6 +258,23 @@ typedef struct _BROKER_SMBUS_WRITE_RESPONSE
     UINT32 Status;         /* BROKER_SMBUS_STATUS (Forbidden if address not on RGB range) */
 } BROKER_SMBUS_WRITE_RESPONSE;
 
+/* IOCTL_BROKER_SUPERIO_RGB_WRITE: write Length (1..MAX_BLOCK) bytes to consecutive EC
+   addresses starting at Address (16-bit page:index). Brick-guarded to the NCT6687 RGB
+   window in-kernel; refused unless SuperioRgbImplemented (HW-validated) is set. */
+typedef struct _BROKER_SUPERIO_RGB_WRITE_REQUEST
+{
+    UINT32 Version;        /* = BROKER_SMBUS_PROTOCOL_VERSION                 */
+    UINT32 Address;        /* 16-bit EC address (page:index), brick-guarded   */
+    UINT32 Length;         /* valid bytes in Block (1..BROKER_SMBUS_MAX_BLOCK) */
+    UINT8  Block[BROKER_SMBUS_MAX_BLOCK];
+} BROKER_SUPERIO_RGB_WRITE_REQUEST;
+
+typedef struct _BROKER_SUPERIO_RGB_WRITE_RESPONSE
+{
+    UINT32 Status;         /* BROKER_SMBUS_STATUS (Forbidden if EC addr not on RGB window;
+                              NotImplemented while the EC RGB path is HW-unvalidated) */
+} BROKER_SUPERIO_RGB_WRITE_RESPONSE;
+
 /* Backend classes reported by IOCTL_BROKER_ENUM_BACKENDS. */
 #define BROKER_BACKEND_CLASS_SMBUS    0u   /* SMBus host controller (Detail: PCI device id)        */
 #define BROKER_BACKEND_CLASS_SMU      1u   /* CPU SMU/SMN sensors  (Detail: (CpuFamily<<8)|Model)  */
@@ -253,7 +300,11 @@ typedef struct _BROKER_ENUM_BACKENDS_RESPONSE
 
 #include <poppack.h>
 
-#define BROKER_SMBUS_CAP_READ     0x1u
-#define BROKER_SMBUS_CAP_SMU      0x2u
-#define BROKER_SMBUS_CAP_SUPERIO  0x4u
-#define BROKER_SMBUS_CAP_WRITE    0x8u
+#define BROKER_SMBUS_CAP_READ        0x1u
+#define BROKER_SMBUS_CAP_SMU         0x2u
+#define BROKER_SMBUS_CAP_SUPERIO     0x4u
+#define BROKER_SMBUS_CAP_WRITE       0x8u
+/* The brick-guarded NCT6687 EC RGB write path (IOCTL_BROKER_SUPERIO_RGB_WRITE). Off until
+   the EC RGB register window is hardware-validated (SuperioRgbImplemented); see the window
+   constants above. The broker gates its motherboard-header EC zone on this bit. */
+#define BROKER_SMBUS_CAP_SUPERIO_RGB 0x10u

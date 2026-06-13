@@ -104,7 +104,13 @@
         { "rawId": "nct6687d.volt.11", "label": "3VSB",       "scale": 1  },
         { "rawId": "nct6687d.volt.12", "label": "AVSB",       "scale": 1  },
         { "rawId": "nct6687d.volt.13", "label": "VTT",        "scale": 1  },
-        { "rawId": "nct6687d.volt.14", "label": "VBat",       "scale": 1  }
+        { "rawId": "nct6687d.volt.14", "label": "VBat",       "scale": 1  },
+
+        // RGB zones (label-only, like sensors — relabel/hide by zone id, NEVER an address).
+        // The zone ids come from the signed RgbBoardProfile (RgbCatalog.cs); calibration only
+        // renames them for rgb.list, or hides one with "hidden": true.
+        { "rawId": "mb.jrgb0", "label": "Case 12V Strip (JRGB)" },
+        { "rawId": "mb.argb0", "label": "Front ARGB Fans (JRAINBOW)" }
       ]
     }
   ]

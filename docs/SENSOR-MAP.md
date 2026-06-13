@@ -53,17 +53,23 @@ control service** (`--control`, pipe `\\.\pipe\BrokerControl`, `rgb:write` scope
 sensor broker never offers writes. Ops: `rgb.list` /
 `rgb.set {device, color:"RRGGBB" | colors:["RRGGBB",…]}` (per-LED).
 
-| Logical name | Source | Baked-in location | Notes | Status |
-|---|---|---|---|---|
-| `ram0` | SMBus ENE/Aura DRAM RGB | bus 0, addr `0x39` | "GSkill RGB (DIMM 0)", 5 LEDs; `RgbCatalog` map; `EneController` write | ✅ live (non-admin client set RAM color, per-LED) |
-| `ram1` | SMBus ENE/Aura DRAM RGB | bus 0, addr `0x3A` | "GSkill RGB (DIMM 1)", 5 LEDs; same | ✅ |
+Zones come from a **DMI-matched board profile** (`RgbCatalog`, this dev box = MSI B550I). Each zone
+reports `kind` (`dram`/`mb12v`/`mbargb`) and `transport` (`smbusene`/`superioec`/`usbhid`).
 
-The ENE/Aura register protocol is a publicly documented hardware protocol, reproduced as
-register facts. Per-LED frames are written as **one atomic 3-byte SMBus block write per LED**
-via the driver's `WriteBlock` op; DIRECT/APPLY are latched once per controller. Addresses are
-baked into the control broker; clients never supply/search them (memory `smbus-write-safety`).
-Gated by the kernel brick-guard (writes only to `0x70–0x77` / `0x39–0x3A`) + baked map +
-scope + rate-limit + audit; SPD write-enable is never exposed.
+| Logical name | Kind / transport | Baked-in location | Notes | Status |
+|---|---|---|---|---|
+| `ram0` | dram / smbusene | bus 0, addr `0x39` | "GSkill RGB (DIMM 0)", 5 LEDs; `EneController` write | ✅ live (non-admin, per-LED) |
+| `ram1` | dram / smbusene | bus 0, addr `0x3A` | "GSkill RGB (DIMM 1)", 5 LEDs; same | ✅ |
+| `mb.argb0` | mbargb / usbhid | MSI Mystic Light, USB PID `0x7C92`, packet offset 31 (JRAINBOW1) | 60 LEDs; `MysticLightHidController`; **opt-in** `AllowHidRgb`, listed only when enabled | ✅ live (solid color validated on dev box) |
+| `mb.jrgb0` | mb12v / superioec | NCT6687 EC RGB window | 1 LED zone; `MysticLightEcController`; **inert** until the EC window is HW-validated (`CAP_SUPERIO_RGB` off) | 🟡 wired, not listed |
+
+The ENE/Aura and MSI Mystic Light protocols are publicly documented hardware protocols, reproduced
+as register facts. DRAM per-LED frames are **one atomic 3-byte SMBus block write per LED** (driver
+`WriteBlock`; DIRECT/APPLY latched once per controller). Addresses/PIDs are baked in signed code;
+clients never supply/search them (memory `smbus-write-safety`). Each transport's boundary differs:
+SMBus and the EC path are kernel brick-guarded (writes only to `0x70–0x77`/`0x39–0x3A`, or the
+NCT6687 RGB register window); the USB-HID path is user-mode (broker report builder + USB PID pin,
+no kernel guard) and opt-in. Adding a zone in an existing window is broker-only — no driver rebuild.
 
 ---
 

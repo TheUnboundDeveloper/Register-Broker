@@ -160,7 +160,9 @@ VOID BrokerSmbusEvtIoDeviceControl(WDFQUEUE Queue, WDFREQUEST Request,
                            | ((g_Controller.Backend != NULL &&
                                g_Controller.Backend->WriteImplemented &&
                                g_Controller.ReadImplemented)
-                                                            ? BROKER_SMBUS_CAP_WRITE   : 0);
+                                                            ? BROKER_SMBUS_CAP_WRITE   : 0)
+                           | (g_Controller.SuperioRgbImplemented
+                                                            ? BROKER_SMBUS_CAP_SUPERIO_RGB : 0);
         info->Vendor       = (UINT32)g_Controller.Vendor;
         for (ULONG bi = 0; bi < 8; bi++)
             info->BusInfo[bi] = (bi < g_Controller.BusCount)
@@ -330,6 +332,28 @@ VOID BrokerSmbusEvtIoDeviceControl(WDFQUEUE Queue, WDFREQUEST Request,
             /* BrokerSmbusWrite applies the in-kernel brick-guard (RGB range only). */
             resp->Status = BrokerSmbusWrite(&g_Controller, &reqLocal);
         }
+        bytesReturned = sizeof(*resp);
+        status        = STATUS_SUCCESS;
+        break;
+    }
+    case IOCTL_BROKER_SUPERIO_RGB_WRITE:
+    {
+        BROKER_SUPERIO_RGB_WRITE_REQUEST   reqLocal;
+        BROKER_SUPERIO_RGB_WRITE_RESPONSE* resp;
+
+        status = WdfRequestRetrieveInputBuffer(Request, sizeof(reqLocal), &inBuf, &bufLen);
+        if (!NT_SUCCESS(status)) break;
+        status = WdfRequestRetrieveOutputBuffer(Request, sizeof(*resp), &outBuf, &bufLen);
+        if (!NT_SUCCESS(status)) break;
+
+        /* Snapshot before zeroing the response (METHOD_BUFFERED aliases the buffers). */
+        reqLocal = *(BROKER_SUPERIO_RGB_WRITE_REQUEST*)inBuf;
+        resp = (BROKER_SUPERIO_RGB_WRITE_RESPONSE*)outBuf;
+        RtlZeroMemory(resp, sizeof(*resp));
+
+        /* SuperioRgbWrite applies the in-kernel RGB-window brick-guard and the
+           SuperioRgbImplemented kill-switch (refuses everything while HW-unvalidated). */
+        resp->Status  = SuperioRgbWrite(&g_Controller, &reqLocal);
         bytesReturned = sizeof(*resp);
         status        = STATUS_SUCCESS;
         break;

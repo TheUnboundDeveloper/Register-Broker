@@ -8,8 +8,10 @@ that matches what you want to do.
 | Goal | Read |
 |---|---|
 | **Use it** — read my PC sensors / control my RGB as a normal (non-admin) user | [USER-GUIDE.md](USER-GUIDE.md) |
+| **Drive RGB** — the rgb.list / rgb.set command syntax and examples | [RGB-COMMANDS.md](RGB-COMMANDS.md) |
 | **Integrate it** — add sensor/RGB support to my own application (with code samples) | [INTEGRATING.md](INTEGRATING.md) |
 | **Contribute** — build it, add a sensor or RGB device, send a change | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| **Add my board's RGB** — collect the data (DMI, HID PID, zones) to add a board profile | [RGB-BOARD-BRINGUP.md](RGB-BOARD-BRINGUP.md) |
 | **Port a chipset** — add support for a new Super-I/O / SMBus host chip | [CONTRIBUTING-CHIPSET.md](CONTRIBUTING-CHIPSET.md) |
 | **Test on my hardware** — validate an unvalidated chipset and report results | [TESTING.md](TESTING.md) |
 | **Understand how it's built** — the layers, the trust boundaries, the data flow | [ARCHITECTURE.md](ARCHITECTURE.md) |

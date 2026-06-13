@@ -61,6 +61,13 @@ internal interface ISmbusBackend
     /// <summary>True when the driver reports the brick-guarded SMBus write path (CAP_WRITE).</summary>
     bool WriteAvailable { get; }
 
+    /// <summary>
+    /// True when the driver reports the brick-guarded NCT6687 EC RGB write path
+    /// (CAP_SUPERIO_RGB). Off until the EC RGB register window is hardware-validated, so the
+    /// motherboard-header EC zone stays inert on a driver that has not enabled it.
+    /// </summary>
+    bool SuperioRgbAvailable { get; }
+
     /// <summary>Human-readable backend state for logs / health.</summary>
     string Describe { get; }
 
@@ -108,4 +115,12 @@ internal interface ISmbusBackend
     /// byte transactions — this is what makes per-LED frames fast and tear-free.
     /// </summary>
     bool TryWriteBlock(int bus, int address, int command, ReadOnlySpan<byte> data, out SmbusStatus status);
+
+    /// <summary>
+    /// Bounded NCT6687 EC RGB register write (1..32 bytes to consecutive EC addresses from
+    /// <paramref name="ecAddress"/>). Kernel brick-guarded to the NCT6687 RGB register window and
+    /// refused unless the EC RGB path is hardware-validated (SuperioRgbAvailable). The caller
+    /// supplies a baked EC address from the RGB catalog — clients never reach this.
+    /// </summary>
+    bool TrySuperioRgbWrite(int ecAddress, ReadOnlySpan<byte> data, out SmbusStatus status);
 }

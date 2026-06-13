@@ -69,6 +69,16 @@ internal sealed class MockSmbusBackend : ISmbusBackend
 
     public bool WriteAvailable => Available;   // mock: writes succeed when the mock is "available"
 
+    /// <summary>Mock: the EC RGB path mirrors the kernel's HW-unvalidated default (off) unless asked.</summary>
+    public bool SuperioRgbAvailable { get; init; }
+
+    public bool TrySuperioRgbWrite(int ecAddress, ReadOnlySpan<byte> data, out SmbusStatus status)
+    {
+        if (data.Length is < 1 or > 32) { status = SmbusStatus.BadRequest; return false; }
+        status = SuperioRgbAvailable ? SmbusStatus.Ok : SmbusStatus.Forbidden;
+        return SuperioRgbAvailable;
+    }
+
     public bool TryWrite(int bus, int address, int command, int data, bool word, out SmbusStatus status)
     {
         status = Available ? SmbusStatus.Ok : SmbusStatus.Unavailable;

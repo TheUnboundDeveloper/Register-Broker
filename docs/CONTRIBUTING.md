@@ -121,23 +121,29 @@ it up automatically via `sensor.list` — no client change needed.
 
 ## 5. How to add a new **RGB device**
 
-For a device on an **already-allowed** controller address window
-(`BROKER_SMBUS_RGB_ADDR_*` / `BROKER_SMBUS_DRAM_ADDR_*` in the IOCTL header), just add a
-`RgbDevice` to `BrokerSensorBridge/RgbCatalog.cs`:
+RGB is **board-aware**: zones live in a DMI-matched `RgbBoardProfile` in
+`BrokerSensorBridge/RgbCatalog.cs` as `RgbZone` records, each tagged with a transport
+(`SmbusEne` DRAM / `SuperioEc` 12V header / `UsbHid` Mystic Light). For a device on an
+**already-allowed** window, add a zone to the matching board profile:
 
 ```csharp
-new RgbDevice("ram2", "DRAM RGB (DIMM 2)", bus: 0, address: 0x3B, ledCount: 5),
+new RgbZone("ram2", "DRAM RGB (DIMM 2)", RgbZoneKind.Dram, RgbTransport.SmbusEne, LedCount: 5, Bus: 0, Address: 0x3B),
 ```
 
-If the new device sits **outside** the kernel's allowed write window, you must *deliberately*
-widen the window in the IOCTL header **and** the in-kernel guard
-(`BrokerSmbusWriteAddressAllowed` in `BrokerSmbusDriver/Smbus.c`) — and you must be sure the
-new range never overlaps SPD (`0x50–0x57`), the SPD page-select (`0x36/0x37`), or DIMM temp
-sensors (`0x18–0x1F`). Treat widening the brick-guard as a security change: justify it, bound
-it tightly, and test against SPD first. The LED write sequence itself lives in
-`BrokerSensorBridge/Smbus/EneController.cs` (the ENE/Aura protocol is a publicly documented
-hardware protocol, reproduced as register facts; per-LED frames go out as atomic 3-byte block
-writes via the driver's `WriteBlock` op).
+The full, end-to-end walkthrough — DMI capture, finding DRAM addresses, the USB-HID controller
+(`--hid-scan`), zone offsets, pinning the PID, labels, and validation — is
+**[RGB-BOARD-BRINGUP.md](RGB-BOARD-BRINGUP.md)**. Key rules the build enforces: the broker refuses
+any zone whose baked address is outside the kernel write window (`RgbCatalog.ZoneAddressFault`), and
+`--selftest` checks catalog validity + parity. The LED write sequences live in
+`BrokerSensorBridge/Smbus/EneController.cs` (DRAM) and `Rgb/MysticLightHidController.cs` (USB-HID) —
+both reproduced from publicly documented hardware protocols as register facts.
+
+If a new device sits **outside** the kernel's allowed write window, you must *deliberately* widen
+the window in the IOCTL header **and** the in-kernel guard (`BrokerSmbusWriteAddressAllowed` for
+SMBus, or `SuperioRgbWriteAddressAllowed` for the EC path) — never overlapping SPD (`0x50–0x57`),
+the SPD page-select (`0x36/0x37`), DIMM temp (`0x18–0x1F`), or the EC sensor banks. Treat widening
+a brick-guard as a security change: justify it, bound it tightly, test first. This is the rare case
+that requires a driver recompile + re-sign; adding a zone in an existing window does **not**.
 
 ---
 

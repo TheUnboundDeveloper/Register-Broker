@@ -75,7 +75,9 @@
 This maps the **Super-I/O sensor chip** (the part that varies most by vendor) to manufacturers,
 so you can tell at a glance whether a given board's board-level sensors are covered. CPU temp
 (AMD SMU) and DIMM temp (JC42) are vendor-independent and covered wherever the AMD FCH SMBus is
-present. RGB coverage is DRAM-only today.
+present. RGB coverage: DRAM (ENE/Aura over SMBus) on every board, plus motherboard ARGB headers
+on MSI boards via USB-HID Mystic Light (opt-in); the NCT6687 EC 12V-header path is wired but inert
+pending validation. See `RGB-BOARD-BRINGUP.md` to add a board's zones.
 
 | Manufacturer | Common Super-I/O sensor chip(s) | Covered by | Status |
 |---|---|---|---|

@@ -506,7 +506,14 @@ internal sealed class BrokerControlServer
     private async Task<string> HandleRgbListAsync(NamedPipeServerStream pipe, CancellationToken token)
     {
         var items = (_rgb?.Devices ?? Array.Empty<IRgbController>())
-            .Select(d => new { id = d.Id, label = d.Label, leds = d.LedCount }).ToArray();
+            .Select(d => new
+            {
+                id = d.Id,
+                label = d.Label,
+                leds = d.LedCount,
+                kind = d.Kind.ToString().ToLowerInvariant(),        // dram / mb12v / mbargb
+                transport = d.Transport.ToString().ToLowerInvariant() // smbusene / superioec / usbhid
+            }).ToArray();
         await WriteFrameAsync(pipe, new { type = "data", op = "rgb.list", devices = items }, token);
         return "data";
     }

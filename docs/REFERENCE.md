@@ -43,7 +43,7 @@ Full request/response shapes are in [`CLIENT-PROTOCOL.md`](CLIENT-PROTOCOL.md). 
 | `sensor.list` | — | `{sensors:[{id,label,unit}]}` | `sensors:read` |
 | `sensor.read` | `id` | `{value,unit}` / `error` / `deny` | `sensors:read` |
 | `sensor.readall` | — | every catalog sensor's value, **one rate-limited op** | `sensors:read` |
-| `rgb.list` | — | `{devices:[{id,label,leds}]}` | `rgb:write` |
+| `rgb.list` | — | `{devices:[{id,label,leds,kind,transport}]}` | `rgb:write` |
 | `rgb.set` | `device`, `color` (`RRGGBB`) **or** `colors` (per-LED array) | `{device}` / `error` / `deny` | `rgb:write` |
 
 `{"type":"deny"}` is uniform and uninformative by design (bad token, ungranted scope, unknown
@@ -70,10 +70,16 @@ working): `cpu.temp` → `smu.cpu.temp`, `cpu.ccd{n}.temp` → `smu.ccd.{n}`,
 `board.12v.volt`/`board.5v.volt`/… → `nct6687d.volt.{n}`, `fan{n}` → `nct6687d.fan.{n}`,
 `dimm{n}.temp` → `dimm.{n}`.
 
-| RGB device id | Baked location | LEDs |
-|---|---|---|
-| `ram0` | bus 0, addr `0x39` | 5 |
-| `ram1` | bus 0, addr `0x3A` | 5 |
+RGB zones come from the **DMI-matched board profile** (`RgbCatalog.cs`); this is the dev box
+(MSI B550I). Each zone reports `kind` (`dram`/`mb12v`/`mbargb`) and `transport`
+(`smbusene`/`superioec`/`usbhid`) in `rgb.list`.
+
+| RGB zone id | Kind / transport | Baked location | LEDs | Notes |
+|---|---|---|---|---|
+| `ram0` | dram / smbusene | bus 0, addr `0x39` | 5 | always on |
+| `ram1` | dram / smbusene | bus 0, addr `0x3A` | 5 | always on |
+| `mb.argb0` | mbargb / usbhid | MSI Mystic Light, USB PID `0x7C92`, packet offset 31 (JRAINBOW1) | 60 | **opt-in** (`AllowHidRgb`); listed only when enabled |
+| `mb.jrgb0` | mb12v / superioec | NCT6687 EC RGB window | 1 | **inert** until the EC RGB window is validated (`CAP_SUPERIO_RGB` off) — not listed |
 
 Ids are stable identifiers; new hardware adds new ids (clients discover them via `*.list`).
 
@@ -95,6 +101,7 @@ makes the broker **fail closed** (`RequireAuthorizedClient=true`) with a loud lo
 | `RateBurst` | double | `60.0` | per-session token-bucket capacity (control service floors this at 240) |
 | `MaxSessions` | int | `32` | bounded session table size |
 | `MaxSessionsPerIdentity` | int | `8` | max concurrent sessions per client identity |
+| `AllowHidRgb` | bool | `false` | enable the USB-HID (MSI Mystic Light) RGB transport for motherboard headers. Off = reduced-assurance transport not loaded, no `usbhid` zones. Read by the **control service** (not the client); `--allow-hid-rgb` forces it on. Restart the service after changing. |
 
 > Under LocalSystem, `%LOCALAPPDATA%` resolves to
 > `C:\Windows\System32\config\systemprofile\AppData\Local\…`, **not** your user profile.
@@ -112,6 +119,8 @@ makes the broker **fail closed** (`RequireAuthorizedClient=true`) with a loud lo
 | `--id=<id>` | sensor id for `sensor.read` |
 | `--device=<id>` `--color=<RRGGBB>` | args for `rgb.set` |
 | `--scopes=<a,b>` | scopes to request in the client hello |
+| `--allow-hid-rgb` | (control **service**) force the USB-HID RGB transport on for this run; no-op on a client invocation |
+| `--hid-scan [--vid=1462]` | read-only USB-HID discovery: list a vendor's HID interfaces (PID + feature-report length) to find/pin a Mystic Light controller |
 | `--once` | print one named-catalog JSON snapshot read straight from the driver and exit (needs elevation to open the device) |
 | `--calibration [--user=<path>]` | print the detected board DMI + resolved catalog (no driver, no pipe, no admin) |
 | `--selftest` | in-process auth/scope/rate/signature/calibration/chipset-gate tests (no hardware) |
@@ -141,6 +150,7 @@ The exe is a `WinExe` (no console window): `--client` / `--once` / `--calibratio
 | `IOCTL_BROKER_SMU_READ` (0x802) | read a baked-in named SMU sensor (raw 32-bit) |
 | `IOCTL_BROKER_SUPERIO_READ` (0x803) | read a baked-in named Super-I/O sensor (raw) |
 | `IOCTL_BROKER_SMBUS_WRITE` (0x804) | brick-guarded byte/word/block write (RGB windows only) |
+| `IOCTL_BROKER_SUPERIO_RGB_WRITE` (0x806) | brick-guarded NCT6687 EC RGB-register write (motherboard 12V header); refused unless the EC RGB window is HW-validated |
 
 ### Op codes (`BROKER_SMBUS_OP`)
 `ReadByte=0`, `ReadWord=1`, `ReadBlock=2`, `WriteByte=3`, `WriteWord=4`, `WriteBlock=5`
@@ -188,6 +198,11 @@ NCT6686 `0xD440`, NCT6687D `0xD590`), `ITE = 2` (**reserved** — the ITE backen
 | `0x70–0x77`, `0x39–0x3A` | **writable** (RGB controller windows) |
 | `0x50–0x57` (SPD), `0x36/0x37` (SPD page-select), `0x18–0x1F` (DIMM temp) | **refused in-kernel** |
 | any other ≤ `0x7F` | readable; not writable |
+
+The NCT6687 EC RGB write path (`IOCTL_BROKER_SUPERIO_RGB_WRITE`) has its **own** in-kernel guard:
+only the NCT6687 RGB register window is writable; the EC sensor/fan/voltage banks (`0x100`/`0x120`/
+`0x140`) and config space are refused. It is additionally disabled at runtime (`SuperioRgbImplemented`)
+until the window is hardware-validated.
 
 ---
 

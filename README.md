@@ -48,7 +48,7 @@ audited broker. Privilege is scoped to one small service instead of every consum
 
 ## What works today
 
-**33-sensor catalog** served to non-admin clients over authenticated pipe; per-LED RGB fully drivable.
+**33-sensor catalog** served to non-admin clients over authenticated pipe; RGB drivable on DRAM **and motherboard headers**.
 
 | Capability | Mechanism | Status |
 |---|---|---|
@@ -59,6 +59,8 @@ audited broker. Privilege is scoped to one small service instead of every consum
 | Board temps / fans / voltages | Nuvoton NCT6775 family (6779, 6791–6798) | 🟡 implemented, HW-unvalidated |
 | DIMM temperatures | JC42 / TSE2004av over SMBus | ✅ hardware-validated |
 | Per-LED DRAM RGB (non-admin!) | ENE/Aura (block write, 1–32 B atomic) | ✅ hardware-validated |
+| Motherboard ARGB headers (non-admin!) | MSI Mystic Light over USB-HID (JRAINBOW) | ✅ hardware-validated (MSI B550I) — opt-in |
+| Motherboard 12V header | NCT6687 EC RGB (JRGB) | 🟡 wired + brick-guarded, inert pending EC-register validation |
 | AMD SMBus host (FCH KERNCZ) | SMBus sequential controller | ✅ hardware-validated |
 | Intel SMBus host (i801) | SMBus sequential controller | ⬜ implemented, HW-unvalidated |
 
@@ -66,23 +68,28 @@ Full inventory: [docs/SENSOR-CHIPSET-INVENTORY.md](docs/SENSOR-CHIPSET-INVENTORY
 
 ## RGB status (read this before expecting your build to light up)
 
-RGB support is deliberately narrow today:
+RGB is **board-aware and multi-transport**. `RgbCatalog` is a DMI-matched board profile of
+zones; the client contract (`rgb.list` / `rgb.set`) is identical across transports, but what
+*bounds* each write differs:
 
-- **Supported hardware: ENE/Aura-protocol DRAM over SMBus only** (validated on
-  G.Skill DDR4 modules). That is the one controller family the in-kernel write
-  allow-list ("brick guard") covers. Motherboard headers, GPUs, AIOs, and USB/HID
-  controllers are **not** supported. (Comming Soon).
-- **Colors only, no effects.** `rgb.set` writes static per-LED colors atomically.
-  Animation, breathing, rainbow, music sync — any effect — is the **consumer's job**:
-  render frames client-side and send colors at your own rate (the control service
-  allows 120 ops/s, burst 240). The broker will never host an effects engine.
-- **Extensible by interface.** New controller families implement
-  `IRgbController` ([BrokerSensorBridge/Rgb/IRgbController.cs](BrokerSensorBridge/Rgb/IRgbController.cs));
-  the reference implementation is the ENE/Aura controller. Every new write target
-  also requires a matching in-kernel allow-list entry — write capability is never
-  data-driven. See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) §5.
-- **Future:** broader controller coverage is planned as a separate, license-isolated
-  sidecar process (post-1.0) — see the design rules in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+| Transport | Hardware | Safety boundary | Status |
+|---|---|---|---|
+| SMBus (ENE/Aura) | DRAM modules | **kernel** address brick-guard (`0x70–0x77` / `0x39–0x3A`) | ✅ validated (G.Skill DDR4) |
+| USB-HID (MSI Mystic Light) | addressable motherboard headers (JRAINBOW) | **broker** baked report builder + PID pin, *no kernel guard* | ✅ validated (MSI B550I); **opt-in** |
+| Super-I/O EC (NCT6687) | 12V motherboard header (JRGB) | **kernel** EC RGB-register brick-guard | 🟡 wired, **inert** until the EC RGB window is validated |
+
+- **USB-HID is opt-in and reduced-assurance.** It's a user-mode transport (the broker talks to
+  the controller directly, no kernel brick-guard), so it's **off by default** — enable
+  `AllowHidRgb` in the control service's `appsettings.json`. It's pinned to the controller's USB
+  product id so only the intended device is driven. See
+  [docs/RGB-BOARD-BRINGUP.md](docs/RGB-BOARD-BRINGUP.md).
+- **Colors only, no effects.** `rgb.set` writes solid colors. Animation (breathing, rainbow,
+  music sync) is the **consumer's job**: render frames client-side and send colors at your own
+  rate (the control service allows 120 ops/s, burst 240). The broker hosts no effects engine.
+- **Adding a board is broker-only.** Zones live in signed code (`RgbCatalog.cs`); the kernel
+  exposes only stable, class-wide write windows, so a new board/zone needs no driver
+  recompile/re-sign. Walkthrough: [docs/RGB-BOARD-BRINGUP.md](docs/RGB-BOARD-BRINGUP.md).
+- **Driving it:** see [docs/RGB-COMMANDS.md](docs/RGB-COMMANDS.md) for the command syntax.
 
 ## Security model (the point of the project)
 
@@ -128,7 +135,9 @@ Details: [docs/USER-GUIDE.md](docs/USER-GUIDE.md) (run it) ·
   require production cert + pinned signer thumbprint.
 - **SMU PM-table metrics** (CPU power, clocks, voltage) — separate mailbox mechanism,
   deliberately deferred.
-- **RGB scope**: ENE/Aura DRAM only, colors only — see [RGB status](#rgb-status-read-this-before-expecting-your-build-to-light-up).
+- **RGB scope**: DRAM (SMBus) + motherboard ARGB headers (USB-HID, opt-in), colors only; the
+  NCT6687 EC 12V-header path is wired but inert pending validation — see
+  [RGB status](#rgb-status-read-this-before-expecting-your-build-to-light-up).
 
 ## Documentation map
 
@@ -136,6 +145,8 @@ Details: [docs/USER-GUIDE.md](docs/USER-GUIDE.md) (run it) ·
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | the four layers, end to end |
 | [docs/CLIENT-PROTOCOL.md](docs/CLIENT-PROTOCOL.md) | the named-pipe wire protocol for consumers |
+| [docs/RGB-COMMANDS.md](docs/RGB-COMMANDS.md) | RGB command-line syntax (rgb.list / rgb.set), examples |
+| [docs/RGB-BOARD-BRINGUP.md](docs/RGB-BOARD-BRINGUP.md) | collect the data to add a board's RGB/sensor profile |
 | [docs/INTEGRATING.md](docs/INTEGRATING.md) | add sensor/RGB support to your own app (code samples) |
 | [SECURITY.md](SECURITY.md) | the trust boundary + how to report vulnerabilities |
 | [docs/SENSOR-MAP.md](docs/SENSOR-MAP.md) | every served id and where it comes from |

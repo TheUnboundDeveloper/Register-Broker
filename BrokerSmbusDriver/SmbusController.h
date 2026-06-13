@@ -49,6 +49,9 @@ typedef struct _SMBUS_CONTROLLER
     USHORT       SuperioBase;               /* EC base I/O port (from LD-HWM / LD-EC)        */
     USHORT       SuperioChipId;             /* detected SIO chip id (e.g. 0xD592, 0x8688)   */
     UCHAR        SuperioKind;               /* BROKER_SUPERIO_KIND_NCT / _ITE / _NONE      */
+    BOOLEAN      SuperioRgbImplemented;     /* TRUE only when the NCT6687 EC RGB WRITE window
+                                               is hardware-validated; gates CAP_SUPERIO_RGB and
+                                               the in-kernel RGB write guard. FALSE today. */
     const struct _SMBUS_BACKEND_DESCRIPTOR* Backend;   /* SMBus backend that claimed the
                                                controller at detect; NULL if none */
 } SMBUS_CONTROLLER;
@@ -147,3 +150,8 @@ UINT32 SuperioNct6775Read(_In_ const SMBUS_CONTROLLER* Controller, _In_ UINT32 K
 /* Dispatch a Super-I/O read to whichever backend was detected. Implemented in
    SuperioNct.c. Driver.c calls this so the IOCTL handler stays backend-agnostic. */
 UINT32 SuperioReadDispatch(_In_ const SMBUS_CONTROLLER* Controller, _In_ UINT32 Kind, _In_ UINT32 Index, _Out_ UINT32* Raw);
+
+/* Bounded NCT6687 EC RGB register write (motherboard-header RGB). Applies the in-kernel
+   RGB-window brick-guard and refuses everything unless SuperioRgbImplemented is set
+   (HW-validated). Implemented in SuperioNct.c; Driver.c calls it from the IOCTL handler. */
+UINT32 SuperioRgbWrite(_In_ const SMBUS_CONTROLLER* Controller, _In_ const BROKER_SUPERIO_RGB_WRITE_REQUEST* Req);

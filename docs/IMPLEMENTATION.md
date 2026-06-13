@@ -26,8 +26,10 @@ driver* internals behind it.
 | `Sensors/RawChannel.cs` | The raw channels: stable ids (`smu.cpu.temp`, `nct6687d.volt.0`, `dimm.0`…), availability gates, base reads. |
 | `Sensors/SensorDecode.cs` | Raw register → engineering units (Linux-hwmon register facts: k10temp, nct6683 lineage, nct6775, jc42). |
 | `Sensors/Calibration.cs` | Board DMI detect, `calibration.default.json` + user-override loading, the built-in legacy-id alias map. |
-| `RgbCatalog.cs` | Named RGB device map → baked `(bus, address)`. |
-| `Rgb/IRgbController.cs` / `Rgb/RgbRegistry.cs` / `Rgb/EneRgbController.cs` | Transport-agnostic RGB device seam + the auto-detect registry (devices appear only when their transport hardware is found). |
+| `RgbCatalog.cs` / `Rgb/RgbZone.cs` | DMI-matched board profiles of RGB **zones** → baked `(transport, address)`; window-assertion + parity validation. |
+| `Rgb/IRgbController.cs` / `Rgb/RgbRegistry.cs` | Transport-agnostic RGB zone seam (Id/Label/LedCount/Kind/Transport) + the auto-detect registry (zones appear only when their transport is present; HID lifetime; PID-pin selection). |
+| `Rgb/EneRgbController.cs` / `Rgb/MysticLightEcController.cs` / `Rgb/MysticLightHidController.cs` | The three transports: ENE/Aura DRAM (SMBus), NCT6687 EC 12V header, MSI Mystic Light USB-HID (185-byte FeaturePacket). |
+| `Hid/HidDevice.cs` | Minimal Win32 HID interop (SetupAPI + hid.dll): enumerate by vendor id, read feature-report length, get/set feature reports. No third-party dependency. |
 | `Smbus/SmbusDriverBackend.cs` | `DeviceIoControl` wrapper over the driver IOCTLs. |
 | `Smbus/SmbusTypes.cs` | C# mirror of the IOCTL structs/enums + `ISmbusBackend`. |
 | `Smbus/MockSmbusBackend.cs` | In-memory backend for `--selftest` (no hardware). |
@@ -133,13 +135,18 @@ bit the project once; keep it.
 | `SMU_READ` | `{Version, Sensor}` → `{Status, Raw}` | `Version`, `Sensor` index bounded (Tctl + 8 CCDs); SMN address baked in-kernel |
 | `SUPERIO_READ` | `{Version, Kind, Index}` → `{Status, Raw}` | `Version`, `Kind` (temp/fan/voltage), `Index` bounded per kind *per detected backend*; EC/HWM register baked in-kernel |
 | `SMBUS_WRITE` | `{Version, Op, BusIndex, Address, Command, Data, Length, Block[32]}` → `{Status}` | as XFER **plus** the brick-guard: address must be in an RGB window. `WriteBlock` (op 5) requires the full struct with `Length` 1..32; byte/word may legally truncate to the original 24-byte V1 prefix (`Length`/`Block` were appended) |
+| `SUPERIO_RGB_WRITE` (0x806) | `{Version, Address, Length, Block[32]}` → `{Status}` | NCT6687 EC RGB-register write (motherboard 12V header). Own brick-guard: only the NCT6687 RGB register window; refused unless `SuperioRgbImplemented` (HW-validated) — off today, so inert |
 
-**Brick-guard** (`BrokerSmbusWriteAddressAllowed` in `Smbus.c`): a write is permitted *only*
+**Brick-guard** (`BrokerSmbusWriteAddressAllowed` in `Smbus.c`): a SMBus write is permitted *only*
 to `0x70–0x77` or `0x39–0x3A` (the RGB controller windows). SPD (`0x50–0x57`), the SPD
 page-select (`0x36/0x37`), and DIMM temp sensors (`0x18–0x1F`) are all refused **in the
 kernel**, regardless of what the broker sends. (The guard gates the device *address*, not the
 register/`Command` within it — the broker's baked `RgbCatalog` bounds which registers are
-actually written.)
+actually written.) The EC RGB path has a parallel guard (`SuperioRgbWriteAddressAllowed` in
+`SuperioNct.c`): only the NCT6687 RGB register window, never the EC sensor/fan/voltage banks,
+and disabled entirely until the window is hardware-validated. The **USB-HID** transport does not
+pass the kernel at all — it's user-mode in the broker (opt-in `AllowHidRgb`, bounded by the baked
+report builder + USB product-id pin).
 
 The C# side (`SmbusDriverBackend`) validates `bytesReturned` against the expected struct size
 before trusting a response, so a truncated kernel reply is rejected rather than read as zeros.
@@ -190,11 +197,16 @@ When you add a sensor, the decode goes here next to these — see
 
 ## RGB frame path (control service)
 
-`RgbRegistry` (transport-agnostic, built at startup over the `IRgbController` seam) registers
-the ENE/Aura DRAM devices from `RgbCatalog` only when the driver reports `CAP_WRITE`. The
-ENE write sequence (`Smbus/EneController.cs` — a publicly documented hardware protocol,
-reproduced as register facts) is pointer-write (`cmd 0x00`, byte-swapped 16-bit register) then
-data write. Two load-bearing details (the 2026-06-11 crawl/blink fix):
+`RgbRegistry` (transport-agnostic, built at startup over the `IRgbController` seam) resolves the
+DMI-matched board profile from `RgbCatalog`, then registers each zone whose transport is present:
+ENE/Aura DRAM when the driver reports `CAP_WRITE`; the NCT6687 EC 12V header when it reports
+`CAP_SUPERIO_RGB` (off today, so inert); and MSI Mystic Light USB-HID zones when `AllowHidRgb` is
+set and the pinned controller is found. A zone whose baked address is outside the kernel write
+window is refused at registration (`RgbCatalog.ZoneAddressFault`, mirroring the kernel guard).
+
+The **ENE/DRAM** write sequence (`Smbus/EneController.cs` — a publicly documented hardware
+protocol, reproduced as register facts) is pointer-write (`cmd 0x00`, byte-swapped 16-bit register)
+then data write. Two load-bearing details (the 2026-06-11 crawl/blink fix):
 
 - **One atomic block write per LED**: each LED's 3 color bytes (R,B,G — the controller's byte
   order) go out as a single `WriteBlock` transaction (2 bus transactions per LED instead
@@ -206,6 +218,14 @@ data write. Two load-bearing details (the 2026-06-11 crawl/blink fix):
 
 Each controller instance is persistent + shared, with all bus sequences serialized per
 controller so concurrent `rgb.set` calls can't interleave pointer/data pairs.
+
+The **USB-HID (MSI Mystic Light)** transport (`Rgb/MysticLightHidController.cs`) writes a
+185-byte `FeaturePacket` (report id `0x52`) where each zone sits at a fixed byte offset
+(JRAINBOW1 = 31). It sets a static color (effect + RGB + brightness + colorFlags) in the target
+zone only, and **seeds the packet from the device's current state via `HidD_GetFeature`** first so
+editing one zone doesn't reset the others to disabled. The device's max feature length is
+classified to the protocol variant (e.g. 725 → 185). Pinned to a USB product id so only the
+intended controller is driven. Reduced assurance: user-mode, no kernel guard, opt-in.
 
 ---
 

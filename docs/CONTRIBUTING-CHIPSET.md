@@ -197,3 +197,42 @@ campaign ([TESTING.md](TESTING.md)) exists to close the gap.
 - [ ] `SENSOR-CHIPSET-INVENTORY.md` updated with the honest status (✅ or 🟡)
 - [ ] Validation evidence in the PR: board model + DMI string, chip id, side-by-side
       readings vs HWiNFO — or an explicit "no hardware, 🟡" statement
+
+---
+
+## Adding a board RGB profile (motherboard-header RGB)
+
+RGB zones follow the same rule as sensors: **the hardware map is signed code, never data.**
+Per-board zones live in `BrokerSensorBridge/RgbCatalog.cs` (a DMI-matched `RgbBoardProfile`);
+calibration JSON may only relabel/hide a zone by id. Adding a board is a **broker-only change** —
+no driver recompile — because the kernel exposes only stable, class-wide write windows (the SMBus
+RGB range and the NCT6687 EC RGB register region).
+
+1. **Get the board DMI.** Run `BrokerSensorBridge.exe --calibration`; copy the
+   `Board identity (DMI)` manufacturer/product string.
+2. **Add an `RgbBoardProfile` row** in `RgbCatalog.cs`. Fill the standard zone vocabulary where the
+   hardware exists — `Dram`, `Mb12V`, `MbArgb` — so `--selftest` parity passes (a board genuinely
+   lacking a kind simply omits it; the generic fallback is DRAM-only). Each `RgbZone` names a
+   transport and its address fields:
+   - `SmbusEne` — `Bus`/`Address` (ENE/Aura DRAM; must fall in the kernel SMBus RGB window).
+   - `SuperioEc` — `EcAddress` (NCT6687 12V header; inert until the EC RGB window is validated).
+   - `UsbHid` — `HidZoneIndex` + `HidProductId` (MSI Mystic Light; opt-in via `AllowHidRgb`).
+     Leave `HidProductId: 0` for first bring-up (matches by feature-report length and logs the
+     candidate PIDs under VID `0x1462`), then **pin** it to the RGB controller's PID so the broker
+     drives only that exact device and refuses any other MSI HID interface.
+3. **(Optional) Add label overrides** to `calibration.default.json` under the board match, keyed by
+   zone id (`mb.jrgb0` → "Case Strip"). Labels only — **never** an address.
+4. **Validate on hardware** before trusting a new transport:
+   - DRAM: `--ene-read` (brick-guard + ENE identity) then `--ene-set` (DevProbes builds only).
+   - USB-HID: enable `--allow-hid-rgb`, then `--client --op=rgb.list` / `rgb.set` and watch the LEDs.
+   - NCT6687 EC: requires confirming the EC RGB register window first, then setting the window +
+     `SuperioRgbImplemented = TRUE` in the driver (a deliberate, re-validated, re-signed change).
+5. **Rebuild the broker only** (`scripts\Build-BrokerSensorBridge.ps1`) — `--selftest` green — as long
+   as the addresses fall inside the existing class windows (the expected case).
+
+### RGB PR checklist
+- [ ] Zones in signed C# (`RgbCatalog.cs`); no addresses in JSON/data (grep your diff)
+- [ ] Profile covers the standard zone vocabulary where the hardware exists (parity selftest green)
+- [ ] `--selftest` green (RGB catalog + parity + transport-gating gates)
+- [ ] Validation evidence: board DMI string, which headers, and per-transport proof (or 🟡)
+- [ ] USB-HID zones documented as opt-in / reduced-assurance; no driver recompile required

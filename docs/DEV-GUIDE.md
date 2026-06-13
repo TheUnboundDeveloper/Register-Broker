@@ -119,6 +119,11 @@ DRAM RGB addresses (`0x39/0x3A`). Run this **before** ever writing a color.
 ```
 Writes a color to the ENE DRAM controllers and commits. Watch the RAM change.
 
+> **USB-HID RGB discovery is *not* a DevProbe.** Motherboard ARGB headers (MSI Mystic Light) are
+> found with `--hid-scan` in a **normal** build (read-only — enumerate a USB vendor's HID
+> interfaces, print PID + feature-report length). It doesn't touch the kernel driver. Full board
+> RGB bring-up: [RGB-BOARD-BRINGUP.md](RGB-BOARD-BRINGUP.md).
+
 ---
 
 ## 5. Hardware bring-up workflow (new board / new sensor)

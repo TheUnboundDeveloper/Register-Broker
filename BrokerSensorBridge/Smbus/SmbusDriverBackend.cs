@@ -42,6 +42,7 @@ internal sealed class SmbusDriverBackend : ISmbusBackend, IDisposable
     private const uint IOCTL_SUPERIO = (0x8000u << 16) | (0x803u << 2);
     private const uint IOCTL_WRITE   = (0x8000u << 16) | (0x804u << 2);
     private const uint IOCTL_ENUM    = (0x8000u << 16) | (0x805u << 2);
+    private const uint IOCTL_SIO_RGB = (0x8000u << 16) | (0x806u << 2);
 
     /* BROKER_ENUM_BACKENDS_RESPONSE layout (packed): Version(4) Count(4) then
        BROKER_ENUM_BACKENDS_MAX entries of Name[32] + Class(4) + Active(4) + Detail(4). */
@@ -72,6 +73,8 @@ internal sealed class SmbusDriverBackend : ISmbusBackend, IDisposable
     public int SuperioChipId { get; }
     /// <summary>True when the driver reports the brick-guarded SMBus write path (CAP_WRITE).</summary>
     public bool WriteAvailable { get; }
+    /// <summary>True when the driver reports the brick-guarded NCT6687 EC RGB write path (CAP_SUPERIO_RGB).</summary>
+    public bool SuperioRgbAvailable { get; }
     public string Describe { get; }
 
     /* The driver's backend registry, queried once at open. Diagnostic only: the CAP_*
@@ -96,10 +99,11 @@ internal sealed class SmbusDriverBackend : ISmbusBackend, IDisposable
         bool haveInfo = TryInfo(out uint busCount, out uint caps, out uint vendor, out uint superioChipId);
         string vendorName = vendor switch { 1 => "Intel", 2 => "AMD", _ => "unknown" };
 
-        SmuAvailable     = haveInfo && (caps & 0x2u) != 0;   // CAP_SMU
-        SuperioAvailable = haveInfo && (caps & 0x4u) != 0;   // CAP_SUPERIO
-        WriteAvailable   = haveInfo && (caps & 0x8u) != 0;   // CAP_WRITE
-        SuperioChipId    = haveInfo ? (int)superioChipId : 0;
+        SmuAvailable      = haveInfo && (caps & 0x2u) != 0;   // CAP_SMU
+        SuperioAvailable  = haveInfo && (caps & 0x4u) != 0;   // CAP_SUPERIO
+        WriteAvailable    = haveInfo && (caps & 0x8u) != 0;   // CAP_WRITE
+        SuperioRgbAvailable = haveInfo && (caps & 0x10u) != 0; // CAP_SUPERIO_RGB
+        SuperioChipId     = haveInfo ? (int)superioChipId : 0;
 
         if (haveInfo && (caps & 0x1u) != 0)
         {
@@ -390,6 +394,38 @@ internal sealed class SmbusDriverBackend : ISmbusBackend, IDisposable
             || wrBytes < 4)
         {
             _log("[smbus-write] block DeviceIoControl failed: " + Marshal.GetLastWin32Error());
+            status = SmbusStatus.BusError;
+            return false;
+        }
+
+        status = (SmbusStatus)ReadU32(resp, 0);
+        return status == SmbusStatus.Ok;
+    }
+
+    /// <summary>
+    /// Bounded NCT6687 EC RGB register write (IOCTL_BROKER_SUPERIO_RGB_WRITE). Writes 1..32 bytes
+    /// to consecutive EC addresses from <paramref name="ecAddress"/>. The kernel re-validates the
+    /// length and applies the NCT6687 RGB-window brick-guard; while the EC RGB path is
+    /// HW-unvalidated the kernel refuses every write (Forbidden) and SuperioRgbAvailable is false.
+    /// </summary>
+    public bool TrySuperioRgbWrite(int ecAddress, ReadOnlySpan<byte> data, out SmbusStatus status)
+    {
+        status = SmbusStatus.Unavailable;
+        if (_device is null || _device.IsInvalid) return false;
+        if (data.Length is < 1 or > MAX_BLOCK) { status = SmbusStatus.BadRequest; return false; }
+
+        // BROKER_SUPERIO_RGB_WRITE_REQUEST: Version(4) Address(4) Length(4) Block[32]
+        byte[] req = new byte[12 + MAX_BLOCK];
+        WriteU32(req, 0, PROTOCOL_VERSION);
+        WriteU32(req, 4, (uint)ecAddress);
+        WriteU32(req, 8, (uint)data.Length);
+        data.CopyTo(req.AsSpan(12));
+
+        byte[] resp = new byte[4];
+        if (!DeviceIoControl(_device, IOCTL_SIO_RGB, req, (uint)req.Length, resp, (uint)resp.Length, out uint wrBytes, IntPtr.Zero)
+            || wrBytes < 4)
+        {
+            _log("[superio-rgb] DeviceIoControl failed: " + Marshal.GetLastWin32Error());
             status = SmbusStatus.BusError;
             return false;
         }

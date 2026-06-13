@@ -183,6 +183,27 @@ resolves `ram0` → baked `(bus 0, 0x39)` → `IOCTL_SMBUS_WRITE` → in-kernel 
 the address is in an RGB window → ENE write sequence (each LED's 3 color bytes go out as one
 atomic block write; DIRECT mode + APPLY are latched once per controller).
 
+### 5.1 RGB transports & their safety boundaries
+
+DRAM RGB is on the SMBus; **motherboard headers are not** — they need other transports.
+`RgbCatalog` is a DMI-matched board profile of zones, each tagged with a transport; the client
+contract (`rgb.list`/`rgb.set`) is identical across all three. What bounds a write differs:
+
+| Transport | Hardware | Path | Safety boundary | Status |
+|---|---|---|---|---|
+| `SmbusEne` | ENE/Aura DRAM | `IOCTL_SMBUS_WRITE` | **Kernel** address brick-guard (`0x70–0x77` / `0x39–0x3A`) | validated |
+| `SuperioEc` | NCT6687 12V header (JRGB) | `IOCTL_SUPERIO_RGB_WRITE` | **Kernel** EC RGB-register brick-guard | wired but **inert** — `SuperioRgbImplemented`/`CAP_SUPERIO_RGB` off until the EC RGB window is hardware-validated |
+| `UsbHid` | MSI Mystic Light addressable headers | user-mode HID feature reports | **Broker only** — baked report builder, *no kernel guard* | opt-in (`AllowHidRgb`, default off), reduced assurance |
+
+**Driver-stability contract:** adding a board/zone is a **broker-only** change. The kernel
+exposes only stable, class-wide write windows (the SMBus RGB range; the NCT6687 RGB register
+region, a property of the silicon), so new controllers/boards never require a driver recompile —
+which also avoids the re-signed-`.sys` time bomb. The driver changes only for a genuinely new
+transport class or Super-I/O / SMBus vendor family.
+
+The USB-HID path is the **corrected** re-introduction of a user-mode HID transport scoped to RGB;
+the retired Gigabyte IT8297 path stays retired (design record: `docs/GIGABYTE-SUPPORT.md`).
+
 ---
 
 ## 6. Why it's structured this way (key decisions)
