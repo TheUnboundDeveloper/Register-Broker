@@ -27,9 +27,9 @@ jobs:
     name: Bridge build + selftest
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
 
@@ -54,7 +54,7 @@ jobs:
 
       - name: Upload selftest log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: selftest-log
           path: selftest.txt
@@ -64,7 +64,7 @@ jobs:
     name: PowerShell 5.1 parse check
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Parse every .ps1 under Windows PowerShell 5.1
         shell: powershell
