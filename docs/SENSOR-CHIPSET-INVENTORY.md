@@ -82,7 +82,7 @@ present. RGB coverage is DRAM-only today.
 | **MSI** | NCT6687D / NCT6686 (EC-space) | `SuperioNct.c` | ✅ 6687D / 🟡 6686 |
 | **ASUS** | NCT6798D / NCT6796D / NCT6793D / NCT6791D (NCT6775 family) | `SuperioNct6775.c` | 🟡 |
 | **ASRock** | NCT6796D / NCT6779D / NCT6791D (NCT6775 family) | `SuperioNct6775.c` | 🟡 |
-| **Gigabyte** | NCT6798D / NCT6796D on some boards; **ITE IT87xx** on others | `SuperioNct6775.c` (Nuvoton boards only) | 🟡 Nuvoton / 🗄️ ITE archived |
+| **Gigabyte** | NCT6798D / NCT6796D on some boards; **ITE IT87xx** on others | `SuperioNct6775.c` (Nuvoton boards only) | 🟡 Nuvoton / 🗄️ ITE omitted |
 | **EVGA** | NCT6779D / NCT6796D (NCT6775 family) | `SuperioNct6775.c` | 🟡 |
 | **Biostar** | NCT6779D / NCT6796D (NCT6775 family) | `SuperioNct6775.c` | 🟡 |
 
@@ -93,7 +93,9 @@ present. RGB coverage is DRAM-only today.
 >   `BrokerSensorBridge.exe --calibration` to print the detected board DMI + chip id + resolved
 >   catalog on any specific board.
 > - **Gigabyte** boards that use a Nuvoton NCT6775-family Super-I/O for sensors are covered by
->   the new backend; Gigabyte boards that use an **ITE** Super-I/O are **not** (ITE archived).
+>   the new backend; Gigabyte boards that use an **ITE** Super-I/O are **not** — ITE support
+>   was retired: the Gigabyte register system is overly complex and more fragile than the
+>   average board (see `GIGABYTE-SUPPORT.md` for the rationale and design record).
 > - 🟡 entries are register-correct from proven sources but **not yet validated on that exact
 >   silicon** — the dev box is an MSI NCT6687D. Validation on a real board is the remaining step;
 >   the failure mode for an unvalidated *read* is a wrong number, never a brick.
