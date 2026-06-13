@@ -8,7 +8,7 @@ broker (`BrokerSensorBridge`): SMBus reads, named SMU/Super-I/O sensor reads, an
 brick-guarded SMBus writes for RGB. It deliberately exposes **no** physical-memory
 mapping, **no** MSR access, and **no** arbitrary port I/O — that narrow surface is
 what makes it *not* WinRing0. See
-[`../docs/BROKER-DESIGN.md`](../docs/BROKER-DESIGN.md) for the full design.
+[`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) for the full design.
 
 > **Status (2026-06-12).** IOCTLs: `INFO`, `XFER` (read byte/word/block), `SMU_READ`,
 > `SUPERIO_READ`, and `WRITE` (byte/word/**block** — block is op 5, 1..32 bytes via the
@@ -112,5 +112,5 @@ reports `BusCount`/capabilities and the broker gates its catalog on them. No edi
 ## Production note
 
 Test signing is lab-only. A distributable driver that loads under HVCI / Secure Boot
-requires an **EV code-signing certificate + Microsoft attestation signing**. Budget
-and process are tracked in [`../docs/BROKER-DESIGN.md`](../docs/BROKER-DESIGN.md) §7 and §9.
+requires an **EV code-signing certificate + Microsoft attestation signing**. The
+process is documented in [`../docs/SIGNING-AND-DEPLOYMENT.md`](../docs/SIGNING-AND-DEPLOYMENT.md).

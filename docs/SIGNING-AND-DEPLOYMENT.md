@@ -150,6 +150,7 @@ hardened `appsettings.json`, then registers the services.
 The whole point of the architecture is that **signing makes the security story credible, not
 just functional.** A Microsoft-attestation-signed *narrow* driver that exposes only bounded,
 validated transactions — loading under HVCI — is the antithesis of WinRing0 (an
-arbitrary-memory driver on the block list). The phased plan and threat model behind this are
-in [`BROKER-DESIGN.md`](BROKER-DESIGN.md) (see "Phase E — Production signing"); the
-broker-side remaining work is in [`BROKER-ROADMAP.md`](BROKER-ROADMAP.md).
+arbitrary-memory driver on the block list). Production signing (EV certificate + Microsoft
+attestation) is the tracked path to a distributable driver; until it lands, deployments are
+test-signed and lab-only. The trust boundary it protects is summarized in
+[`SECURITY.md`](../SECURITY.md).

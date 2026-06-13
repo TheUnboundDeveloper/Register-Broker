@@ -1,0 +1,74 @@
+name: Hardware validation report
+description: Report results from testing Register Broker on your board (pass OR fail — both are equally valuable)
+title: "Validation: <vendor + board model>"
+labels: ["hardware-validation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing! Follow the procedure in
+        [docs/TESTING.md](../blob/main/docs/TESTING.md) first — it takes ~15 minutes and
+        produces the two files this form asks for (`calib.txt`, `readall.txt`).
+        A *failed* validation is exactly as valuable as a pass: "chip id detected but all
+        temps read 0" pinpoints a register-map fact to re-check.
+  - type: input
+    id: board
+    attributes:
+      label: Board
+      description: Vendor + exact model
+      placeholder: ASUS ROG STRIX B550-F GAMING
+    validations:
+      required: true
+  - type: input
+    id: dmi
+    attributes:
+      label: DMI identity
+      description: From `--calibration` output
+      placeholder: ASUSTeK COMPUTER INC. / ROG STRIX B550-F GAMING
+    validations:
+      required: true
+  - type: input
+    id: chipid
+    attributes:
+      label: Detected Super-I/O chip id
+      description: From `--calibration` output
+      placeholder: "0xD42A"
+    validations:
+      required: true
+  - type: input
+    id: backends
+    attributes:
+      label: Driver backend line
+      description: The `Detected backends:` line from the service log (admin to read — see TESTING.md step 1)
+      placeholder: "Detected backends: AMD FCH (0x790B), AMD SMU (0x1921), NCT6775 (0xD42A) | registered: ..."
+  - type: input
+    id: hardware
+    attributes:
+      label: CPU / RAM
+      placeholder: Ryzen 7 5800X / 2x 16GB DDR4-3600
+    validations:
+      required: true
+  - type: textarea
+    id: results
+    attributes:
+      label: Result table
+      description: One row per sensor — broker value vs HWiNFO value, MATCH / MISMATCH / MISSING
+      placeholder: |
+        nct6775.temp.0   38.0 C    vs  HWiNFO "Motherboard" 38 C     MATCH
+        nct6775.fan.1    644 RPM   vs  HWiNFO "CPU Fan" 645 RPM      MATCH
+        nct6775.volt.2   3.392 V   vs  HWiNFO "+3.3V" 3.392 V        MATCH
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: anomalies
+    attributes:
+      label: Anomalies
+      description: Wrong values, missing channels, errors in readall.txt, log excerpts. A value that is an exact divisor of HWiNFO's (e.g. 1.024 V vs 12.29 V = x12) is a missing calibration scale — report it as such.
+  - type: textarea
+    id: files
+    attributes:
+      label: Attachments
+      description: Drag and drop `calib.txt` and `readall.txt` here.
+    validations:
+      required: true

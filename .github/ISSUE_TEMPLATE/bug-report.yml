@@ -1,0 +1,50 @@
+name: Bug report
+description: Something broke — a crash, a hang, a wrong behavior (for wrong sensor VALUES on untested boards, use the Hardware validation report instead)
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security issues:** do NOT file a public issue — see [SECURITY.md](../blob/main/SECURITY.md)
+        for private reporting.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what actually happened.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Install services with `.\scripts\Install-SensorBrokerService.ps1 -WithRgbControl`
+        2. Run `cmd /c ".\BrokerSensorBridge.exe --client --op=sensor.readall > out.txt 2>&1"`
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: component
+    attributes:
+      label: Component
+      description: Which piece — kernel driver (BrokerSmbus), sensor service (SensorBroker), RGB control (BrokerControl), build/install scripts, docs
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: |
+        Windows build:  Windows 11 Pro 26100
+        Board:          MSI MPG B550I GAMING EDGE MAX WIFI
+        Broker version: 1.0.0 (git commit if built from source)
+        Services:       installed / console mode
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant excerpts — client output, `bridge.log` / `audit.log` (service logs live under `C:\Windows\System32\config\systemprofile\AppData\Local\BrokerSensorBridge\`, admin to read). Redact anything you consider private.
+      render: text

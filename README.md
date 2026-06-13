@@ -82,7 +82,7 @@ RGB support is deliberately narrow today:
   also requires a matching in-kernel allow-list entry — write capability is never
   data-driven. See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) §5.
 - **Future:** broader controller coverage is planned as a separate, license-isolated
-  sidecar process (post-1.0) — see [docs/BROKER-ROADMAP.md](docs/BROKER-ROADMAP.md).
+  sidecar process (post-1.0) — see the design rules in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Security model (the point of the project)
 
@@ -135,8 +135,9 @@ Details: [docs/USER-GUIDE.md](docs/USER-GUIDE.md) (run it) ·
 | Doc | What it covers |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | the four layers, end to end |
-| [docs/BROKER-DESIGN.md](docs/BROKER-DESIGN.md) | threat model, auth, scopes, driver strategy |
 | [docs/CLIENT-PROTOCOL.md](docs/CLIENT-PROTOCOL.md) | the named-pipe wire protocol for consumers |
+| [docs/INTEGRATING.md](docs/INTEGRATING.md) | add sensor/RGB support to your own app (code samples) |
+| [SECURITY.md](SECURITY.md) | the trust boundary + how to report vulnerabilities |
 | [docs/SENSOR-MAP.md](docs/SENSOR-MAP.md) | every served id and where it comes from |
 | [docs/SENSOR-CHIPSET-INVENTORY.md](docs/SENSOR-CHIPSET-INVENTORY.md) | chipset coverage by vendor + status |
 | [docs/CALIBRATION-AND-REGISTRY-PLAN.md](docs/CALIBRATION-AND-REGISTRY-PLAN.md) | data-driven calibration + scaling plan |

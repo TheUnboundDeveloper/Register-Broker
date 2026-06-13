@@ -2,8 +2,8 @@
 
 How the system is structured, where the privilege boundary is, and how a request flows from
 a non-admin app to the hardware and back. For the line-level "how does this actually work,"
-see [IMPLEMENTATION.md](IMPLEMENTATION.md); for the threat model see
-[`BROKER-DESIGN.md`](BROKER-DESIGN.md).
+see [IMPLEMENTATION.md](IMPLEMENTATION.md); for the trust boundary and what counts as a
+vulnerability, see [`SECURITY.md`](../SECURITY.md).
 
 ---
 
@@ -147,8 +147,8 @@ Within the elevated side, a second boundary is the **IOCTL contract**: even the 
 only ask the driver for bounded, named, in-kernel-validated transactions. The driver does not
 trust the broker — it re-validates every field and enforces the write brick-guard itself.
 
-See [`BROKER-DESIGN.md`](BROKER-DESIGN.md) §2 for the adversaries each layer defends
-against.
+The trust boundary — and the attack surface each layer defends — is summarized in
+[`SECURITY.md`](../SECURITY.md).
 
 ---
 
@@ -196,7 +196,7 @@ atomic block write; DIRECT mode + APPLY are latched once per controller).
 | **In-kernel brick-guard** | The kernel refuses writes outside the RGB window regardless of the broker, so a broker bug can't brick a DIMM's SPD. |
 | **Two services (sensor vs control)** | The sensor broker never holds the write capability; RGB write is an opt-in, separately-scoped process. |
 | **Sequential IOCTL queue** | SMBus/SMU/EC share firmware state; serializing all IOCTLs is the single hardware lock. |
-| **RGB is one thin layer; effects are consumer-side** | The broker writes colors (`rgb.set`), nothing more. Animation lives in the consumer, which renders frames and streams per-LED updates — so the privileged surface never grows an effects engine, and every consumer can have its own. Broader controller coverage is planned as a separate license-isolated sidecar process (see `BROKER-ROADMAP.md`), not as broker code. |
+| **RGB is one thin layer; effects are consumer-side** | The broker writes colors (`rgb.set`), nothing more. Animation lives in the consumer, which renders frames and streams per-LED updates — so the privileged surface never grows an effects engine, and every consumer can have its own. Broader controller coverage is planned as a separate license-isolated sidecar process (a deferred post-1.0 design), not as broker code. |
 
 ---
 
@@ -215,5 +215,5 @@ no longer in the tree (the `KIND_ITE` wire value stays reserved so it is never r
 Not yet done: **production driver signing** (today's driver is test-signed — lab machines
 only), flipping `RequireAuthorizedClient` on by default (still audit-only), SMU PM-table
 metrics (power/clocks), and SMBus writes outside the RGB windows (deliberately refused). The
-productionization path is [SIGNING-AND-DEPLOYMENT.md](SIGNING-AND-DEPLOYMENT.md); the broker
-pick-up list is [`BROKER-ROADMAP.md`](BROKER-ROADMAP.md).
+productionization path is [SIGNING-AND-DEPLOYMENT.md](SIGNING-AND-DEPLOYMENT.md); release
+history is in [`CHANGELOG.md`](../CHANGELOG.md).

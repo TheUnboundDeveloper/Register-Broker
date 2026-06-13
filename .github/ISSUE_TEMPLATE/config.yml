@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability (private)
+    url: https://github.com/REPLACE-OWNER/register-broker/security/advisories/new
+    about: Report security issues privately via GitHub Security Advisories — never as a public issue. See SECURITY.md.
+  - name: Porting a new chipset?
+    url: https://github.com/REPLACE-OWNER/register-broker/blob/main/docs/CONTRIBUTING-CHIPSET.md
+    about: The full walkthrough for adding a Super-I/O or SMBus host chip lives in CONTRIBUTING-CHIPSET.md.

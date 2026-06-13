@@ -4,7 +4,7 @@
   Generates a self-signed code-signing cert, trusts it on THIS machine, and
   signs the driver so it can load with test-signing enabled. This is for a
   lab/dev box only -- it is NOT a distributable signature. Production requires
-  an EV certificate + Microsoft attestation signing (see BROKER-DESIGN.md).
+  an EV certificate + Microsoft attestation signing (see docs\SIGNING-AND-DEPLOYMENT.md).
 
   Elevation is only needed to import the cert into the LocalMachine trust
   stores, and test-signing mode loads the driver either way -- so when run

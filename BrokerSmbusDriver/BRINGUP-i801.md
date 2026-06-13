@@ -117,7 +117,7 @@ Test the driver **directly** with the bridge's dev probe — no auth, no consume
       authenticated channel from a non-admin client:
       `--client --op=sensor.read --id=dimm.0` / `--client --control --op=rgb.list`.
 - [ ] Re-test under **HVCI** once you have a properly attestation-signed build — that is
-      the real target environment (see `../docs/BROKER-DESIGN.md` §7, §9).
+      the real target environment (see `../docs/SIGNING-AND-DEPLOYMENT.md`).
 
 ## 7. Definition of done (Intel live)
 

@@ -10,7 +10,7 @@
   the cert into LocalMachine\Root: the broker pins the exact thumbprint and
   accepts an untrusted root (PeerSignature treats CERT_E_UNTRUSTEDROOT as
   "signature intact, pin by thumbprint"). It is NOT a distributable signature —
-  production wants a real (EV) cert. See BROKER-DESIGN.md.
+  production wants a real (EV) cert. See docs\SIGNING-AND-DEPLOYMENT.md.
 
   Usage:
     .\scripts\Sign-BrokerSensorBridge.ps1                       # signs the Release build

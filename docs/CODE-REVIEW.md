@@ -83,8 +83,8 @@ a `ForEachWmiSensor(service, callback)` helper was recommended.
 
 ## Broker / auth design (now implemented — summary)
 
-> The full design lives in [`BROKER-DESIGN.md`](BROKER-DESIGN.md) — threat model,
-> kernel-driver, auth model, SMBus guardrails, and the phased roadmap. The summary
+> The shipped design is documented in [`ARCHITECTURE.md`](ARCHITECTURE.md) and
+> [`IMPLEMENTATION.md`](IMPLEMENTATION.md). The summary
 > below is retained for context and **updated to the shipped protocol v2** (the
 > shared-secret challenge/response originally sketched here was dropped).
 
@@ -112,4 +112,4 @@ services).
 
 > These requirements are now realized in `BrokerSensorBridge` (`BrokerControlServer.cs`,
 > `ClientAuthorization.cs`, `PeerIdentity.cs`, `PeerSignature.cs`, `BrokerPolicy.cs`,
-> `SensorCatalog.cs`, `RgbCatalog.cs`) — see `BROKER-DESIGN.md` §7a–§7d.
+> `SensorCatalog.cs`, `RgbCatalog.cs`) — see `IMPLEMENTATION.md` for how each works.

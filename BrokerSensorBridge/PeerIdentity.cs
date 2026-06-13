@@ -15,7 +15,7 @@ namespace BrokerSensorBridge;
 |   comes from QueryFullProcessImageName, which works across integrity        |
 |   levels for the same user and reports the *real* backing image (it cannot  |
 |   be spoofed by merely naming a process). Residual risk: PID reuse (TOCTOU) |
-|   between connect and query — noted in BROKER-DESIGN.md.                    |
+|   between connect and query — noted in SECURITY.md.                         |
 \*---------------------------------------------------------------------------*/
 internal static class PeerIdentity
 {

@@ -1,0 +1,65 @@
+# Register Broker — release packaging
+#
+# Triggered by pushing a version tag (v1.0.0, v1.1.0, ...). Builds the bridge, zips it
+# with the docs a deployer needs, and opens a DRAFT GitHub release for a human to review
+# and publish.
+#
+# The kernel driver is deliberately NOT in the release zip: until production signing
+# (EV + attestation) lands, the driver is test-signed and must be built + signed on the
+# target machine (docs/TESTING.md, docs/SIGNING-AND-DEPLOYMENT.md). Shipping a
+# test-signed .sys binary would be worse than shipping none.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package bridge + draft release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish bridge (Release)
+        run: dotnet publish BrokerSensorBridge/BrokerSensorBridge.csproj -c Release -o stage/BrokerSensorBridge
+
+      - name: Selftest the release binary
+        shell: pwsh
+        run: |
+          cmd /c "stage\BrokerSensorBridge\BrokerSensorBridge.exe --selftest > selftest.txt 2>&1"
+          $code = $LASTEXITCODE
+          Get-Content selftest.txt
+          if ($code -ne 0) { throw "Selftest FAILED (exit $code) - refusing to package." }
+
+      - name: Stage docs + scripts a deployer needs
+        shell: pwsh
+        run: |
+          Copy-Item LICENSE, THIRD-PARTY-NOTICES.md, CHANGELOG.md, SECURITY.md stage\
+          Copy-Item -Recurse docs stage\docs
+          Copy-Item -Recurse scripts stage\scripts
+          Copy-Item -Recurse BrokerSmbusDriver\scripts stage\driver-scripts
+
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path stage\* -DestinationPath "RegisterBroker-bridge-${{ github.ref_name }}-win-x64.zip"
+
+      - name: Draft GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          body: |
+            **Bridge (broker services) build — the kernel driver is not included.**
+            The driver is test-signed until production signing lands; build + sign it
+            on the target machine per `docs/TESTING.md`. See `CHANGELOG.md` for what
+            changed in this release.
+          files: RegisterBroker-bridge-${{ github.ref_name }}-win-x64.zip

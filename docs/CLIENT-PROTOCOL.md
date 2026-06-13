@@ -15,8 +15,9 @@ There are **two pipes**, same framing and auth model, different scope:
 The sensor broker **never** offers writes; the control service is a separate, write-only
 process. Most consumers only need the sensor broker — §6 covers the control plane.
 
-Authoritative companions: `BROKER-DESIGN.md` (threat model), `SENSOR-MAP.md` (catalog),
-the C# reference client `BrokerSensorBridge/BrokerControlClient.cs`.
+Authoritative companions: `ARCHITECTURE.md` (trust boundaries), `SENSOR-MAP.md` (catalog),
+the C# reference client `BrokerSensorBridge/BrokerControlClient.cs`. For a practical
+walkthrough with copy-paste C#/Python clients, see `INTEGRATING.md`.
 
 ---
 
@@ -170,7 +171,7 @@ so per-LED frame updates aren't rate-limited.
 > music sync) is deliberately the consumer's job: render frames client-side and send
 > per-LED `rgb.set` updates at your own cadence within the rate limit. The broker hosts
 > no effects engine; if effect ops ever exist they will be additive ops dispatched to a
-> separate sidecar process (see `BROKER-ROADMAP.md`, deferred designs), never an engine
+> separate sidecar process (a deferred post-1.0 design), never an engine
 > inside the broker.
 
 ## 7. Minimal client flow (pseudocode)

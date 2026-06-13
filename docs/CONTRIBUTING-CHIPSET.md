@@ -23,7 +23,7 @@ named `{kind, index}` Super-I/O read op, and clients discover the new ids via
 ## 1. Ground rules (the non-negotiables)
 
 These come from the project's security model
-([BROKER-DESIGN.md](BROKER-DESIGN.md)); a PR that violates one will be rejected:
+([ARCHITECTURE.md](ARCHITECTURE.md)); a PR that violates one will be rejected:
 
 - **Register maps live in signed code, never in data.** Your chip's registers are baked
   into the kernel backend; the broker-side channel table is C# code. Nothing

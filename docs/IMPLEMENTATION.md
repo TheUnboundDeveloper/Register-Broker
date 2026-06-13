@@ -76,7 +76,7 @@ which resolves and checks the peer in three layers:
   reply (nothing to fingerprint).
 
 > **Known residual:** a PID-reuse TOCTOU window exists between connect and identity query —
-> accepted for local same-user IPC, documented in BROKER-DESIGN §7a/§10.
+> accepted for local same-user IPC, recorded in `SECURITY.md` (known and accepted).
 
 ## Handshake, sessions, scopes
 

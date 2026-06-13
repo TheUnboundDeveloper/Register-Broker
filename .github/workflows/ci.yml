@@ -1,0 +1,84 @@
+# Register Broker — CI
+#
+# What runs here and why:
+#   * bridge        — publish the .NET broker exactly as a contributor would, then run
+#                     `--selftest`. The selftest is hardware-free by design (MockSmbusBackend):
+#                     calibration regression, chipset/registry gates, auth + scope + rate-limit
+#                     cases all run on a bare runner.
+#   * ps51-parse    — every .ps1 must parse under Windows PowerShell 5.1 (project rule:
+#                     scripts support 5.1; GitHub's `powershell` shell IS 5.1).
+#
+# Deliberately NOT here (yet):
+#   * Kernel driver compile — needs the WDK (~GBs, not on hosted runners). Driver changes
+#     are gated by review + the hardware validation procedure in docs/TESTING.md instead.
+#     If a WDK CI job is ever added, use Build-Driver-DirectLink.ps1 (the MSBuild route
+#     needs the WDK VS extension and fails with MSB8020).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  bridge:
+    name: Bridge build + selftest
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish bridge (Release, default flags — no DevProbes)
+        run: dotnet publish BrokerSensorBridge/BrokerSensorBridge.csproj -c Release -o ci-publish
+
+      - name: Run broker selftest
+        shell: pwsh
+        # The bridge is a WinExe (no console): redirect through cmd or the output is lost.
+        run: |
+          cmd /c "ci-publish\BrokerSensorBridge.exe --selftest > selftest.txt 2>&1"
+          $code = $LASTEXITCODE
+          Get-Content selftest.txt
+          if ($code -ne 0) { throw "Selftest FAILED (exit $code) - see log above." }
+
+      - name: Guard - DevProbes must never be in a default build
+        shell: pwsh
+        run: |
+          if (Select-String -Path selftest.txt -Pattern 'DEV BUILD' -Quiet) {
+            throw "Default build contains the DEV BUILD banner - the DevProbes gate is broken."
+          }
+
+      - name: Upload selftest log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-log
+          path: selftest.txt
+          if-no-files-found: ignore
+
+  ps51-parse:
+    name: PowerShell 5.1 parse check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse every .ps1 under Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $bad = @()
+          Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object {
+            $tokens = $null; $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $bad += "$($_.FullName):$($errors[0].Extent.StartLineNumber) $($errors[0].Message)"
+            }
+          }
+          if ($bad.Count -gt 0) {
+            $bad | ForEach-Object { Write-Host "PARSE ERROR  $_" }
+            throw "$($bad.Count) script(s) do not parse under Windows PowerShell 5.1."
+          }
+          Write-Host "All scripts parse under 5.1."

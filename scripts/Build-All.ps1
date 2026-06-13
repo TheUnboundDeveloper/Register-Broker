@@ -6,13 +6,13 @@
   and baked in.
 
   Canonical locations (the single source of truth):
-    Repo .......... C:\Users\natha\AppData\Roaming\VSC\Register Broker
+    Repo .......... resolved from this script's location (override with -Repo)
     Bridge build .. <repo>\scripts\Build-BrokerSensorBridge.ps1        -> <repo>\publish\BrokerSensorBridge
     Driver build .. <repo>\BrokerSmbusDriver\scripts\Build-Driver-DirectLink.ps1 -> <repo>\BrokerSmbusDriver\x64\Release\BrokerSmbus.sys (auto-test-signed)
     Services run .. the SensorBroker / BrokerControl services point at <repo>\publish\BrokerSensorBridge
 
   Typical use (ELEVATED -- publishing the bridge must stop the running services, which needs admin):
-    cd "C:\Users\natha\AppData\Roaming\VSC\Register Broker"
+    cd "<repo>"
     .\scripts\Build-All.ps1                 # bridge, then restart services
     .\scripts\Build-All.ps1 -Bridge -Clean  # clean rebuild + republish the bridge, restart services
     .\scripts\Build-All.ps1 -InstallServices -WithRgbControl   # (re)create the service definitions
@@ -24,7 +24,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Repo = "C:\Users\natha\AppData\Roaming\VSC\Register Broker",
+    [string]$Repo = (Split-Path -Parent $PSScriptRoot),
 
     [switch]$Bridge,            # build + publish the bridge/services binary
     [switch]$Driver,            # build (+ auto-test-sign) the kernel driver (DirectLink)

@@ -8,6 +8,7 @@ that matches what you want to do.
 | Goal | Read |
 |---|---|
 | **Use it** — read my PC sensors / control my RGB as a normal (non-admin) user | [USER-GUIDE.md](USER-GUIDE.md) |
+| **Integrate it** — add sensor/RGB support to my own application (with code samples) | [INTEGRATING.md](INTEGRATING.md) |
 | **Contribute** — build it, add a sensor or RGB device, send a change | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | **Port a chipset** — add support for a new Super-I/O / SMBus host chip | [CONTRIBUTING-CHIPSET.md](CONTRIBUTING-CHIPSET.md) |
 | **Test on my hardware** — validate an unvalidated chipset and report results | [TESTING.md](TESTING.md) |
@@ -58,8 +59,6 @@ back to the community, but commercial use is available under a separate license.
 
 These predate the guides and remain the source of truth for design decisions:
 
-- [`BROKER-DESIGN.md`](BROKER-DESIGN.md) — threat model, auth model, driver strategy, phased roadmap.
-- [`BROKER-ROADMAP.md`](BROKER-ROADMAP.md) — current "what's left" / pick-up point.
 - [`CLIENT-PROTOCOL.md`](CLIENT-PROTOCOL.md) — the named-pipe wire contract (the integration surface).
 - [`SENSOR-MAP.md`](SENSOR-MAP.md) — the named sensor catalog (baked-in locations).
 - [`SENSOR-CHIPSET-INVENTORY.md`](SENSOR-CHIPSET-INVENTORY.md) — hardware support by chipset and vendor.
