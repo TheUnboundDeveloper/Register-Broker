@@ -36,13 +36,13 @@ back to the community, but commercial use is available under a separate license.
 ## The three pieces
 
 ```
-  Your app / any client            (non-admin)
+  Your app / any client   (non-admin)
             │  named pipe (authenticated, scoped)
             ▼
-  SensorBroker / BrokerControl    (the broker — runs as a service)
+  SensorBroker / BrokerControl (the broker — runs as a service)
             │  narrow IOCTLs (bounded transactions only)
             ▼
-  BrokerSmbus                       (the kernel driver — the only Ring-0 surface)
+  BrokerSmbus (the kernel driver — the only Ring-0 surface)
             │
             ▼
   CPU SMU · Super-I/O · SMBus (RAM/board RGB)

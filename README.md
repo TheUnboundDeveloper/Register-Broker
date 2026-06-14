@@ -26,12 +26,12 @@ kernel-enforced map.
  └────────────┬─────────────┘   └──────────────┬───────────────┘
               │        \\.\BrokerSmbus (SYSTEM+Admins only)
               ▼                                ▼
- ┌─────────────────────────────────────────────────────────────┐
+ ┌──────────────────────────────────────────────────────────────┐
  │ BrokerSmbus kernel driver (non-PnP KMDF, sequential, narrow) │
  │  bounded reads: SMBus · AMD SMU · Super-I/O (named registers)│
  │  bounded writes: SMBus block ≤32 B, in-kernel address        │
  │  allow-list ("brick guard": RGB windows only, never SPD)     │
- └─────────────────────────────────────────────────────────────┘
+ └──────────────────────────────────────────────────────────────┘
               │ SMBus / SMN / LPC port I/O
               ▼
          hardware (CPU SMU · Super-I/O EC · DIMMs · RGB controllers)
