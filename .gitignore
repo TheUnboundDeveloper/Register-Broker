@@ -4,6 +4,8 @@
 
 # --- Internal engineering log (dev-box paths, session history) ---
 CLAUDE.md
+_Footer.md
+_Sidebar.md
 
 # --- .NET (BrokerSensorBridge) ---
 bin/
