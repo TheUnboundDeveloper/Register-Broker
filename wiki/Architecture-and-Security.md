@@ -7,20 +7,20 @@ Register Broker exists to give non-admin applications real low-level hardware ac
 ## The pieces
 
 ```
-┌─────────────────────┐      named pipe (JSON)      ┌──────────────────────────┐
-│  non-admin client    │ ──────────────────────────▶ │  BrokerSensorBridge      │
-│  (your app / CLI)    │   sensors:read / rgb:write   │  (LocalSystem service)   │
-└─────────────────────┘                              │  auth · scopes · policy  │
+┌─────────────────────┐      named pipe (JSON)        ┌──────────────────────────┐
+│  non-admin client   │ ──────────────────────────▶  │  BrokerSensorBridge       │
+│  (your app / CLI)   │   sensors:read / rgb:write    │  (LocalSystem service)   │
+└─────────────────────┘                               │  auth · scopes · policy  │
                                                       │  rate-limit · audit log  │
                                                       │  logical-id → hardware   │
                                                       └────────────┬─────────────┘
                                                                    │ bounded IOCTLs
                                                                    ▼
                                                       ┌──────────────────────────┐
-                                                      │  BrokerSmbus (KMDF)       │
-                                                      │  named-register IOCTLs    │
-                                                      │  in-kernel allow-list +   │
-                                                      │  brick-guards             │
+                                                      │  BrokerSmbus (KMDF)      │
+                                                      │  named-register IOCTLs   │
+                                                      │  in-kernel allow-list +  │
+                                                      │  brick-guards            │
                                                       └──────────────────────────┘
 ```
 
