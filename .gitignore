@@ -4,8 +4,9 @@
 
 # --- Internal engineering log (dev-box paths, session history) ---
 CLAUDE.md
-_Footer.md
-_Sidebar.md
+
+# --- Wiki content (lives in the separate GitHub .wiki.git repo, not here) ---
+/wiki/
 
 # --- .NET (BrokerSensorBridge) ---
 bin/
