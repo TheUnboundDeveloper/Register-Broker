@@ -9,6 +9,41 @@ assembly version, git tags) and the **pipe protocol version** (currently `2`, se
 in the client hello — see `docs/CLIENT-PROTOCOL.md` §8) are independent. New sensors
 and additive ops do not bump the protocol version.
 
+## [1.1.1] — 2026-06-17
+
+Security and robustness hardening from a full-repo code review. No new features;
+backward-compatible (pipe protocol stays v2). Deployed and hardware-validated on the
+dev box (selftest PASS, 33-sensor non-admin catalog, MSI HID RGB).
+
+### Security
+
+- **Client signer pin now matches SHA-256** in addition to SHA-1. `AllowedClientSigners`
+  may list either a 40-hex (SHA-1) or 64-hex (SHA-256) thumbprint; pinning on SHA-256 is
+  recommended (SHA-1 is collision-weak). Existing SHA-1 allowlists keep working.
+- **Pre-auth connection throttle** on the control channel: new connections are rate-limited
+  before any signature verification, so a connect-flood cannot spin `WinVerifyTrust` before a
+  session exists.
+
+### Fixed
+
+- The RGB registry disposes opened MSI HID interfaces that no zone binds, instead of holding
+  the handles open until shutdown.
+- The interactive (console) shutdown path drops its `Console.CancelKeyPress` subscription when
+  shutdown fires.
+- `Install-SensorBrokerService.ps1` checks the `sc.exe create` exit code for the kernel driver
+  (the old service is removed first, so a silent create failure — e.g. a lingering
+  `DELETE_PENDING` handle — no longer leaves no driver service, notably under `-NoStart`).
+
+### Changed
+
+- Driver block-write copy length uses an explicit clamp instead of the `min()` macro (removes a
+  header-availability dependency; behavior identical).
+- NCT6791+ HWM-enable and I/O-space-unlock bit-flips are logged (`DbgPrintEx`) only when they
+  actually change a bit — visibility for that HW-unvalidated family during bring-up.
+- `Install-SensorBrokerService.ps1` accepts SHA-256 signer thumbprints and writes
+  `appsettings.json` with `ConvertTo-Json -Depth 32` (was 8) so a deep config section is never
+  silently truncated.
+
 ## [1.1.0] — 2026-06-13
 
 ### Added — motherboard-header RGB (board-aware, multi-transport)
@@ -87,5 +122,6 @@ First public release.
 - 2026-06-07/08 — broker architecture locked; protocol v2 identity auth; first
   hardware validation pass; policy hardening.
 
-[1.1.0]: https://github.com/REPLACE-OWNER/register-broker/releases/tag/v1.1.0
-[1.0.0]: https://github.com/REPLACE-OWNER/register-broker/releases/tag/v1.0.0
+[1.1.1]: https://github.com/TheUnboundDeveloper/Register-Broker/releases/tag/v1.1.1
+[1.1.0]: https://github.com/TheUnboundDeveloper/Register-Broker/releases/tag/v1.1.0
+[1.0.0]: https://github.com/TheUnboundDeveloper/Register-Broker/releases/tag/v1.0.0
