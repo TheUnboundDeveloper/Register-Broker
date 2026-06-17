@@ -57,6 +57,12 @@ internal sealed class BrokerControlServer
     // client cannot reset its token bucket by reconnecting (the limiter outlives the
     // session). Pruned lazily when an identity has no active sessions.
     private readonly ConcurrentDictionary<string, RateLimiter> _limitersByIdentity = new();
+
+    // Global pre-auth connection throttle: bounds how fast NEW connections can force the
+    // expensive peer-signature verification (WinVerifyTrust hashes the client image) before
+    // any session exists. Generous — legitimate clients connect rarely; this only blunts a
+    // same-user connect-flood. Identity-keyed limits can't apply yet (no identity pre-auth).
+    private readonly RateLimiter _connectionLimiter;
     // Active session count per identity (guarded by _sessionGate) for the per-identity cap.
     private readonly Dictionary<string, int> _sessionsByIdentity = new();
 
@@ -78,6 +84,9 @@ internal sealed class BrokerControlServer
         _policy = policy ?? BrokerPolicy.Default;
         _allowRgbWrite = allowRgbWrite;
         _rgb = rgb;
+        // Allow connection attempts at the per-session op rate (burst), which is far above any
+        // legitimate connect cadence yet caps a flood that would otherwise spin WinVerifyTrust.
+        _connectionLimiter = new RateLimiter(_policy.MaxOpsPerSecond, _policy.RateBurst);
 
         /* sensors:read is always offered; smbus:read only when a driver backs it. rgb:write
            is offered ONLY by the dedicated control service (allowRgbWrite) AND when the RGB
@@ -228,6 +237,18 @@ internal sealed class BrokerControlServer
         {
             try
             {
+                /*-----------------------------------------------------------*\
+                | Pre-auth connection throttle: bound the rate of new         |
+                | connections before doing any expensive per-peer work        |
+                | (signature verification). Generous; a flood is dropped       |
+                | with no reply, learning nothing.                            |
+                \*-----------------------------------------------------------*/
+                if (!_connectionLimiter.TryConsume())
+                {
+                    _audit("REJECT connect-throttle");
+                    return;
+                }
+
                 /*-----------------------------------------------------------*\
                 | Drop remote (SMB) clients first: this is a local-only       |
                 | broker, and remote peers would otherwise be served in       |

@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
 namespace BrokerSensorBridge;
@@ -68,14 +69,18 @@ internal static class PeerSignature
 
     /// <summary>
     /// True if <paramref name="imagePath"/> has an intact Authenticode signature.
-    /// On success, <paramref name="thumbprint"/> is the signer's SHA-1 thumbprint
-    /// (uppercase hex, matching certmgr) and <paramref name="chainTrusted"/> tells
-    /// whether the cert chained to a trusted root (false for a pinned test cert).
+    /// On success, <paramref name="thumbprint"/> is the signer's SHA-1 thumbprint and
+    /// <paramref name="thumbprintSha256"/> the SHA-256 thumbprint (both uppercase hex,
+    /// matching certmgr); pin on the SHA-256 value going forward (SHA-1 is collision-weak,
+    /// kept only for back-compat with existing allowlists). <paramref name="chainTrusted"/>
+    /// tells whether the cert chained to a trusted root (false for a pinned test cert).
     /// Returns false for unsigned, tampered, expired, or revoked images.
     /// </summary>
-    public static bool TryGetSigner(string? imagePath, out string? thumbprint, out string? subject, out bool chainTrusted)
+    public static bool TryGetSigner(string? imagePath, out string? thumbprint, out string? thumbprintSha256,
+                                    out string? subject, out bool chainTrusted)
     {
         thumbprint = null;
+        thumbprintSha256 = null;
         subject = null;
         chainTrusted = false;
 
@@ -93,13 +98,15 @@ internal static class PeerSignature
                 return false;                    // NOSIGNATURE / BAD_DIGEST / EXPIRED / REVOKED -> reject
 
             using var raw = X509Certificate.CreateFromSignedFile(imagePath);
-            thumbprint = raw.GetCertHashString(); // SHA-1, uppercase hex
+            thumbprint = raw.GetCertHashString();                          // SHA-1, uppercase hex
+            thumbprintSha256 = raw.GetCertHashString(HashAlgorithmName.SHA256); // SHA-256, uppercase hex
             subject = raw.Subject;
             return !string.IsNullOrEmpty(thumbprint);
         }
         catch
         {
             thumbprint = null;
+            thumbprintSha256 = null;
             subject = null;
             chainTrusted = false;
             return false;

@@ -180,8 +180,8 @@ if ((Test-Path $AppSettings) -and ($setAuth -or $WithHidRgb)) {
         # Validate inputs up front: a malformed thumbprint/path would silently produce a
         # dead allowlist that locks out every client while RequireAuthorizedClient is ON.
         foreach ($s in $AllowedClientSigners) {
-            if (($s -replace '[\s:-]', '') -notmatch '^[0-9A-Fa-f]{40}$') {
-                throw "AllowedClientSigners entry '$s' is not a 40-hex-char SHA-1 thumbprint."
+            if (($s -replace '[\s:-]', '') -notmatch '^([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$') {
+                throw "AllowedClientSigners entry '$s' is not a 40-hex SHA-1 or 64-hex SHA-256 thumbprint."
             }
         }
         foreach ($p in $AllowedClientPaths) {
@@ -205,7 +205,9 @@ if ((Test-Path $AppSettings) -and ($setAuth -or $WithHidRgb)) {
 
     # Write BOM-less UTF-8 deterministically. Windows PowerShell 5.1 'Set-Content -Encoding UTF8'
     # emits a BOM; .NET tolerates it, but BOM-less keeps the file byte-identical across shells.
-    [System.IO.File]::WriteAllText($AppSettings, ($cfg | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
+    # Depth 32 (well past any real appsettings nesting) so ConvertTo-Json never silently
+    # truncates a deep section into a string.
+    [System.IO.File]::WriteAllText($AppSettings, ($cfg | ConvertTo-Json -Depth 32), (New-Object System.Text.UTF8Encoding($false)))
 }
 
 #--------------------------------------------------------------------------
@@ -217,6 +219,12 @@ if (-not $SkipDriver) {
     Remove-ServiceIfPresent $DriverServiceName
     Write-Host "[driver] Creating kernel service '$DriverServiceName' -> $SysPath"
     sc.exe create $DriverServiceName type= kernel start= demand binPath= "$SysPath" DisplayName= "Register Broker SMBus Driver" | Out-Host
+    # sc.exe is a native exe — a non-zero exit does NOT throw. The old service was already
+    # removed above, so a silent create failure (e.g. 1072 DELETE_PENDING from a lingering
+    # handle) would otherwise leave NO driver service, especially under -NoStart. Check it.
+    if ($LASTEXITCODE -ne 0) {
+        throw "sc.exe create '$DriverServiceName' failed (exit $LASTEXITCODE). The previous driver service was already removed; resolve the cause (a lingering DELETE_PENDING handle / open SCM console usually clears on a retry) and re-run this installer."
+    }
     if (-not $NoStart) {
         Write-Host "[driver] Starting '$DriverServiceName'"
         sc.exe start $DriverServiceName | Out-Host

@@ -203,11 +203,15 @@ internal static class Program
     private static CancellationToken ConsoleShutdownToken()
     {
         var cts = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, e) =>
+        ConsoleCancelEventHandler handler = (_, e) =>
         {
             e.Cancel = true;            // shut down gracefully instead of hard-killing
             cts.Cancel();
         };
+        Console.CancelKeyPress += handler;
+        // Drop the static event subscription once shutdown fires so the handler (and the CTS it
+        // captures) don't outlive their use on the long-lived Console.CancelKeyPress event.
+        cts.Token.Register(() => Console.CancelKeyPress -= handler);
         return cts.Token;
     }
 
@@ -778,13 +782,19 @@ internal static class Program
         int failures = 0;
 
         string signed = Path.Combine(Environment.SystemDirectory, "kernel32.dll");
-        bool okSigned = PeerSignature.TryGetSigner(signed, out string? thumb, out string? subject, out bool trusted);
+        bool okSigned = PeerSignature.TryGetSigner(signed, out string? thumb, out string? thumb256, out string? subject, out bool trusted);
         bool pass1 = okSigned && !string.IsNullOrEmpty(thumb);
-        Console.WriteLine($"  [{(pass1 ? "PASS" : "FAIL")}] signature: {Path.GetFileName(signed)} -> signed={okSigned} trusted={trusted} thumb={thumb} subject={subject}");
+        Console.WriteLine($"  [{(pass1 ? "PASS" : "FAIL")}] signature: {Path.GetFileName(signed)} -> signed={okSigned} trusted={trusted} sha1={thumb} subject={subject}");
         if (!pass1) failures++;
 
+        // SHA-256 thumbprint must also be produced (40 hex for SHA-1, 64 for SHA-256) so a
+        // signer allowlist can pin on the stronger hash.
+        bool pass1b = okSigned && (thumb256?.Length == 64) && (thumb?.Length == 40);
+        Console.WriteLine($"  [{(pass1b ? "PASS" : "FAIL")}] signature: dual thumbprint -> sha256={thumb256}");
+        if (!pass1b) failures++;
+
         string bogus = Path.Combine(Path.GetTempPath(), "definitely-not-a-signed-binary.zzz");
-        bool okBogus = PeerSignature.TryGetSigner(bogus, out _, out _, out _);
+        bool okBogus = PeerSignature.TryGetSigner(bogus, out _, out _, out _, out _);
         bool pass2 = !okBogus;
         Console.WriteLine($"  [{(pass2 ? "PASS" : "FAIL")}] signature: missing path -> signed={okBogus} (expected false)");
         if (!pass2) failures++;

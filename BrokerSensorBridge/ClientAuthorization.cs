@@ -34,7 +34,7 @@ internal sealed class ClientAuthorization
 {
     private readonly bool _require;
     private readonly string[] _allowedPaths;
-    private readonly string[] _allowedSigners;   // normalized SHA-1 thumbprints (uppercase hex, no separators)
+    private readonly string[] _allowedSigners;   // normalized thumbprints (uppercase hex, no separators) — SHA-1 (40) or SHA-256 (64)
     private readonly Action<string> _log;
 
     public ClientAuthorization(bool requireAuthorizedClient, string[]? allowedClientPaths,
@@ -85,11 +85,15 @@ internal sealed class ClientAuthorization
         string signerInfo = "";
         if (_allowedSigners.Length > 0 && image != null)
         {
-            if (PeerSignature.TryGetSigner(image, out string? thumb, out string? subject, out bool chainTrusted))
+            if (PeerSignature.TryGetSigner(image, out string? thumb, out string? thumb256, out string? subject, out bool chainTrusted))
             {
-                string normThumb = (thumb ?? "").Replace(" ", "").ToUpperInvariant();
-                signerMatch = _allowedSigners.Contains(normThumb);
-                signerInfo = $" signer={subject} thumbprint={thumb} chainTrusted={chainTrusted}";
+                // Match either the SHA-1 or the SHA-256 thumbprint, so an allowlist may pin on
+                // the stronger SHA-256 value (recommended) while existing SHA-1 pins keep working.
+                string normSha1   = (thumb ?? "").Replace(" ", "").ToUpperInvariant();
+                string normSha256 = (thumb256 ?? "").Replace(" ", "").ToUpperInvariant();
+                signerMatch = (normSha1.Length   > 0 && _allowedSigners.Contains(normSha1))
+                           || (normSha256.Length > 0 && _allowedSigners.Contains(normSha256));
+                signerInfo = $" signer={subject} sha1={thumb} sha256={thumb256} chainTrusted={chainTrusted}";
             }
             else
             {

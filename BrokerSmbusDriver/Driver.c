@@ -317,9 +317,11 @@ VOID BrokerSmbusEvtIoDeviceControl(WDFQUEUE Queue, WDFREQUEST Request,
         status = WdfRequestRetrieveOutputBuffer(Request, sizeof(*resp), &outBuf, &bufLen);
         if (!NT_SUCCESS(status)) break;
 
-        /* Snapshot before zeroing the response (METHOD_BUFFERED aliases the buffers). */
+        /* Snapshot before zeroing the response (METHOD_BUFFERED aliases the buffers).
+           Explicit clamp (not the min() macro) so the copy length never depends on a
+           header-provided helper being in scope. */
         RtlZeroMemory(&reqLocal, sizeof(reqLocal));
-        RtlCopyMemory(&reqLocal, inBuf, min(inLen, sizeof(reqLocal)));
+        RtlCopyMemory(&reqLocal, inBuf, (inLen < sizeof(reqLocal)) ? inLen : sizeof(reqLocal));
         resp = (BROKER_SMBUS_WRITE_RESPONSE*)outBuf;
         RtlZeroMemory(resp, sizeof(*resp));
 

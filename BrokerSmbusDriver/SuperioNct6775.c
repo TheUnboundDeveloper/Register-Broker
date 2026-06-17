@@ -192,21 +192,34 @@ VOID SuperioNct6775Detect(SMBUS_CONTROLLER* Controller)
             base = (USHORT)(raw & HWM_BASE_ALIGN);             /* IOREGION_ALIGNMENT */
 
             /* Activate the HWM logical device if it isn't already (Linux probe: set
-               SIO_REG_ENABLE bit0). Harmless if already enabled. */
+               SIO_REG_ENABLE bit0). Harmless if already enabled. Log only when we actually
+               flip the bit, so a hardware mutation on this (HW-unvalidated) family is visible
+               during bring-up. */
             {
                 UCHAR en = SioInb(ioreg, SIO_REG_ENABLE);
                 if ((en & 0x01) == 0)
+                {
                     SioOutb(ioreg, SIO_REG_ENABLE, (UCHAR)(en | 0x01));
+                    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
+                        "BrokerSmbus: NCT6775(0x%04X) enabled HWM logical device (SIO 0x%02X bit0)\n",
+                        (unsigned int)id, (unsigned int)SIO_REG_ENABLE);
+                }
             }
 
             /* NCT6791+ : clear the HWM I/O-space lock (SIO CR 0x28 bit 0x10) so the HWM
                register window is reachable. Verbatim read-modify-write of one bit; only
-               on the chips that documentedly need it. */
+               on the chips that documentedly need it. Log only when the bit is actually
+               cleared (the security-relevant mutation). */
             if (Nct6775NeedsIoSpaceUnlock(id))
             {
                 UCHAR opt = SioInb(ioreg, SIO_REG_IO_SPACE_LOCK);
                 if (opt & IO_SPACE_LOCK_BIT)
+                {
                     SioOutb(ioreg, SIO_REG_IO_SPACE_LOCK, (UCHAR)(opt & ~IO_SPACE_LOCK_BIT));
+                    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
+                        "BrokerSmbus: NCT6775(0x%04X) cleared HWM I/O-space lock (SIO 0x%02X bit 0x%02X)\n",
+                        (unsigned int)id, (unsigned int)SIO_REG_IO_SPACE_LOCK, (unsigned int)IO_SPACE_LOCK_BIT);
+                }
             }
 
             SioExit(ioreg);

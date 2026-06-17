@@ -53,6 +53,7 @@ internal sealed class RgbRegistry : IDisposable
 
         var list = new List<IRgbController>();
         var hidDevices = new List<HidDevice>();
+        var usedHid = new HashSet<HidDevice>();   // HID interfaces actually bound to a zone
         IReadOnlyList<HidDevice>? hids = null;   // opened lazily, only if a UsbHid zone needs it
 
         foreach (RgbZone z in profile.Zones)
@@ -85,6 +86,7 @@ internal sealed class RgbRegistry : IDisposable
                         log($"[rgb] zone '{zone.Id}' -> HID PID 0x{hids[sel].ProductId:X4}"
                           + (zone.HidProductId != 0 ? " (pinned)" : " (unpinned — pin HidProductId in the profile)"));
                         list.Add(new MysticLightHidController(hids[sel], zone));
+                        usedHid.Add(hids[sel]);
                     }
                     else if (zone.HidProductId != 0)
                         log($"[rgb] zone '{zone.Id}': pinned Mystic Light PID 0x{zone.HidProductId:X4} not found at VID 0x{MysticLightVendorId:X4}; skipped");
@@ -95,6 +97,19 @@ internal sealed class RgbRegistry : IDisposable
                 default:
                     log($"[rgb] zone '{zone.Id}' ({zone.Kind}/{zone.Transport}) not available on this host; skipped");
                     break;
+            }
+        }
+
+        /* Close any opened MSI HID interfaces that no zone selected (e.g. the non-RGB MSI
+           interface enumerated alongside the controller) instead of holding their handles
+           open for the whole service lifetime. Only zone-bound interfaces survive in _hid. */
+        for (int i = hidDevices.Count - 1; i >= 0; i--)
+        {
+            if (!usedHid.Contains(hidDevices[i]))
+            {
+                log($"[rgb] closing unused HID interface PID 0x{hidDevices[i].ProductId:X4} (no zone bound)");
+                hidDevices[i].Dispose();
+                hidDevices.RemoveAt(i);
             }
         }
 
