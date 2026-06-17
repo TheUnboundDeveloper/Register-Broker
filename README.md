@@ -46,6 +46,37 @@ registers live; calibration **data** (JSON, no addresses) maps them to human lab
 per board; clients get values by **id** through an authenticated, rate-limited,
 audited broker. Privilege is scoped to one small service instead of every consumer.
 
+## Vision
+
+Register Broker isn't really about RGB. RGB is the proof.
+
+The convenience features people actually want — read a temperature, set an LED color,
+nudge a fan curve — are gated behind software that takes far more than it needs:
+elevated apps, broad kernel drivers (often WinRing0, on Microsoft's vulnerable-driver
+block list), raw register access, and always-on privileged services. Gamers, builders,
+and non-technical users install proprietary monitoring and lighting suites with no way
+to know how much of their system they just handed over.
+
+The broker model inverts that. Privilege collapses into one small, narrow, auditable
+driver that does only bounded, named operations; every consumer stays non-admin; access
+is validated, scoped, rate-limited, audited, and exposed through a safe abstraction
+instead of uncontrolled register traffic — which also removes a whole class of crashes
+and bricks caused by software poking hardware it doesn't understand.
+
+A real third-party RGB application already drives hardware through the broker with no
+elevation — the model works. (That tool is an independent, pre-existing project used
+only as a convenient live consumer; it is not affiliated with, nor an endorser of, this
+framework.) The next milestone is production driver signing, so it runs outside Windows
+test mode and coexists cleanly with modern Windows security (Secure Boot, HVCI,
+vulnerable-driver blocking).
+
+From there the same pattern generalizes far past lighting: sensor monitoring, fan
+control, diagnostics, and motherboard utilities all lean on elevation for convenience,
+not necessity. The long-term goal is a standardized, non-privileged Windows
+hardware-access surface — where reading a sensor or setting a color is a safe, ordinary
+capability, and the pressure is on vendors to behave better instead of on users to
+trust blindly.
+
 ## What works today
 
 **33-sensor catalog** served to non-admin clients over authenticated pipe; RGB drivable on DRAM **and motherboard headers**.
