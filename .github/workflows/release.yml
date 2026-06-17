@@ -1,65 +1,116 @@
-# Register Broker — release packaging
+# Register Broker - automatic release on version bump
 #
-# Triggered by pushing a version tag (v1.0.0, v1.1.0, ...). Builds the bridge, zips it
-# with the docs a deployer needs, and opens a DRAFT GitHub release for a human to review
-# and publish.
+# Fires on every push to main. Reads BrokerSensorBridge's <Version>; if no matching
+# vX.Y.Z tag exists yet (i.e. the version was just bumped), it runs the selftest gate,
+# creates and pushes an annotated tag, and opens a DRAFT GitHub release with generated
+# notes. If the tag already exists the run is a no-op, so ordinary pushes do nothing.
 #
-# The kernel driver is deliberately NOT in the release zip: until production signing
-# (EV + attestation) lands, the driver is test-signed and must be built + signed on the
-# target machine (docs/TESTING.md, docs/SIGNING-AND-DEPLOYMENT.md). Shipping a
-# test-signed .sys binary would be worse than shipping none.
+# To cut a release: bump <Version> in BrokerSensorBridge/BrokerSensorBridge.csproj, add a
+# CHANGELOG entry, and push to main. (workflow_dispatch is also available for a manual run.)
+#
+# PACKAGING IS INTENTIONALLY EMPTY. No binary artifacts are attached until the kernel
+# driver is PRODUCTION-signed (EV + attestation). A test-signed .sys - or a bridge that
+# requires one - must not be distributed; shipping it would be worse than shipping none.
+# When production signing lands, re-enable the commented publish/zip/attach steps below
+# and add `files:` back to the release step.
 
 name: Release
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  package:
-    name: Package bridge + draft release
+  release:
+    name: Tag + draft release on version bump
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Read version from csproj
+        id: ver
+        shell: pwsh
+        run: |
+          [xml]$proj = Get-Content BrokerSensorBridge/BrokerSensorBridge.csproj
+          $v = @($proj.Project.PropertyGroup.Version | Where-Object { $_ })[0]
+          if (-not $v) { throw "Could not read <Version> from BrokerSensorBridge.csproj." }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "tag=v$v"    >> $env:GITHUB_OUTPUT
+          Write-Host "Detected version $v (tag v$v)"
+
+      - name: Skip if the tag already exists
+        id: check
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.ver.outputs.tag }}"
+          if (git tag -l $tag) {
+            Write-Host "$tag already exists - nothing to release."
+            "new=false" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "$tag is new - releasing."
+            "new=true" >> $env:GITHUB_OUTPUT
+          }
 
       - uses: actions/setup-dotnet@v5
+        if: steps.check.outputs.new == 'true'
         with:
           dotnet-version: 8.0.x
 
-      - name: Publish bridge (Release)
-        run: dotnet publish BrokerSensorBridge/BrokerSensorBridge.csproj -c Release -o stage/BrokerSensorBridge
-
-      - name: Selftest the release binary
+      - name: Selftest gate (build bridge, run --selftest)
+        if: steps.check.outputs.new == 'true'
         shell: pwsh
         run: |
+          dotnet publish BrokerSensorBridge/BrokerSensorBridge.csproj -c Release -o stage/BrokerSensorBridge
           cmd /c "stage\BrokerSensorBridge\BrokerSensorBridge.exe --selftest > selftest.txt 2>&1"
           $code = $LASTEXITCODE
           Get-Content selftest.txt
-          if ($code -ne 0) { throw "Selftest FAILED (exit $code) - refusing to package." }
+          if ($code -ne 0) { throw "Selftest FAILED (exit $code) - refusing to release." }
 
-      - name: Stage docs + scripts a deployer needs
+      - name: Create and push annotated tag
+        if: steps.check.outputs.new == 'true'
         shell: pwsh
         run: |
-          Copy-Item LICENSE, THIRD-PARTY-NOTICES.md, CHANGELOG.md, SECURITY.md stage\
-          Copy-Item -Recurse docs stage\docs
-          Copy-Item -Recurse scripts stage\scripts
-          Copy-Item -Recurse BrokerSmbusDriver\scripts stage\driver-scripts
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.ver.outputs.tag }}" -m "Register Broker ${{ steps.ver.outputs.tag }} (auto)"
+          git push origin "${{ steps.ver.outputs.tag }}"
 
-      - name: Zip
-        shell: pwsh
-        run: Compress-Archive -Path stage\* -DestinationPath "RegisterBroker-bridge-${{ github.ref_name }}-win-x64.zip"
-
-      - name: Draft GitHub release
+      - name: Draft GitHub release (NO binaries - see header)
+        if: steps.check.outputs.new == 'true'
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
           draft: true
           generate_release_notes: true
           body: |
-            **Bridge (broker services) build — the kernel driver is not included.**
-            The driver is test-signed until production signing lands; build + sign it
-            on the target machine per `docs/TESTING.md`. See `CHANGELOG.md` for what
-            changed in this release.
-          files: RegisterBroker-bridge-${{ github.ref_name }}-win-x64.zip
+            See `CHANGELOG.md` for what changed in this release.
+
+            **No binaries are attached.** The kernel driver is test-signed until production
+            signing (EV + attestation) lands; until then it must be built and signed on the
+            target machine per `docs/TESTING.md` / `docs/SIGNING-AND-DEPLOYMENT.md`.
+            Distributable packages will be added to releases once a production-signed driver
+            exists.
+
+      # ---------------------------------------------------------------------------
+      # WHEN PRODUCTION SIGNING LANDS, re-enable packaging (and add `files:` above):
+      #
+      #   - name: Stage docs + scripts a deployer needs
+      #     if: steps.check.outputs.new == 'true'
+      #     shell: pwsh
+      #     run: |
+      #       Copy-Item LICENSE, THIRD-PARTY-NOTICES.md, CHANGELOG.md, SECURITY.md stage\
+      #       Copy-Item -Recurse docs stage\docs
+      #       Copy-Item -Recurse scripts stage\scripts
+      #   - name: Zip
+      #     if: steps.check.outputs.new == 'true'
+      #     shell: pwsh
+      #     run: Compress-Archive -Path stage\* -DestinationPath "RegisterBroker-${{ steps.ver.outputs.tag }}-win-x64.zip"
+      #   then add to the release step:  files: RegisterBroker-${{ steps.ver.outputs.tag }}-win-x64.zip
+      # ---------------------------------------------------------------------------
