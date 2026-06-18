@@ -91,11 +91,13 @@ All are elevated, and all redirect via `cmd` to capture WinExe stdout.
 SPD byte 2 reads `0x0C` on DDR4 / `0x12` on DDR5 — the canonical "is the read path alive"
 check. Walk `--bus=0..3` to find which segment your DIMMs are on.
 
-### `--smu-read` — AMD CPU temperature register
+### `--smu-read` — AMD CPU temperature + voltage registers
 ```
 --smu-read [--tctl-offset=<°C>]
 ```
-Reads the raw SMU reported-temp register and applies the `k10temp` decode. Compare to HWiNFO.
+Reads the raw SMU reported-temp register (and per-CCD temps), plus the SVI2 core/SoC voltage
+planes when the CPU model exposes them (Matisse/Vermeer); applies the `k10temp` / `zenpower`
+decodes. Compare to HWiNFO.
 
 ### `--superio-read` — Nuvoton Super-I/O temps + fans
 ```

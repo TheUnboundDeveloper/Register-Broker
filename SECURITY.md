@@ -65,5 +65,5 @@ impact beyond what's described below and in `docs/ARCHITECTURE.md`:
 
 | Version | Supported |
 |---|---|
-| latest release (1.0.x) | ✅ |
+| latest release (1.4.x) | ✅ |
 | anything older | ❌ — update first |

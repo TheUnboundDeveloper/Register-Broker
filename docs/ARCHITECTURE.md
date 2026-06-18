@@ -60,7 +60,8 @@ Ring-0 surface is a tiny, reviewable IOCTL set instead of "give me any memory."
                  ▼
  ┌──────────────────────────────────────────────────────────────────────────┐
  │ LAYER 1 — Hardware                                                       │
- │   • AMD SMU (SMN via PCI cfg) — CPU temperature (Tctl + per-CCD)         │
+ │   • AMD SMU (SMN via PCI cfg) — CPU temperature (Tctl + per-CCD) +       │
+ │     core/SoC voltage (SVI2, Matisse/Vermeer)                            │
  │   • Nuvoton Super-I/O (LPC/EC) — board temps + fans + voltages           │
  │     (NCT668x EC family; NCT6775 bank-select family)                      │
  │   • SMBus host controller (AMD FCH / Intel i801) — RAM/board RGB + SPD   │
@@ -243,6 +244,9 @@ no longer in the tree (the `KIND_ITE` wire value stays reserved so it is never r
 
 Not yet done: **production driver signing** (today's driver is test-signed — lab machines
 only), flipping `RequireAuthorizedClient` on by default (still audit-only), SMU PM-table
-metrics (power/clocks), and SMBus writes outside the RGB windows (deliberately refused). The
+metrics (CPU package power / clocks — these need the SMU mailbox + a physical-memory read of
+the DMA'd table, which the narrow driver deliberately won't do; CPU **voltages** shipped in
+1.4.0 because they read as fixed named registers), and SMBus writes outside the RGB windows
+(deliberately refused). The
 productionization path is [SIGNING-AND-DEPLOYMENT.md](SIGNING-AND-DEPLOYMENT.md); release
 history is in [`CHANGELOG.md`](../CHANGELOG.md).

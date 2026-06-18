@@ -23,7 +23,7 @@ that matches what you want to do.
 ## What this project is, in one paragraph
 
 **Register Broker** — the Universal Low-Level Hardware Access Framework — lets **non-admin**
-applications read privileged PC sensors (CPU/board temperatures, fans) and drive **RGB
+applications read privileged PC sensors (CPU/board temperatures, fans, voltages) and drive **RGB
 lighting** (RAM, motherboard) **without** loading a vulnerable kernel driver like WinRing0
 into every app and **without** running the whole stack as administrator. It does this with
 a small **broker**: one narrowly-privileged service reads the hardware once, behind a

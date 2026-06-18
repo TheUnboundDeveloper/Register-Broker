@@ -181,7 +181,9 @@ still send only the original 24-byte V1 prefix (`BROKER_SMBUS_WRITE_REQUEST_V1_S
 
 ### Named sensors
 - `BROKER_SMU_SENSOR`: `BrokerSmuCpuTemp = 0` (Tctl), `BrokerSmuCcd0Temp = 1` …
-  `BrokerSmuCcd7Temp = 8` (per-CCD, valid-bit `0x800` checked broker-side).
+  `BrokerSmuCcd7Temp = 8` (per-CCD, valid-bit `0x800` checked broker-side),
+  `BrokerSmuCoreVoltage = 9` / `BrokerSmuSocVoltage = 10` (SVI2 core/SoC voltage, offered
+  only on models with a known telemetry plane — Matisse 17h/0x71, Vermeer 19h/0x21).
 - `BROKER_SUPERIO_KIND`: `BrokerSuperioTemp = 0`, `BrokerSuperioFan = 1`,
   `BrokerSuperioVoltage = 2`. Index is bounded per kind *per detected backend*
   (NCT668x EC: 7 temps / 8 fans / 16 volts; NCT6775 family: 6 / 7 / 16).

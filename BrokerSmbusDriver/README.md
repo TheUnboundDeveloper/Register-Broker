@@ -19,8 +19,9 @@ what makes it *not* WinRing0. See
 > - **AMD FCH (`SmbusAmd.c`) — HARDWARE-VALIDATED**, including block write and the
 >   two-phase completion poll (KERNCZ gate: device `0x790B` rev ≥ `0x51` or `0x780B`
 >   rev ≥ `0x59`; 4-way port mux). Ported from Linux `i2c-piix4`.
-> - **AMD SMU (`SmuAmd.c`) — HARDWARE-VALIDATED** (Ryzen Tctl + per-CCD, named sensors,
->   addresses baked in-kernel; ported from `k10temp`/`zenpower`).
+> - **AMD SMU (`SmuAmd.c`) — HARDWARE-VALIDATED** (Ryzen Tctl + per-CCD temps + core/SoC
+>   voltage via SVI2 telemetry on Matisse/Vermeer — named sensors, addresses baked
+>   in-kernel; ported from `k10temp` / `zenpower`).
 > - **Nuvoton Super-I/O** — `SuperioNct.c` (NCT668x EC family: NCT6683/6686/6687D —
 >   **6687D hardware-validated**, the others built-unvalidated) + `SuperioNct6775.c`
 >   (NCT6775 bank-select family: 6779/6791–6798 — **built, hardware-unvalidated**).

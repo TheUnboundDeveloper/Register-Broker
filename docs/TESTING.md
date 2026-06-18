@@ -12,6 +12,7 @@ moves a 🟡 to a ✅ for everyone.
 | **Nuvoton NCT6775 family** (6779/6791/6792/6793/6795/6796/6797/6798) | most ASUS, ASRock, EVGA, Biostar; many Gigabyte | 🟡 implemented, unvalidated |
 | **Nuvoton NCT6683 / NCT6686** (EC family) | many MSI (NCT6687D is ✅ validated) | 🟡 implemented, unvalidated |
 | **Intel i801 SMBus host** | any Intel chipset board | ⬜ written, unvalidated (read path) |
+| **AMD SMU SVI2 voltages** (`smu.cpu.vcore`, `smu.soc.voltage`) | Ryzen Matisse (17h/0x71, Zen 2) / Vermeer (19h/0x21, Zen 3) desktop | ✅ Vermeer (5800X3D) · 🟡 Matisse (built, unvalidated) |
 
 Full status detail: [SENSOR-CHIPSET-INVENTORY.md](SENSOR-CHIPSET-INVENTORY.md).
 

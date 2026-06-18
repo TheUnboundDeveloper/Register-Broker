@@ -44,7 +44,7 @@ driver* internals behind it.
 | `Smbus.c` | Vendor-agnostic validation front-end + the read/write address guards. |
 | `SmbusDetect.c` | PCI scan → pick AMD/Intel backend; per-bus dispatch. |
 | `SmbusAmd.c` / `SmbusIntel.c` | FCH (PIIX4/SB800) and i801 transaction sequences. |
-| `SmuAmd.c` | AMD SMU read over SMN (PCI cfg `0x60/0x64`) — Tctl + per-CCD. |
+| `SmuAmd.c` | AMD SMU read over SMN (PCI cfg `0x60/0x64`) — Tctl + per-CCD + core/SoC voltage (SVI2, Matisse/Vermeer; same IOCTL, enum sensors 9/10). |
 | `SuperioNct.c` | NCT668x EC family (NCT6683/6686/6687D) detect + EC page/index/data reads over LPC. |
 | `SuperioNct6775.c` | NCT6775 bank-select family (NCT6779/6791/6792/6793/6795/6796/6797/6798): HWM bank-select window reads; IO-space-lock clear on 6791+ only. **Built, hardware-unvalidated.** |
 
@@ -162,7 +162,7 @@ costing milliseconds per transaction — the visible RGB frame crawl.
 ## Decode formulas (raw register → units)
 
 The kernel returns raw bytes; the broker decodes them in `Sensors/SensorDecode.cs` —
-**Linux-hwmon register facts** (k10temp, nct6683 lineage, nct6775, jc42 — see
+**Linux-hwmon register facts** (k10temp, zenpower, nct6683 lineage, nct6775, jc42 — see
 `THIRD-PARTY-NOTICES.md`), never invented:
 
 - **AMD CPU temperature** (`AmdCpuTctlC`, from `k10temp`/`zenpower`): the 32-bit
