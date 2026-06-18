@@ -35,6 +35,9 @@ internal sealed class MockSmbusBackend : ISmbusBackend
 
     public bool CcdTempPresent(int ccd) => false;
 
+    /// <summary>Mock: SVI voltage telemetry tracks SMU availability (the driver bakes the planes per model).</summary>
+    public bool SmuVoltagePresent => SmuAvailable;
+
     public bool SuperioAvailable { get; }
 
     public int SuperioChipId { get; }

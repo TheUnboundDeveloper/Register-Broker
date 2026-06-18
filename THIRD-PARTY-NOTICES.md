@@ -34,11 +34,21 @@ facts; **no kernel source code is included or distributed.**
 | AMD FCH SMBus (PIIX4/SB800) | `drivers/i2c/busses/i2c-piix4.c` | SMBus host transactions (read + RGB write) |
 | Intel SMBus | `drivers/i2c/busses/i2c-i801.c` | Intel i801 SMBus path (written, unvalidated) |
 | AMD CPU temperature | `drivers/hwmon/k10temp.c` | SMU/SMN Tctl + per-CCD temperature decode |
+| AMD CPU voltage (SVI2) | `zenpower` (out-of-tree hwmon) | SVI2 telemetry-plane SMN addresses + voltage decode (`AmdSviVoltageV`) |
 | Nuvoton NCT668x | `drivers/hwmon/nct6683.c` | NCT6683/6686/6687D Super-I/O sensors |
 | Nuvoton NCT6775 | `drivers/hwmon/nct6775-core.c`, `nct6775-platform.c` | NCT6775-family Super-I/O sensors + IO-space-lock |
 | DIMM thermal | `drivers/hwmon/jc42.c` | JC42 / TSE2004av DIMM temperature decode |
 
 The Linux kernel is licensed **GPL-2.0**. https://www.kernel.org
+
+**zenpower** is an independent out-of-tree Linux hwmon driver (**GPL-2.0**;
+https://github.com/ocerman/zenpower and the Zen-3 fork). Only the AMD SVI2
+voltage-telemetry register facts — the per-CPU-model telemetry-plane SMN addresses
+(base `0x0005A000`) and the voltage code→volts decode (`1.550 − 0.00625·code`) — are
+reproduced, **as facts, in original code** (`SmuAmd.c` bakes the addresses; the broker
+decodes). The facts were cross-checked against the Linux `k10temp` "core/SoC voltages"
+patch. No zenpower source is included or distributed. AMD SVI2 **current/power**
+telemetry is deliberately **not** reproduced (it needs a board-dependent telemetry factor).
 
 ## RGB control
 
@@ -47,6 +57,18 @@ is a publicly-documented hardware protocol; it is reproduced as a hardware
 protocol fact in original code (`BrokerSensorBridge/Rgb/`). The kernel driver's
 single SMBus write path is bounded by an in-kernel address allow-list (the
 "brick guard"), so only RGB-controller address windows are ever writable.
+
+The MSI Mystic Light USB-HID feature-report layout and the **Razer Chroma
+"extended matrix" USB-HID command protocol** (90-byte report, transaction id,
+command class/id, XOR checksum, custom-frame + apply-custom commands) are
+likewise reproduced as publicly-documented hardware protocol facts in original
+C# (`BrokerSensorBridge/Rgb/MysticLightHidController.cs`,
+`RazerHidController.cs`). The Razer command facts were cross-checked against the
+**OpenRazer** Linux kernel driver (`drivers/hid/razer/` family, GPL-2.0); only
+the register/command values are reproduced — no source code is copied or
+distributed. These USB-HID paths are user-mode and outside the kernel
+brick-guard, so they are opt-in (`AllowHidRgb`) and reduced-assurance; the
+broker's baked report builder is the only write boundary.
 
 ## Build / runtime dependencies
 

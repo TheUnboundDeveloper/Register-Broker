@@ -141,7 +141,14 @@ typedef enum _BROKER_SMU_SENSOR
     BrokerSmuCcd4Temp = 5,
     BrokerSmuCcd5Temp = 6,
     BrokerSmuCcd6Temp = 7,
-    BrokerSmuCcd7Temp = 8
+    BrokerSmuCcd7Temp = 8,
+    /* AMD SVI2 telemetry voltages (zenpower). Each maps to a baked-in per-model SMN
+       telemetry-plane register; the broker decodes V = 1.550 − 0.00625·((raw>>16)&0xFF).
+       Offered only on CPU models whose plane addresses are known (else NotImplemented);
+       the client still names only a logical sensor, never an SMN address. Currents/power
+       are deliberately NOT exposed (they need a board-dependent telemetry factor). */
+    BrokerSmuCoreVoltage = 9,        /* VDDCR_CPU core voltage (SVI telemetry PLANE)     */
+    BrokerSmuSocVoltage  = 10        /* VDDCR_SOC SoC voltage  (SVI telemetry PLANE)     */
 } BROKER_SMU_SENSOR;
 
 #define BROKER_SMU_CCD_MAX   8u

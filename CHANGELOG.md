@@ -9,6 +9,118 @@ assembly version, git tags) and the **pipe protocol version** (currently `2`, se
 in the client hello — see `docs/CLIENT-PROTOCOL.md` §8) are independent. New sensors
 and additive ops do not bump the protocol version.
 
+## [1.4.0] — 2026-06-18
+
+### Added — AMD CPU core & SoC voltage (SVI2 telemetry)
+
+- **Two new SMU sensors: `smu.cpu.vcore` (VDDCR_CPU) and `smu.soc.voltage` (VDDCR_SOC)**, read
+  from the CPU's SVI2 telemetry-plane registers over the existing named-SMN read path — **no new
+  IOCTL, no SMU mailbox, and no physical-memory access**. They are ordinary `sensor.readall` /
+  `sensor.read` channels served non-admin through the broker.
+- Served only on CPU models whose telemetry-plane addresses are known and identical (AMD Matisse
+  17h/0x71 and Vermeer 19h/0x21, e.g. the Ryzen 5000 desktop line); on any other model the rails
+  are simply **absent** (the kernel returns NotImplemented and the broker omits them) — never a
+  wrong-register read. Validated on Ryzen 7 5800X3D (Vermeer); Matisse is built but unvalidated.
+- Register facts (SVI plane SMN addresses, base `0x0005A000`; decode `V = 1.550 − 0.00625·code`)
+  ported from the **zenpower** driver (GPL-2.0) and cross-checked against the Linux k10temp
+  voltage patch — provenance in `THIRD-PARTY-NOTICES.md`. The `--smu-read` DevProbes bring-up tool
+  now prints the SVI voltages; selftest gains the decode/clamp regression and a `smu.cpu.vcore`
+  scope gate.
+
+### Not included (by design)
+
+- **CPU package power (PPT) and per-core/effective clocks are intentionally not exposed.** Unlike
+  voltages, those live only in the SMU **PM table**, which requires writing the SMU mailbox and
+  **reading a physical-memory region the SMU DMAs the table into** — outside Register Broker's
+  bounded, no-physical-memory driver design. See the README note. This may be revisited (as a
+  separate, opt-in driver) if it is frequently requested.
+
+## [1.3.0] — 2026-06-17
+
+### Added — MSI Mystic Light per-LED DIRECT mode for addressable headers (JRAINBOW)
+
+- **Addressable headers (`RgbZoneKind.MbArgb`) are now driven per-LED in DIRECT mode** (HID report
+  `0x53`, 725-byte frame) instead of the 185-byte sync-static packet. RGB is written literally per LED
+  with the firmware effect engine disabled, so **brightness is linear** (fixes the brightness "fold"
+  /double-ramp on the 185-byte path) and **real per-LED color/gradients/effects** work — `SetLeds` is
+  no longer collapsed to a single color. Validated on MSI MPG B550I (MS-7C92): solid colors confirmed
+  on JRAINBOW.
+- Direct mode is engaged with a faithful reconstruction of the public protocol's enable packet — a
+  fully-formed 185-byte `0x52` report whose `on_board_led` zone carries the device-wide per-LED master
+  flags — then per-zone `0x53` frames stream the colors (`MysticLightHidController.BuildDirectModeEnable`
+  / `BuildPerLedFrame`). Ported as facts from the public Mystic Light protocol; **broker-only, no
+  kernel driver change or re-sign** (the USB-HID path is user-mode).
+- New per-zone selectors `RgbZone.HidPerLedHdr1` / `HidPerLedHdr2` in the signed board map
+  (JRAINBOW1 = 4/0). The MSI B550I `mb.argb0` zone is relabeled **"MSI JRAINBOW"**.
+- New DevProbes bring-up tool `--mystic-perled` (find a board's per-zone selector on the strip), and
+  selftest gains per-LED frame/enable gates. (Also fixed a pre-existing compile break in the gated
+  `--smu-read` probe so the DevProbes build builds again.)
+
+## [1.2.1] — 2026-06-17
+
+### Fixed — MSI Mystic Light JRAINBOW (`mb.argb0`) brightness ramp & flicker
+
+- **Addressable headers now write the full `RainbowZoneData` layout.** On a JRAINBOW / JARGB
+  (`RgbZoneKind.MbArgb`) zone the controller previously wrote only the 10-byte `ZoneData` and never
+  set the trailing **`cycle_or_led_num` byte at +10** — the LED/render count the firmware sync engine
+  needs. Left at a stale value it produced a **double-brightness ramp** and **dim-and-recover flicker
+  on color change**. Cross-checking the public Mystic Light protocol showed `RainbowZoneData` simply
+  *extends* `ZoneData` with that one trailing byte (the field offsets are not shifted — the earlier
+  assumption was wrong); the controller now writes it (the zone's LED count, clamped 1..200) for
+  `MbArgb` zones, while the `ZoneData` path for non-addressable zones is unchanged. HW-validated on
+  MSI MPG B550I (MS-7C92): the dimming/flicker artifact is gone.
+- **No per-frame re-assert.** A consumer driving `rgb.set` at frame rate was re-sending the whole
+  185-byte packet every frame, restarting the firmware effect and fighting its sync engine. The
+  controller now caches the last color and **suppresses an identical re-send**, so a held color is
+  written exactly once.
+- `--selftest` gains four Mystic Light gates (rainbow `ZoneData` fields; the +10 LED-count byte;
+  a non-rainbow zone leaving +10 untouched; LED-count clamp 1..200). Broker-only change — no kernel
+  driver rebuild or re-sign.
+
+### Known limitation
+
+- `mb.argb0` remains **static, whole-zone** color. Per-LED spatial effects and the smoother
+  transitions of a native vendor driver require the MSI per-LED direct frame (report `0x53` /
+  725-byte protocol), which is not yet implemented — see `CLAUDE.md` Open items.
+
+## [1.2.0] — 2026-06-17
+
+### Added — Razer Chroma peripheral RGB (USB-HID, board-independent)
+
+- **Razer Chroma keyboards/mice over USB-HID.** A new `UsbHidRazer` transport
+  (`Rgb/RazerHidController.cs`) drives Razer peripherals (VID `0x1532`) as ordinary broker
+  devices — they appear in `rgb.list` and take `rgb.set` (whole-device or per-LED) exactly
+  like any other zone. Ships with Razer Naga Trinity (PID `0x0067`, 3 zones) and Razer Cynosa
+  Chroma (PID `0x022A`, 6×22). The "extended matrix" command protocol (90-byte report,
+  transaction id, command class/id, XOR checksum, custom-frame + apply-custom) is reproduced
+  as public protocol facts, cross-checked against the OpenRazer Linux driver (GPL-2.0); only
+  RGB commands are issued — device mode / macros are never touched. Provenance in
+  `THIRD-PARTY-NOTICES.md`.
+- **Board-independent registration.** Unlike the board-zone transports, Razer devices are not
+  tied to the DMI board profile — `RgbRegistry.Build` enumerates them by vendor id and binds the
+  90-byte command collection, identified by the **(USB interface number + HID usage)** tuple
+  OpenRazer/OpenRGB use (Naga = iface 0, Cynosa = iface 2; usage `0x01:0x02`, 91-byte feature
+  report) — a device exposes several collections per interface, so the usage disambiguates the
+  command one from the consumer/system collections. `HidDevice` now parses the interface number
+  from the Windows device path, exposes the HID usage page/usage, and **opens with a zero-access
+  fallback** so OS-held input collections (where Razer keyboards/mice expose RGB) are reachable
+  for feature reports (HidD_GetFeature/SetFeature work on a 0-access handle — what hidapi does).
+  Each enumerated Razer interface is logged (PID / interface / usage / feature length), and
+  `--hid-scan --vid=1532` reports the same, for bring-up. Same opt-in gate (`AllowHidRgb`) and
+  reduced assurance (user-mode, no kernel brick-guard) as the Mystic Light path (whose R/W open is
+  unchanged); the broker's baked report builder is the only write boundary.
+- New `RgbZoneKind` values **`keyboard`** / **`mouse`** surfaced in `rgb.list` (additive; pipe
+  protocol stays v2 — older clients unaffected).
+- `--selftest` gains five Razer gates (custom-frame header/args, CRC = XOR[3..88], apply-custom,
+  known-model geometry); the packet builders are pure/internal so the brittle wire math is
+  asserted without a device.
+
+✅ **Hardware-validated 2026-06-17** on the dev box: Razer Naga Trinity (iface 0) and Cynosa
+Chroma (iface 2) both enumerate and light via the broker, driven by a non-admin client — no
+"software mode" handshake needed, custom frames take effect directly. The zero-access HID open
+was the key: the command collections are owned by the OS HID input stack and only open for
+feature reports under a 0-access handle.
+
 ## [1.1.1] — 2026-06-17
 
 Security and robustness hardening from a full-repo code review. No new features;
@@ -122,6 +234,7 @@ First public release.
 - 2026-06-07/08 — broker architecture locked; protocol v2 identity auth; first
   hardware validation pass; policy hardening.
 
+[1.2.0]: https://github.com/TheUnboundDeveloper/Register-Broker/releases/tag/v1.2.0
 [1.1.1]: https://github.com/TheUnboundDeveloper/Register-Broker/releases/tag/v1.1.1
 [1.1.0]: https://github.com/TheUnboundDeveloper/Register-Broker/releases/tag/v1.1.0
 [1.0.0]: https://github.com/TheUnboundDeveloper/Register-Broker/releases/tag/v1.0.0

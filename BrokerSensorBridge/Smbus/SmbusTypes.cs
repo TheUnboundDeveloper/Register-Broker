@@ -90,6 +90,13 @@ internal interface ISmbusBackend
     /// </summary>
     bool CcdTempPresent(int ccd);
 
+    /// <summary>
+    /// True when the driver serves AMD SVI2 voltage telemetry (the CPU model's plane addresses
+    /// are baked in). Probed once and cached; gates the smu.cpu.vcore / smu.soc.voltage entries.
+    /// An older driver (or an unsupported CPU model) reports false and the rails stay absent.
+    /// </summary>
+    bool SmuVoltagePresent { get; }
+
     /// <summary>Reads a named Super-I/O sensor {kind,index}'s raw value. The caller never supplies an EC address.</summary>
     bool TryReadSuperioRaw(uint kind, uint index, out uint raw, out SmbusStatus status);
 

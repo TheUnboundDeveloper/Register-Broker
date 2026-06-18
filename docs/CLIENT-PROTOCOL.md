@@ -142,15 +142,20 @@ Handshake requests `rgb:write`:
 ```
 → {"token":"…","op":"rgb.list"}
 ← {"type":"data","op":"rgb.list","devices":[
-     {"id":"ram0",    "label":"GSkill RGB (DIMM 0)",          "leds":5, "kind":"dram",  "transport":"smbusene"},
-     {"id":"ram1",    "label":"GSkill RGB (DIMM 1)",          "leds":5, "kind":"dram",  "transport":"smbusene"},
-     {"id":"mb.argb0","label":"Front ARGB Fans (JRAINBOW)",   "leds":60,"kind":"mbargb","transport":"usbhid"}, … ]}
+     {"id":"ram0",        "label":"GSkill RGB (DIMM 0)",        "leds":5,  "kind":"dram",     "transport":"smbusene"},
+     {"id":"ram1",        "label":"GSkill RGB (DIMM 1)",        "leds":5,  "kind":"dram",     "transport":"smbusene"},
+     {"id":"mb.argb0",    "label":"Front ARGB Fans (JRAINBOW)", "leds":60, "kind":"mbargb",   "transport":"usbhid"},
+     {"id":"razer.naga",  "label":"Razer Naga Trinity",         "leds":3,  "kind":"mouse",    "transport":"usbhidrazer"},
+     {"id":"razer.cynosa","label":"Razer Cynosa Chroma",        "leds":132,"kind":"keyboard", "transport":"usbhidrazer"}, … ]}
 ```
-Each device carries a `kind` (`dram` / `mb12v` / `mbargb`) for grouping headers vs DRAM, and a
-`transport` (`smbusene` / `superioec` / `usbhid`) for diagnostics. The device set is the active
-board's profile crossed with the transports actually present, so motherboard-header zones appear
-only on a board that has them and a host where that transport is enabled (see §6.1). `kind` and
-`transport` are additive fields — older clients that read only `id`/`label`/`leds` keep working.
+Each device carries a `kind` (`dram` / `mb12v` / `mbargb` / `keyboard` / `mouse`) for grouping, and
+a `transport` (`smbusene` / `superioec` / `usbhid` / `usbhidrazer`) for diagnostics. The device set
+is the active board's profile crossed with the transports actually present (so motherboard-header
+zones appear only on a board that has them and a host where that transport is enabled — see §6.1),
+**plus board-independent USB-HID peripherals** (Razer Chroma keyboards/mice), matched by USB
+vendor/product/interface rather than the board profile. `kind` and `transport` are additive fields
+— older clients that read only `id`/`label`/`leds` keep working, and new values may appear over
+time, so treat them as opaque strings.
 
 ### `rgb.set` — set a named device's color(s)
 Two forms (both name a device, never an address):
@@ -180,12 +185,15 @@ the `transport` field so an operator knows what bounds a write:
 |---|---|---|---|
 | `smbusene` | ENE/Aura DRAM modules | **Kernel** SMBus brick-guard (`0x70–0x77` / `0x39–0x3A`) | validated |
 | `superioec` | NCT6687 12V header (JRGB) | **Kernel** EC RGB-register brick-guard | inert until the EC RGB window is hardware-validated (`CAP_SUPERIO_RGB` off) |
-| `usbhid` | MSI Mystic Light addressable headers (JRAINBOW) | **Broker only** — baked report builder, *no kernel guard* | opt-in (`AllowHidRgb`, default off) |
+| `usbhid` | MSI Mystic Light addressable headers (JRAINBOW) | **Broker only** — baked report builder, *no kernel guard* | opt-in (`AllowHidRgb`, default off); validated |
+| `usbhidrazer` | Razer Chroma peripherals (keyboards / mice) | **Broker only** — baked report builder, *no kernel guard* | opt-in (`AllowHidRgb`, default off); validated (Naga Trinity, Cynosa Chroma) |
 
-The `usbhid` path is the corrected re-introduction of a user-mode HID transport (reduced
-assurance): it is disabled by default and must be enabled deliberately (`AllowHidRgb` in
-`appsettings.json` or `--allow-hid-rgb`). Adding a new board's zones is a broker-only change —
-the kernel exposes only stable, class-wide windows, so no driver recompile is needed.
+The `usbhid` / `usbhidrazer` paths are user-mode HID transports (reduced assurance): disabled by
+default, enabled deliberately (`AllowHidRgb` in `appsettings.json` or `--allow-hid-rgb`). Adding a
+new board's zones is a broker-only change — the kernel exposes only stable, class-wide windows, so
+no driver recompile is needed. Razer peripherals are **board-independent**: matched by USB
+vendor/product/interface+usage (not the DMI board profile), so they appear on any host with the
+device present and `AllowHidRgb` on.
 
 > **`rgb.set` is colors only — there are no effect ops.** Animation (breathing, rainbow,
 > music sync) is deliberately the consumer's job: render frames client-side and send

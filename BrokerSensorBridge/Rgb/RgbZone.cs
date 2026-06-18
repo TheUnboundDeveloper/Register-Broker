@@ -27,7 +27,8 @@ internal enum RgbTransport
 {
     SmbusEne,    // ENE/Aura DRAM over SMBus (kernel brick-guarded write)
     SuperioEc,   // NCT6687 EC register RGB (kernel brick-guarded EC write)
-    UsbHid       // MSI Mystic Light over USB-HID (user-mode, broker-only)
+    UsbHid,      // MSI Mystic Light over USB-HID (user-mode, broker-only)
+    UsbHidRazer  // Razer Chroma peripherals over USB-HID (user-mode, board-independent)
 }
 
 /// <summary>The logical capability classes every board profile is expected to cover where the
@@ -36,15 +37,25 @@ internal enum RgbZoneKind
 {
     Dram,        // addressable DRAM module LEDs
     Mb12V,       // 12V non-addressable motherboard header (JRGB) — a single solid-color zone
-    MbArgb       // 5V addressable motherboard header (JRAINBOW / JARGB) — per-LED
+    MbArgb,      // 5V addressable motherboard header (JRAINBOW / JARGB) — per-LED
+    Keyboard,    // USB-HID keyboard peripheral (not a board zone; not part of board parity)
+    Mouse        // USB-HID mouse peripheral (not a board zone; not part of board parity)
 }
 
 /// <summary>
 /// One drivable RGB zone in a board profile. Only the fields relevant to <see cref="Transport"/>
-/// are meaningful (Bus/Address for SmbusEne; EcAddress for SuperioEc; HidZoneIndex/HidProductId
-/// for UsbHid). For UsbHid, <see cref="HidZoneIndex"/> is the zone's BYTE OFFSET in the Mystic Light
-/// feature packet (e.g. 31 = j_rainbow_1 in FeaturePacket_185), not an ordinal. Addresses/registers
-/// are SIGNED CODE and never leave the broker — clients name <see cref="Id"/>.
+/// are meaningful (Bus/Address for SmbusEne; EcAddress for SuperioEc; HidZoneIndex/HidLedOffset/
+/// HidProductId for UsbHid). For UsbHid, <see cref="HidZoneIndex"/> is the zone's BYTE OFFSET in the
+/// Mystic Light 185-byte sync packet (e.g. 31 = j_rainbow_1 in FeaturePacket_185), not an ordinal.
+/// Addresses/registers are SIGNED CODE and never leave the broker — clients name <see cref="Id"/>.
+///
+/// <para>An addressable header (<see cref="RgbZoneKind.MbArgb"/>) is driven PER-LED in direct mode
+/// (report 0x53): RGB is written literally per LED, so brightness is linear (no firmware sync engine),
+/// unlike the 185-byte sync path which folds. Each addressable zone is its OWN per-LED frame, selected
+/// by two header bytes — <see cref="HidPerLedHdr1"/> / <see cref="HidPerLedHdr2"/> — not by a flat
+/// offset (JRAINBOW1 = 4/0, JRAINBOW2 = 4/1, JCORSAIR = 5/0; the zone's LEDs start at index 0 of its
+/// own frame). These are the public-protocol per-zone selectors; the board's value is confirmed at
+/// bring-up (the <c>--mystic-perled</c> dev probe). Meaningful only for UsbHid MbArgb zones.</para>
 ///
 /// <para><see cref="HidProductId"/> PINS a UsbHid zone to exactly one USB product id under the MSI
 /// vendor id (0x1462), so the broker drives only the intended Mystic Light controller and refuses
@@ -61,6 +72,8 @@ internal sealed record RgbZone(
     int Address = 0,
     int EcAddress = 0,
     int HidZoneIndex = 0,
+    int HidPerLedHdr1 = 0,
+    int HidPerLedHdr2 = 0,
     int HidProductId = 0);
 
 /// <summary>

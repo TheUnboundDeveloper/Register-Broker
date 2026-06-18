@@ -100,6 +100,36 @@ internal sealed class RgbRegistry : IDisposable
             }
         }
 
+        /* Board-independent USB-HID peripherals (Razer Chroma keyboards/mice): not part of the
+           DMI board profile — enumerated directly by vendor id (0x1532) and matched against the
+           known-model table. Same opt-in gate (AllowHidRgb) and reduced assurance (no kernel
+           brick-guard) as the Mystic Light path; the RGB-control interface is the one presenting
+           a 91-byte feature report. */
+        if (allowHidRgb)
+        {
+            IReadOnlyList<HidDevice> razer = OpenRazerHid(hidDevices, log);
+            foreach (RazerHidController.Model m in RazerHidController.KnownModels)
+            {
+                /* The 90-byte command collection is identified by the (interface, usage page, usage)
+                   tuple OpenRGB's Razer detector uses — a device exposes several collections on one
+                   interface, so the usage disambiguates the command one (usage 0x01:0x02, 91-byte
+                   feature report) from the consumer/system collections that share the interface. */
+                HidDevice? iface = razer.FirstOrDefault(h =>
+                    h.ProductId == m.Pid && h.InterfaceNumber == m.Interface
+                    && h.UsagePage == m.UsagePage && h.Usage == m.Usage && !usedHid.Contains(h));
+                if (iface != null)
+                {
+                    log($"[rgb] Razer {m.Label} (PID 0x{m.Pid:X4} iface {m.Interface} usage {m.UsagePage:X2}:{m.Usage:X2}, featureLen {iface.FeatureReportByteLength}) -> bound (USB-HID, reduced assurance)");
+                    list.Add(new RazerHidController(iface, m));
+                    usedHid.Add(iface);
+                }
+                else if (razer.Any(h => h.ProductId == m.Pid))
+                    log($"[rgb] Razer {m.Label} (PID 0x{m.Pid:X4}): device present but command collection "
+                      + $"(iface {m.Interface} usage {m.UsagePage:X2}:{m.Usage:X2}) not found/openable "
+                      + "(Razer Synapse may hold it exclusively, or the interface map differs) — skipped");
+            }
+        }
+
         /* Close any opened MSI HID interfaces that no zone selected (e.g. the non-RGB MSI
            interface enumerated alongside the controller) instead of holding their handles
            open for the whole service lifetime. Only zone-bound interfaces survive in _hid. */
@@ -124,6 +154,17 @@ internal sealed class RgbRegistry : IDisposable
         string pids = devs.Count > 0 ? string.Join(", ", devs.Select(d => $"0x{d.ProductId:X4}")) : "none";
         log($"[rgb] Mystic Light HID: {devs.Count} device(s) at VID 0x{MysticLightVendorId:X4} "
           + $"[candidate PIDs: {pids}] (USB-HID transport — reduced assurance, no kernel brick-guard)");
+        return devs;
+    }
+
+    private static IReadOnlyList<HidDevice> OpenRazerHid(List<HidDevice> sink, Action<string> log)
+    {
+        IReadOnlyList<HidDevice> devs = HidDevice.OpenByVendor(RazerHidController.RazerVendorId, log);
+        sink.AddRange(devs);
+        log($"[rgb] Razer HID: {devs.Count} interface(s) at VID 0x{RazerHidController.RazerVendorId:X4} "
+          + "(USB-HID transport — reduced assurance, no kernel brick-guard)");
+        foreach (HidDevice d in devs)
+            log($"[rgb]   PID 0x{d.ProductId:X4} iface {d.InterfaceNumber} featureLen {d.FeatureReportByteLength} usage {d.UsagePage:X2}:{d.Usage:X2}");
         return devs;
     }
 

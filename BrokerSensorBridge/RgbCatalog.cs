@@ -49,7 +49,10 @@ internal static class RgbCatalog
         RgbTransport.SuperioEc =>
             z.EcAddress >= Nct6687RgbMin && z.EcAddress + 2 <= Nct6687RgbMax
                 ? null : $"EC address 0x{z.EcAddress:X4} is outside the NCT6687 RGB window",
-        RgbTransport.UsbHid => null,
+        RgbTransport.UsbHid =>
+            z.Kind == RgbZoneKind.MbArgb && z.LedCount > MysticLightHidController.PerLedMaxLeds
+                ? $"per-LED LedCount {z.LedCount} exceeds the {MysticLightHidController.PerLedMaxLeds}-LED direct frame"
+                : null,   // UsbHid has no kernel address (bounded by the HID report builder)
         _ => $"unknown transport {z.Transport}",
     };
 
@@ -82,14 +85,19 @@ internal static class RgbCatalog
                    PINNED to PID 0x7C92 — the Mystic Light controller on this board (confirmed by
                    --hid-scan: VID 0x1462; the PID matches the board's MS-7C92 model number; the other
                    MSI interface 0x3FA4 has no feature reports and is refused by the pin). The device's
-                   max feature length (725) classifies to the 185-byte protocol variant. HidZoneIndex
-                   is the zone's BYTE OFFSET in FeaturePacket_185: 31 = j_rainbow_1 (first JRAINBOW
-                   ARGB header). Other offsets: 1 = j_rgb_1 (12V), 42 = j_rainbow_2, 74 = on_board_led
-                   — change it to target a different header (see docs/RGB-BOARD-BRINGUP.md). Solid-color
-                   today (per-LED report 0x53 is future). HW-VALIDATED 2026-06-13: solid color on this
-                   header confirmed on the dev box. */
-                new RgbZone("mb.argb0", "Motherboard ARGB Header (JRAINBOW)", RgbZoneKind.MbArgb,
-                            RgbTransport.UsbHid, LedCount: 60, HidZoneIndex: 31, HidProductId: 0x7C92),
+                   max feature length (725) = the 0x53 per-LED DIRECT frame, so this zone is driven
+                   PER-LED (literal RGB, linear brightness — no firmware sync-engine fold).
+
+                   HidZoneIndex (31 = j_rainbow_1 byte offset in FeaturePacket_185) is the zone slot
+                   used to put THIS zone into direct mode (185-byte enable packet). HidPerLedHdr1/Hdr2
+                   are the per-zone selector in the 0x53 per-LED frame: JRAINBOW1 = 4/0 (JRAINBOW2 would
+                   be 4/1, JCORSAIR 5/0). The zone's LEDs start at index 0 of its own frame; LedCount 60
+                   = the strip length. Confirm the selector on the strip with `--mystic-perled --hdr1=4`;
+                   see docs/RGB-BOARD-BRINGUP.md. Brightness/flicker fix HW-validated 2026-06-13/17;
+                   per-LED bring-up in progress. */
+                new RgbZone("mb.argb0", "MSI JRAINBOW", RgbZoneKind.MbArgb,
+                            RgbTransport.UsbHid, LedCount: 60, HidZoneIndex: 31,
+                            HidPerLedHdr1: 4, HidPerLedHdr2: 0, HidProductId: 0x7C92),
             }),
 
         /*-- Generic fallback: DRAM only. Preserves the pre-board-profile behavior on any board

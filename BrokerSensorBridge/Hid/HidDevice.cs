@@ -25,10 +25,28 @@ internal sealed class HidDevice : IDisposable
     public ushort VendorId { get; }
     public ushort ProductId { get; }
     public string Path { get; }
+    /// <summary>HID top-level collection usage page / usage (HIDP_CAPS), for diagnostics/selection.</summary>
+    public ushort UsagePage { get; }
+    public ushort Usage { get; }
+    /// <summary>USB interface number parsed from the device path (&amp;mi_NN); -1 if non-composite.</summary>
+    public int InterfaceNumber { get; }
 
-    private HidDevice(SafeFileHandle handle, string path, ushort vid, ushort pid, int featureLen)
+    private HidDevice(SafeFileHandle handle, string path, ushort vid, ushort pid,
+                      int featureLen, ushort usagePage, ushort usage)
     {
-        _handle = handle; Path = path; VendorId = vid; ProductId = pid; FeatureReportByteLength = featureLen;
+        _handle = handle; Path = path; VendorId = vid; ProductId = pid;
+        FeatureReportByteLength = featureLen; UsagePage = usagePage; Usage = usage;
+        InterfaceNumber = ParseInterfaceNumber(path);
+    }
+
+    /// <summary>Parse the USB interface number from a Windows HID device path (e.g. "&amp;mi_02" -> 2).
+    /// Returns -1 for a non-composite device (no &amp;mi_ token). Internal for selftest.</summary>
+    internal static int ParseInterfaceNumber(string path)
+    {
+        int at = path.IndexOf("&mi_", StringComparison.OrdinalIgnoreCase);
+        if (at < 0 || at + 6 > path.Length) return -1;
+        return int.TryParse(path.Substring(at + 4, 2),
+            System.Globalization.NumberStyles.HexNumber, null, out int n) ? n : -1;
     }
 
     /// <summary>Sends a HID feature report (HidD_SetFeature). The buffer's first byte is the report id.</summary>
@@ -65,13 +83,23 @@ internal sealed class HidDevice : IDisposable
 
                 SafeFileHandle h = CreateFileW(path, 0xC0000000 /* R|W */, 0x3 /* share R|W */,
                     IntPtr.Zero, 3 /* OPEN_EXISTING */, 0, IntPtr.Zero);
+                if (h.IsInvalid)
+                {
+                    /* OS-held input collections (keyboard/mouse) refuse GENERIC_READ|WRITE. Reopen with
+                       ZERO desired access — HidD_GetFeature/SetFeature work on a 0-access handle (they
+                       go through IOCTLs, not ReadFile/WriteFile), so RGB feature reports still flow.
+                       This mirrors hidapi and is required for Razer command collections that the HID
+                       input stack owns exclusively. */
+                    h.Dispose();
+                    h = CreateFileW(path, 0, 0x3, IntPtr.Zero, 3, 0, IntPtr.Zero);
+                }
                 if (h.IsInvalid) { h.Dispose(); continue; }
 
                 var attrs = new HIDD_ATTRIBUTES { Size = (uint)Marshal.SizeOf<HIDD_ATTRIBUTES>() };
                 if (!HidD_GetAttributes(h, ref attrs) || attrs.VendorID != vendorId) { h.Dispose(); continue; }
 
-                int featureLen = GetFeatureReportLength(h);
-                found.Add(new HidDevice(h, path, attrs.VendorID, attrs.ProductID, featureLen));
+                GetCaps(h, out int featureLen, out ushort usagePage, out ushort usage);
+                found.Add(new HidDevice(h, path, attrs.VendorID, attrs.ProductID, featureLen, usagePage, usage));
             }
         }
         finally { SetupDiDestroyDeviceInfoList(set); }
@@ -79,14 +107,17 @@ internal sealed class HidDevice : IDisposable
         return found;
     }
 
-    private static int GetFeatureReportLength(SafeFileHandle h)
+    private static void GetCaps(SafeFileHandle h, out int featureLen, out ushort usagePage, out ushort usage)
     {
-        if (!HidD_GetPreparsedData(h, out IntPtr pre) || pre == IntPtr.Zero) return 0;
+        featureLen = 0; usagePage = 0; usage = 0;
+        if (!HidD_GetPreparsedData(h, out IntPtr pre) || pre == IntPtr.Zero) return;
         try
         {
-            byte[] caps = new byte[256];                       // HIDP_CAPS; FeatureReportByteLength is at offset 8
-            if (HidP_GetCaps(pre, caps) != HIDP_STATUS_SUCCESS) return 0;
-            return BitConverter.ToUInt16(caps, 8);
+            byte[] caps = new byte[256];   // HIDP_CAPS: Usage @0, UsagePage @2, FeatureReportByteLength @8
+            if (HidP_GetCaps(pre, caps) != HIDP_STATUS_SUCCESS) return;
+            usage      = BitConverter.ToUInt16(caps, 0);
+            usagePage  = BitConverter.ToUInt16(caps, 2);
+            featureLen = BitConverter.ToUInt16(caps, 8);
         }
         finally { HidD_FreePreparsedData(pre); }
     }

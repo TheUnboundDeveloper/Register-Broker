@@ -29,6 +29,17 @@ internal static class SensorDecode
     /// <summary>k10temp CCD valid bit (BIT 11). The catalog checks this before exposing a CCD.</summary>
     public const uint AmdCcdValid = 0x800;
 
+    /// <summary>
+    /// AMD SVI2 telemetry-plane voltage decode (zenpower plane_to_vcc): the voltage code is
+    /// byte [23:16] of the plane register; V = 1.550 − 0.00625·code. A fully-gated plane reads
+    /// a high code → small/negative voltage; we clamp at 0 so an idle rail never reports negative.
+    /// </summary>
+    public static double AmdSviVoltageV(uint raw)
+    {
+        double v = 1.550 - 0.00625 * ((raw >> 16) & 0xFF);
+        return v < 0.0 ? 0.0 : v;
+    }
+
     /// <summary>NCT6687D temperature: low byte = signed °C, high byte bit 7 = +0.5 °C (raw = value | half&lt;&lt;8).</summary>
     public static double NctTempC(uint raw)
     {
@@ -84,7 +95,7 @@ internal static class DecoderRegistry
     /// <summary>Raw-id prefix → the proven source the decode is ported from.</summary>
     public static readonly IReadOnlyDictionary<string, string> Sources = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["smu."]      = "Linux k10temp (AmdCpuTctlC / AmdCcdTempC)",
+        ["smu."]      = "Linux k10temp (AmdCpuTctlC / AmdCcdTempC) + zenpower SVI (AmdSviVoltageV)",
         ["nct6687d."] = "Linux nct6683 + Fred78290/nct6687d (NctTempC / NctFanRpm / NctVoltageMv)",
         ["nct6775."]  = "Linux nct6775-core (NctTempC / NctFanRpm / Nct6775VoltageMv)",
         ["dimm."]     = "Linux jc42 (Jc42TempC)",

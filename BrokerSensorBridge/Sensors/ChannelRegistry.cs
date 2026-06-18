@@ -98,6 +98,19 @@ internal static class ChannelRegistry
                         : new RawReading(false, 0, st == SmbusStatus.Ok ? "Invalid" : st.ToString())));
             }
 
+            /* SVI2 voltage telemetry (zenpower). Sensor ids 9/10 = BrokerSmuCoreVoltage/SocVoltage;
+               present only on CPU models whose plane addresses the kernel knows (Matisse/Vermeer). */
+            list.Add(new RawChannel("smu.cpu.vcore", "V", 3,
+                b => b.SmuVoltagePresent,
+                b => b.TryReadSmuRaw(9, out uint raw, out SmbusStatus st)
+                    ? new RawReading(true, SensorDecode.AmdSviVoltageV(raw), "Ok")
+                    : new RawReading(false, 0, st.ToString())));
+            list.Add(new RawChannel("smu.soc.voltage", "V", 3,
+                b => b.SmuVoltagePresent,
+                b => b.TryReadSmuRaw(10, out uint raw, out SmbusStatus st)
+                    ? new RawReading(true, SensorDecode.AmdSviVoltageV(raw), "Ok")
+                    : new RawReading(false, 0, st.ToString())));
+
             defs.Add(new ChannelBackendDef("AMD SMU", new[] { "AMD SMU" }, "smu.",
                 b => b.SmuAvailable, list));
         }

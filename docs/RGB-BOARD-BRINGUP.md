@@ -166,6 +166,14 @@ Each zone block is `effect[+0] R[+1] G[+2] B[+3] brightness[+4] … colorFlags[+
 writes a static color (effect = `MSI_MODE_STATIC`, colorFlags bit 7 = fixed color) and **seeds the
 packet from the device's current state first**, so setting your zone never turns the others off.
 
+> **Addressable headers (JRAINBOW / JARGB, `RgbZoneKind.MbArgb`) carry one extra byte.** Their block
+> is `RainbowZoneData` = the ten `ZoneData` bytes **plus** `cycle_or_led_num[+10]`, the number of LEDs
+> the firmware renders the static color across. A plain `ZoneData` write that omits `+10` leaves a
+> stale count and the sync engine double-ramps brightness / flickers. The controller writes `+10` for
+> `MbArgb` zones (the zone's `LedCount`, clamped 1..200); set the zone `Kind` to `MbArgb` so this path
+> is taken. Do **not** re-send the packet every frame for a held color — the controller suppresses an
+> identical re-send so the firmware isn't restarted each frame.
+
 > Not sure which physical header is which offset? Set one, watch which strip changes, adjust. Start
 > with `j_rainbow_1` (31) for a 5V ARGB strip or `j_rgb_1` (1) for a 12V strip.
 
@@ -174,6 +182,54 @@ packet from the device's current state first**, so setting your zone never turns
 If the LEDs light but are dim/off, the one tunable is `StaticBrightnessFlags` in
 `MysticLightHidController` (`(brightness << 2) | speed`). The default is near-max for the 5-bit
 brightness field; raise/lower if needed.
+
+### 5d-2. Addressable headers: per-LED DIRECT mode (the smooth path)
+
+The 185-byte SYNC packet above drives an addressable header (JRAINBOW / JARGB) through the firmware's
+effect engine, which renders the color non-linearly — solid color works, but **brightness folds**
+(rises then falls as you raise it) and there are no real per-LED effects. The fix is **per-LED DIRECT
+mode** (HID report `0x53`): the device is put into direct mode and a 725-byte frame streams **literal
+RGB per LED**, so brightness is linear and gradients/effects work. The broker uses this automatically
+for `RgbZoneKind.MbArgb` zones when the device advertises a ≥725-byte feature report.
+
+The one per-board unknown is **where the header's LEDs sit in the flat 240-LED direct array**
+(`RgbZone.HidLedOffset`). Find it empirically with the dev probe (build with `-p:DevProbes=true`):
+
+1. Close OpenRGB / MSI Center and stop the control service so nothing else drives the strip.
+2. Confirm direct mode lights the strip at all (and that brightness no longer folds):
+   `--mystic-perled --index=0 --count=240 --color=200000` then `--color=ff0000` — the strip should get
+   **monotonically brighter**, not fold.
+3. Find the start index: sweep `--index` in blocks until only the target strip lights, then narrow to
+   a single LED:
+   `--mystic-perled --index=0 --count=20 --color=00ff00`, `--index=20 --count=20`, … then
+   `--index=<start> --count=1` to confirm the **first** JRAINBOW LED.
+   (`--zoneoff=31` is the 185-byte offset used to *enable* direct mode — leave it at `j_rainbow_1`=31
+   for JRAINBOW1; `--pid=7C92` pins the controller.)
+4. Bake the result into the zone: set `HidLedOffset:` (and `LedCount:` to the strip length) in
+   `RgbCatalog.cs`. Rebuild **without** DevProbes and redeploy. `rgb.set mb.argb0` now ramps smoothly
+   and `SetLeds` drives real per-LED color. **Broker-only — no driver/kernel change.**
+
+### 5e. Razer Chroma peripherals (board-independent USB-HID)
+
+Razer keyboards/mice are **not** board-profile zones — they are matched by USB id, so they appear
+on any host with the device present and `AllowHidRgb` on, regardless of motherboard. To add one:
+
+1. Enumerate Razer interfaces: `--hid-scan --vid=1532 > razer.txt` (the flag takes any vendor id;
+   default is MSI `0x1462`). Each interface prints `PID / iface / featLen / usage / path`.
+2. The command collection is the one with a **91-byte feature report and usage `01:02`** — note its
+   `PID` and `iface` (e.g. Naga Trinity = PID `0x0067` iface `0`; Cynosa Chroma = PID `0x022A`
+   iface `2`). These collections are owned by the OS HID input stack, so `HidDevice` opens them
+   with a **zero-access fallback** (feature reports still work) — that's why they show up at all.
+3. Add a row to `RazerHidController.KnownModels` (`PID, interface, usagePage, usage, id, label,
+   kind, rows, cols`). The LED count is `rows × cols`, row-major. This is a **broker-only** change
+   — no driver work. The Razer "extended matrix" command protocol (custom-frame + apply-custom,
+   90-byte report, XOR CRC) is shared across models; only the geometry differs.
+4. Rebuild + redeploy the control service; the device appears in `rgb.list` as
+   `kind:keyboard`/`mouse`, `transport:usbhidrazer`, drivable per-LED like any other device.
+
+> Validated 2026-06-17: Naga Trinity + Cynosa Chroma light correctly, no "software mode" handshake
+> needed. If a device is present but its command collection doesn't bind, close **Razer Synapse**
+> (it can hold the interface) and restart the broker.
 
 ## 6. Motherboard RGB over the NCT6687 EC — advanced / optional
 

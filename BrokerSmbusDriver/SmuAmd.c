@@ -30,6 +30,17 @@
 #define ZEN_REPORTED_TEMP_CTRL  0x00059800u
 #define ZEN_CCD_TEMP(offset, ccd)  (ZEN_REPORTED_TEMP_CTRL + (offset) + ((ccd) * 4u))
 
+/* AMD SVI2 voltage-telemetry plane registers, PORTED (not invented) from the zenpower
+   driver (GPL-2.0) and cross-checked against the Linux k10temp "core/SoC voltages" patch.
+   Base SMN 0x0005A000; PLANE0/PLANE1 offsets and the core/SoC plane assignment are
+   per-model. We bake ONLY the models whose offsets are documented and identical:
+     * Matisse  (17h/0x71) and Vermeer (19h/0x21): core = +0x10, SoC = +0xC.
+   Every other model leaves the planes 0 → SVI voltages are simply not offered (never
+   read a wrong register). The broker decodes the plane value to volts. */
+#define ZEN_SVI_BASE            0x0005A000u
+#define ZEN_SVI_PLANE_0X10      (ZEN_SVI_BASE + 0x10u)   /* core on Matisse/Vermeer */
+#define ZEN_SVI_PLANE_0X0C      (ZEN_SVI_BASE + 0x0Cu)   /* SoC  on Matisse/Vermeer */
+
 static KMUTEX  g_SmuLock;
 static BOOLEAN g_SmuLockReady = FALSE;
 
@@ -84,10 +95,33 @@ static UINT32 SmuAmdCcdOffset(UCHAR Family, UCHAR Model)
     return 0u;
 }
 
+/* Per-model SVI voltage-telemetry plane addresses (zenpower). Sets *Core/*Soc to the SMN
+   addresses for VDDCR_CPU / VDDCR_SOC, or leaves them 0 when the model is unknown — only
+   models with documented, identical plane layouts are baked. Returns TRUE if known. */
+static BOOLEAN SmuAmdSviConfig(UCHAR Family, UCHAR Model, UINT32* Core, UINT32* Soc)
+{
+    *Core = 0;
+    *Soc  = 0;
+
+    /* Matisse (Zen 2 desktop, 17h/0x71) and Vermeer (Zen 3 desktop, 19h/0x21) share the
+       same SVI plane layout: PLANE0 (+0x10) = core, PLANE1 (+0xC) = SoC. */
+    if ((Family == 0x17 && Model == 0x71) ||
+        (Family == 0x19 && Model == 0x21))
+    {
+        *Core = ZEN_SVI_PLANE_0X10;
+        *Soc  = ZEN_SVI_PLANE_0X0C;
+        return TRUE;
+    }
+    return FALSE;
+}
+
 VOID SmuAmdDetect(SMBUS_CONTROLLER* Controller)
 {
     Controller->SmuAvailable = FALSE;
     Controller->SmuCcdOffset = 0;
+    Controller->SmuTelemetryAvailable = FALSE;
+    Controller->SmuSviCoreAddr = 0;
+    Controller->SmuSviSocAddr  = 0;
     SmuAmdCpuFamilyModel(&Controller->CpuFamily, &Controller->CpuModel);
 
     if (!g_SmuLockReady)
@@ -101,6 +135,9 @@ VOID SmuAmdDetect(SMBUS_CONTROLLER* Controller)
     {
         Controller->SmuAvailable = TRUE;
         Controller->SmuCcdOffset = SmuAmdCcdOffset(Controller->CpuFamily, Controller->CpuModel);
+        Controller->SmuTelemetryAvailable = SmuAmdSviConfig(Controller->CpuFamily, Controller->CpuModel,
+                                                            &Controller->SmuSviCoreAddr,
+                                                            &Controller->SmuSviSocAddr);
     }
 }
 
@@ -147,6 +184,17 @@ UINT32 SmuAmdRead(const SMBUS_CONTROLLER* Controller, UINT32 Sensor, UINT32* Raw
         if (Controller->SmuCcdOffset == 0)
             return BrokerSmbusNotImplemented;
         smn = ZEN_CCD_TEMP(Controller->SmuCcdOffset, (Sensor - BrokerSmuCcd0Temp));
+    }
+    else if (Sensor == BrokerSmuCoreVoltage || Sensor == BrokerSmuSocVoltage)
+    {
+        /* SVI2 voltage telemetry. Address baked from the per-model plane config; the client
+           names only the logical rail. Unknown model (no planes) -> not offered. */
+        if (!Controller->SmuTelemetryAvailable)
+            return BrokerSmbusNotImplemented;
+        smn = (Sensor == BrokerSmuCoreVoltage) ? Controller->SmuSviCoreAddr
+                                               : Controller->SmuSviSocAddr;
+        if (smn == 0)
+            return BrokerSmbusNotImplemented;
     }
     else
     {

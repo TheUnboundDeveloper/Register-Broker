@@ -61,14 +61,19 @@ Order of flags doesn't matter. Anything the server doesn't recognise comes back 
 ```
 Prints each zone's id, label, and LED count, e.g.:
 ```
-RGB devices (3):
-  ram0     GSkill RGB (DIMM 0) [5 LEDs]
-  ram1     GSkill RGB (DIMM 1) [5 LEDs]
-  mb.argb0 Front ARGB Fans (JRAINBOW) [60 LEDs]
+RGB devices (5):
+  ram0         GSkill RGB (DIMM 0) [5 LEDs]
+  ram1         GSkill RGB (DIMM 1) [5 LEDs]
+  mb.argb0     Front ARGB Fans (JRAINBOW) [60 LEDs]
+  razer.naga   Razer Naga Trinity [3 LEDs]
+  razer.cynosa Razer Cynosa Chroma [132 LEDs]
 ```
-The **id** (`ram0`, `mb.argb0`) is what you pass to `--device`. On the wire each zone also carries a
-`kind` (`dram`/`mb12v`/`mbargb`) and `transport` (`smbusene`/`superioec`/`usbhid`) for apps that want
-to group them; the CLI display omits those.
+The **id** (`ram0`, `mb.argb0`, `razer.cynosa`) is what you pass to `--device`. On the wire each
+device also carries a `kind` (`dram`/`mb12v`/`mbargb`/`keyboard`/`mouse`) and `transport`
+(`smbusene`/`superioec`/`usbhid`/`usbhidrazer`) for apps that want to group them; the CLI display
+omits those. Razer Chroma keyboards/mice and the MSI USB-HID header path require the USB-HID
+transport to be enabled (`AllowHidRgb`; see `docs/RGB-BOARD-BRINGUP.md`) and are driven per-LED
+just like any other device.
 
 ### `rgb.set` — set a zone to one color
 ```powershell

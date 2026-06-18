@@ -45,6 +45,9 @@ typedef struct _SMBUS_CONTROLLER
     UCHAR        CpuFamily;                 /* CPUID effective family (e.g. 0x17, 0x19)    */
     UCHAR        CpuModel;                  /* CPUID effective model (selects CCD offset)  */
     UINT32       SmuCcdOffset;              /* k10temp per-model CCD temp offset; 0 = none */
+    BOOLEAN      SmuTelemetryAvailable;     /* TRUE when the SVI voltage planes are known   */
+    UINT32       SmuSviCoreAddr;            /* SVI telemetry SMN addr for VDDCR_CPU; 0 = none */
+    UINT32       SmuSviSocAddr;             /* SVI telemetry SMN addr for VDDCR_SOC; 0 = none */
     BOOLEAN      SuperioAvailable;          /* TRUE when a supported Super-I/O was found     */
     USHORT       SuperioBase;               /* EC base I/O port (from LD-HWM / LD-EC)        */
     USHORT       SuperioChipId;             /* detected SIO chip id (e.g. 0xD592, 0x8688)   */

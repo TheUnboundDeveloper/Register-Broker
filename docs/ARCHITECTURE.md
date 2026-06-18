@@ -185,24 +185,32 @@ atomic block write; DIRECT mode + APPLY are latched once per controller).
 
 ### 5.1 RGB transports & their safety boundaries
 
-DRAM RGB is on the SMBus; **motherboard headers are not** — they need other transports.
-`RgbCatalog` is a DMI-matched board profile of zones, each tagged with a transport; the client
-contract (`rgb.list`/`rgb.set`) is identical across all three. What bounds a write differs:
+DRAM RGB is on the SMBus; **motherboard headers and USB peripherals are not** — they need other
+transports. Board RGB comes from a DMI-matched `RgbCatalog` board profile of zones, each tagged
+with a transport; **USB-HID peripherals (Razer Chroma) are board-independent** — matched by USB
+vendor/product/interface+usage, not the board profile. The client contract (`rgb.list`/`rgb.set`)
+is identical across all transports. What bounds a write differs:
 
 | Transport | Hardware | Path | Safety boundary | Status |
 |---|---|---|---|---|
 | `SmbusEne` | ENE/Aura DRAM | `IOCTL_SMBUS_WRITE` | **Kernel** address brick-guard (`0x70–0x77` / `0x39–0x3A`) | validated |
 | `SuperioEc` | NCT6687 12V header (JRGB) | `IOCTL_SUPERIO_RGB_WRITE` | **Kernel** EC RGB-register brick-guard | wired but **inert** — `SuperioRgbImplemented`/`CAP_SUPERIO_RGB` off until the EC RGB window is hardware-validated |
-| `UsbHid` | MSI Mystic Light addressable headers | user-mode HID feature reports | **Broker only** — baked report builder, *no kernel guard* | opt-in (`AllowHidRgb`, default off), reduced assurance |
+| `UsbHid` | MSI Mystic Light addressable headers | user-mode HID feature reports | **Broker only** — baked report builder, *no kernel guard* | opt-in (`AllowHidRgb`, default off); validated |
+| `UsbHidRazer` | Razer Chroma keyboards / mice | user-mode HID feature reports (90-byte extended-matrix protocol) | **Broker only** — baked report builder, *no kernel guard* | opt-in (`AllowHidRgb`, default off); **validated** (Naga Trinity, Cynosa Chroma — 2026-06-17) |
 
-**Driver-stability contract:** adding a board/zone is a **broker-only** change. The kernel
-exposes only stable, class-wide write windows (the SMBus RGB range; the NCT6687 RGB register
-region, a property of the silicon), so new controllers/boards never require a driver recompile —
-which also avoids the re-signed-`.sys` time bomb. The driver changes only for a genuinely new
-transport class or Super-I/O / SMBus vendor family.
+**Driver-stability contract:** adding a board/zone — or a USB-HID peripheral — is a **broker-only**
+change. The kernel exposes only stable, class-wide write windows (the SMBus RGB range; the NCT6687
+RGB register region, a property of the silicon), and USB-HID is entirely user-mode, so new
+controllers/boards/peripherals never require a driver recompile — which also avoids the
+re-signed-`.sys` time bomb. The driver changes only for a genuinely new kernel transport class or
+Super-I/O / SMBus vendor family.
 
-The USB-HID path is the **corrected** re-introduction of a user-mode HID transport scoped to RGB;
-the retired Gigabyte IT8297 path stays retired (design record: `docs/GIGABYTE-SUPPORT.md`).
+The USB-HID paths are the **corrected** re-introduction of a user-mode HID transport scoped to RGB
+only; the retired Gigabyte IT8297 path stays retired (design record: `docs/GIGABYTE-SUPPORT.md`).
+Razer command collections are owned by the OS HID input stack, so `HidDevice` opens them with a
+zero-access fallback (feature reports work on a 0-access handle) and binds the command collection
+by its `(interface, usage)` tuple — the same discriminator the reference Razer/OpenRazer protocol
+uses.
 
 ---
 

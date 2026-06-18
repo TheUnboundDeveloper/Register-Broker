@@ -20,6 +20,8 @@
     { "rawId": "smu.ccd.5", "label": "CPU CCD5 Temperature" },
     { "rawId": "smu.ccd.6", "label": "CPU CCD6 Temperature" },
     { "rawId": "smu.ccd.7", "label": "CPU CCD7 Temperature" },
+    { "rawId": "smu.cpu.vcore", "label": "CPU Core Voltage (SVI)" },
+    { "rawId": "smu.soc.voltage", "label": "SoC Voltage (SVI)" },
 
     { "rawId": "nct6687d.temp.0", "label": "Board Temp 0" },
     { "rawId": "nct6687d.temp.1", "label": "Board Temp 1" },
@@ -110,7 +112,7 @@
         // The zone ids come from the signed RgbBoardProfile (RgbCatalog.cs); calibration only
         // renames them for rgb.list, or hides one with "hidden": true.
         { "rawId": "mb.jrgb0", "label": "Case 12V Strip (JRGB)" },
-        { "rawId": "mb.argb0", "label": "Front ARGB Fans (JRAINBOW)" }
+        { "rawId": "mb.argb0", "label": "MSI JRAINBOW" }
       ]
     }
   ]

@@ -35,6 +35,11 @@ internal sealed class SmbusDriverBackend : ISmbusBackend, IDisposable
     private const int  MAX_CCD             = 8;
     private const uint CCD_TEMP_VALID      = 0x800; // BIT(11), per k10temp
 
+    /* AMD SVI2 voltage telemetry. SMU sensor ids 9/10 = BrokerSmuCoreVoltage/SocVoltage; the
+       kernel bakes the per-model SVI plane address. A driver/CPU without the planes returns
+       NotImplemented, so we probe core voltage once to learn whether the rails are served. */
+    private const uint SMU_CORE_VOLTAGE    = 9;     // BrokerSmuCoreVoltage
+
     // CTL_CODE(0x8000, fn, METHOD_BUFFERED=0, FILE_ANY_ACCESS=0) = (0x8000<<16)|(fn<<2)
     private const uint IOCTL_INFO    = (0x8000u << 16) | (0x800u << 2);
     private const uint IOCTL_XFER    = (0x8000u << 16) | (0x801u << 2);
@@ -63,6 +68,10 @@ internal sealed class SmbusDriverBackend : ISmbusBackend, IDisposable
     private readonly object _ccdGate = new();
     private bool _ccdScanned;
     private readonly bool[] _ccdPresent = new bool[MAX_CCD];
+
+    private readonly object _smuVoltGate = new();
+    private bool _smuVoltScanned;
+    private bool _smuVoltPresent;
 
     public bool Available { get; }
     /// <summary>True when the driver reports the AMD SMU CPU-temperature path (CAP_SMU).</summary>
@@ -318,6 +327,31 @@ internal sealed class SmbusDriverBackend : ISmbusBackend, IDisposable
         if (ccd < 0 || ccd >= MAX_CCD) return false;
         EnsureCcdScan();
         return _ccdPresent[ccd];
+    }
+
+    /// <summary>
+    /// Lazily probes whether the driver serves AMD SVI2 voltage telemetry (read core voltage once;
+    /// Ok means the CPU model's plane is baked in). Runs once, cached. Only the sensor broker calls
+    /// this. An old driver returns BadRequest for the new sensor id, leaving the rails absent.
+    /// </summary>
+    private void EnsureSmuVoltageScan()
+    {
+        if (_smuVoltScanned) return;
+        lock (_smuVoltGate)
+        {
+            if (_smuVoltScanned) return;
+            if (SmuAvailable)
+            {
+                _smuVoltPresent = TryReadSmuRaw(SMU_CORE_VOLTAGE, out _, out _);
+                _log($"[smu] SVI voltage telemetry: {(_smuVoltPresent ? "present" : "not available")}");
+            }
+            _smuVoltScanned = true;
+        }
+    }
+
+    public bool SmuVoltagePresent
+    {
+        get { EnsureSmuVoltageScan(); return _smuVoltPresent; }
     }
 
     public bool TryReadDimmTempRaw(int index, out uint raw, out SmbusStatus status)

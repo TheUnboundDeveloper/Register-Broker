@@ -79,11 +79,12 @@ trust blindly.
 
 ## What works today
 
-**33-sensor catalog** served to non-admin clients over authenticated pipe; RGB drivable on DRAM **and motherboard headers**.
+**35-sensor catalog** served to non-admin clients over authenticated pipe; RGB drivable on DRAM, **motherboard headers, and USB peripherals (Razer)**.
 
 | Capability | Mechanism | Status |
 |---|---|---|
 | CPU die temp + per-CCD (Ryzen) | AMD SMU Tctl + CCD reads over SMN | ✅ hardware-validated |
+| CPU core + SoC voltage (Ryzen) | AMD SVI2 telemetry over SMN (Matisse/Vermeer) | ✅ hardware-validated (5800X3D) |
 | Board temps / fans / voltages | Nuvoton NCT6683 EC (0xC730) | 🟡 implemented, HW-unvalidated |
 | Board temps / fans / voltages | Nuvoton NCT6686 EC (0xD440) | 🟡 implemented, HW-unvalidated |
 | Board temps / fans / voltages | Nuvoton NCT6687D EC (0xD590) | ✅ hardware-validated |
@@ -91,6 +92,7 @@ trust blindly.
 | DIMM temperatures | JC42 / TSE2004av over SMBus | ✅ hardware-validated |
 | Per-LED DRAM RGB (non-admin!) | ENE/Aura (block write, 1–32 B atomic) | ✅ hardware-validated |
 | Motherboard ARGB headers (non-admin!) | MSI Mystic Light over USB-HID (JRAINBOW) | ✅ hardware-validated (MSI B550I) — opt-in |
+| Peripheral RGB (non-admin!) | Razer Chroma keyboards/mice over USB-HID | ✅ hardware-validated (Naga Trinity, Cynosa Chroma) — opt-in |
 | Motherboard 12V header | NCT6687 EC RGB (JRGB) | 🟡 wired + brick-guarded, inert pending EC-register validation |
 | AMD SMBus host (FCH KERNCZ) | SMBus sequential controller | ✅ hardware-validated |
 | Intel SMBus host (i801) | SMBus sequential controller | ⬜ implemented, HW-unvalidated |
@@ -107,6 +109,7 @@ zones; the client contract (`rgb.list` / `rgb.set`) is identical across transpor
 |---|---|---|---|
 | SMBus (ENE/Aura) | DRAM modules | **kernel** address brick-guard (`0x70–0x77` / `0x39–0x3A`) | ✅ validated (G.Skill DDR4) |
 | USB-HID (MSI Mystic Light) | addressable motherboard headers (JRAINBOW) | **broker** baked report builder + PID pin, *no kernel guard* | ✅ validated (MSI B550I); **opt-in** |
+| USB-HID (Razer Chroma) | keyboards / mice (board-independent) | **broker** baked report builder + USB id/usage match, *no kernel guard* | ✅ validated (Naga Trinity, Cynosa Chroma); **opt-in** |
 | Super-I/O EC (NCT6687) | 12V motherboard header (JRGB) | **kernel** EC RGB-register brick-guard | 🟡 wired, **inert** until the EC RGB window is validated |
 
 - **USB-HID is opt-in and reduced-assurance.** It's a user-mode transport (the broker talks to
@@ -164,9 +167,19 @@ Details: [docs/USER-GUIDE.md](docs/USER-GUIDE.md) (run it) ·
 - **Production code signing** (EV certificate + attestation) — currently test-signed.
   Hardened client authentication (`RequireAuthorizedClient`) is off by default; will
   require production cert + pinned signer thumbprint.
-- **SMU PM-table metrics** (CPU power, clocks, voltage) — separate mailbox mechanism,
-  deliberately deferred.
-- **RGB scope**: DRAM (SMBus) + motherboard ARGB headers (USB-HID, opt-in), colors only; the
+- **CPU package power (PPT) and per-core / effective clocks are intentionally not exposed.**
+  CPU **voltages** are served (`smu.cpu.vcore`, `smu.soc.voltage` — SVI2 telemetry, read as named
+  registers like every other sensor). Package power and clocks are different: they exist only in the
+  AMD SMU **PM table**, which the CPU will only hand over by DMA-ing it into a region of system RAM
+  on request — reading it means *writing the SMU command mailbox* and then *mapping and reading that
+  physical-memory region*. That is squarely outside this project's core promise — a narrow driver
+  that touches only bounded, named registers and **never arbitrary physical memory**. So the value
+  isn't worth diluting that guarantee for every sensor read. If the PM table is ever added it will be
+  a **separate, opt-in driver+service** that a security-conscious user can simply decline, leaving
+  the core driver's assurances intact. **We'll revisit it if it's frequently requested** — open an
+  issue if you want it.
+- **RGB scope**: DRAM (SMBus) + motherboard ARGB headers (USB-HID, opt-in) + Razer Chroma
+  peripherals (USB-HID, opt-in, board-independent), colors only; the
   NCT6687 EC 12V-header path is wired but inert pending validation — see
   [RGB status](#rgb-status-read-this-before-expecting-your-build-to-light-up).
 

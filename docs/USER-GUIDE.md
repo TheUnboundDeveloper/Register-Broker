@@ -129,9 +129,10 @@ offline, no-admin inspector that prints your board's DMI identity and the resolv
 Requires the control service (`-WithRgbControl` at install) and a driver with the write
 capability.
 
-> **RGB scope today:** DRAM modules (ENE/Aura over SMBus, validated on G.Skill DDR4) **and
-> motherboard ARGB headers** (MSI Mystic Light over USB-HID — opt-in, validated on MSI B550I).
-> The 12V JRGB header via the NCT6687 EC is wired but inert pending validation. GPUs and AIOs are
+> **RGB scope today:** DRAM modules (ENE/Aura over SMBus, validated on G.Skill DDR4), **motherboard
+> ARGB headers** (MSI Mystic Light over USB-HID — opt-in, validated on MSI B550I), **and Razer Chroma
+> peripherals** (keyboards/mice over USB-HID — opt-in, board-independent, validated on Naga Trinity
+> + Cynosa Chroma). The 12V JRGB header via the NCT6687 EC is wired but inert pending validation. GPUs and AIOs are
 > not supported. It's **colors only**: effects (breathing, rainbow, music sync) are the consumer
 > app's job — render frames and send `rgb.set` updates at your own rate. The broker hosts no
 > effects engine. Full command reference: [RGB-COMMANDS.md](RGB-COMMANDS.md); full scope

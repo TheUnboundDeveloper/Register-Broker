@@ -39,6 +39,9 @@ internal static class Program
 
         if (args.Any(a => a.Equals("--ene-set", StringComparison.OrdinalIgnoreCase)))
             return RunEneSetProbe(args);
+
+        if (args.Any(a => a.Equals("--mystic-perled", StringComparison.OrdinalIgnoreCase)))
+            return RunMysticPerLedProbe(args);
 #endif
 
         if (args.Any(a => a.Equals("--client", StringComparison.OrdinalIgnoreCase)))
@@ -142,6 +145,8 @@ internal static class Program
     | no pipe, no service restart. Close OpenRGB / MSI Center first  |
     | so nothing is fighting for the device.                        |
     |   BrokerSensorBridge.exe --hid-scan [--vid=1462] > hid.txt    |
+    |   BrokerSensorBridge.exe --hid-scan --vid=1532 > hid.txt      |
+    |     (Razer: note the 'iface' of the command interface)        |
     \*-----------------------------------------------------------*/
     private static int RunHidScan(string[] args)
     {
@@ -163,10 +168,10 @@ internal static class Program
 
         Console.WriteLine($"Found {devs.Count} interface(s) at VID 0x{vid:X4}:");
         foreach (HidDevice d in devs)
-            Console.WriteLine($"  PID 0x{d.ProductId:X4}  featureReportLen={d.FeatureReportByteLength,-4}  {d.Path}");
+            Console.WriteLine($"  PID 0x{d.ProductId:X4}  iface={d.InterfaceNumber,2}  featLen={d.FeatureReportByteLength,-4}  usage={d.UsagePage:X2}:{d.Usage:X2}  {d.Path}");
         Console.WriteLine();
-        Console.WriteLine("Pin the RGB controller's PID via HidProductId in the board's RgbBoardProfile (RgbCatalog.cs),");
-        Console.WriteLine("then rebuild the broker only. featureReportLen identifies the Mystic Light variant (185/162/112).");
+        Console.WriteLine("MSI Mystic Light: pin the controller's PID via HidProductId in RgbCatalog.cs (featLen = variant 185/162/112).");
+        Console.WriteLine("Razer (VID 1532): the command interface is matched by 'iface' — see RazerHidController.KnownModels (Naga=0, Cynosa=2).");
         foreach (HidDevice d in devs) d.Dispose();
         return 0;
     }
@@ -409,8 +414,8 @@ internal static class Program
 
         /* Shared k10temp decode (see SensorCatalog). Tdie = Tctl minus a per-SKU
            offset (0 on most desktop Ryzen, e.g. Vermeer/5800X3D). */
-        double tctl = SensorCatalog.DecodeAmdCpuTctlC(raw);
-        double tdie = SensorCatalog.DecodeAmdCpuTctlC(raw, offset);
+        double tctl = SensorDecode.AmdCpuTctlC(raw);
+        double tdie = SensorDecode.AmdCpuTctlC(raw, offset);
 
         Console.WriteLine($"OK  raw=0x{raw:X8}  Tctl={tctl:F2} C" +
                           (offset != 0.0 ? $"  Tdie={tdie:F2} C (offset {offset:F1})" : "  (Tdie=Tctl, offset 0)"));
@@ -424,10 +429,25 @@ internal static class Program
             {
                 bool valid = (craw & 0x800u) != 0;
                 Console.WriteLine($"  ccd{c}  raw=0x{craw:X8}  " +
-                    (valid ? $"{SensorCatalog.DecodeAmdCcdTempC(craw):F2} C" : "(not valid / not present)"));
+                    (valid ? $"{SensorDecode.AmdCcdTempC(craw):F2} C" : "(not valid / not present)"));
             }
             else Console.WriteLine($"  ccd{c}  ({cst})");
         }
+
+        /* SVI2 voltage telemetry (zenpower). Served only on models with known plane addresses
+           (Matisse/Vermeer); compare to HWiNFO "Vcore (SVI2 TFN)" / "SoC Voltage (SVI2 TFN)". */
+        Console.WriteLine("SVI voltages (zenpower telemetry):");
+        if (backend.SmuVoltagePresent)
+        {
+            foreach ((uint sensor, string name) in new[] { (9u, "vcore"), (10u, "soc  ") })
+            {
+                if (backend.TryReadSmuRaw(sensor, out uint vraw, out SmbusStatus vst))
+                    Console.WriteLine($"  {name}  raw=0x{vraw:X8}  {SensorDecode.AmdSviVoltageV(vraw):F3} V");
+                else
+                    Console.WriteLine($"  {name}  ({vst})");
+            }
+        }
+        else Console.WriteLine("  (not available on this CPU model)");
         return 0;
     }
 
@@ -597,6 +617,86 @@ internal static class Program
         return 0;
     }
 
+    /*-----------------------------------------------------------*\
+    | Per-LED DIRECT-mode bring-up (MSI Mystic Light report 0x53). |
+    | Lights `--count` LEDs starting at flat index `--index` in    |
+    | the 240-LED direct array, so the JRAINBOW1 index range can    |
+    | be found empirically: sweep --index, watch which physical    |
+    | LED lights, then bake HidLedOffset into RgbCatalog.cs.        |
+    | Reuses the real controller (enable direct mode + 0x53 frame). |
+    | Opt-in dev build only; RGB-only (no fan/voltage reach).       |
+    |   --mystic-perled --index=0 --count=1 --color=FF0000          |
+    |   --mystic-perled --index=23 --count=60 [--pid=7C92] [--zoneoff=31]|
+    \*-----------------------------------------------------------*/
+    private static int RunMysticPerLedProbe(string[] args)
+    {
+        int    hdr1     = ProbeArgInt(args, "--hdr1=", 4);       // 0x53 per-zone selector (JRAINBOW=4, JCORSAIR=5, onboard=6)
+        int    hdr2     = ProbeArgInt(args, "--hdr2=", 0);       // sub-selector (JRAINBOW2 = 1)
+        int    count    = ProbeArgInt(args, "--count=", 60);
+        int    pid      = ProbeArgInt(args, "--pid=", 0x7C92);
+        string colorHex = ProbeArgStr(args, "--color=", "FF0000").TrimStart('#');
+        bool   noEnable = args.Any(a => a.Equals("--no-enable", StringComparison.OrdinalIgnoreCase));
+        if (colorHex.Length != 6 || count < 1)
+        {
+            Console.WriteLine("usage: --mystic-perled [--hdr1=4] [--hdr2=0] [--count=M] [--color=RRGGBB] [--pid=7C92] [--no-enable]");
+            return 2;
+        }
+
+        byte r, g, b;
+        try
+        {
+            r = Convert.ToByte(colorHex.Substring(0, 2), 16);
+            g = Convert.ToByte(colorHex.Substring(2, 2), 16);
+            b = Convert.ToByte(colorHex.Substring(4, 2), 16);
+        }
+        catch { Console.WriteLine("bad --color (expected RRGGBB hex)"); return 2; }
+
+        IReadOnlyList<HidDevice> devs = HidDevice.OpenByVendor(0x1462, Console.WriteLine);
+        Console.WriteLine($"MSI HID interfaces at VID 0x1462: {devs.Count}");
+        foreach (HidDevice d0 in devs)
+            Console.WriteLine($"  candidate PID 0x{d0.ProductId:X4}  iface={d0.InterfaceNumber}  featLen={d0.FeatureReportByteLength}  usage={d0.UsagePage:X2}:{d0.Usage:X2}");
+        HidDevice? dev = devs.FirstOrDefault(d => d.ProductId == pid) ?? devs.FirstOrDefault();
+        if (dev is null)
+        {
+            Console.WriteLine($"No MSI HID device found at VID 0x1462 (looked for PID 0x{pid:X4}). Close OpenRGB/MSI Center and STOP the control service first.");
+            foreach (HidDevice d in devs) d.Dispose();
+            return 1;
+        }
+
+        Console.WriteLine($"Using PID 0x{dev.ProductId:X4} featLen={dev.FeatureReportByteLength} (per-LED 0x53 needs >= 725)");
+        if (dev.FeatureReportByteLength < 725)
+            Console.WriteLine("  WARNING: featLen < 725 — this device may not expose the 0x53 per-LED report; SetFeature will likely fail.");
+
+        /* Step 1: enable per-LED DIRECT mode via the full 185-byte (0x52) enable packet (the same one
+           the controller sends — on_board_led carries the device-wide per-LED master flags). */
+        if (!noEnable)
+        {
+            var enable = new byte[185];
+            MysticLightHidController.BuildDirectModeEnable(enable);
+            bool setEn = dev.SetFeature(enable);
+            System.Threading.Thread.Sleep(15);
+            Console.WriteLine($"  enable: full per-LED direct packet  send(0x52@185)={(setEn ? "ok" : "FAIL")}");
+        }
+        else Console.WriteLine("  enable: SKIPPED (--no-enable)");
+
+        /* Step 2: the 0x53 per-LED frame for the selected zone (hdr1/hdr2). Seed from device
+           (best-effort) so untouched LEDs persist, then write `count` LEDs of the color from index 0. */
+        int frameLen = 5 + MysticLightHidController.PerLedMaxLeds * 3;   // 725
+        var frame = new byte[frameLen];
+        frame[0] = 0x53;
+        bool seedPl = dev.GetFeature(frame);
+        var colors = new (byte, byte, byte)[count];
+        for (int i = 0; i < count; i++) colors[i] = (r, g, b);
+        MysticLightHidController.BuildPerLedFrame(frame, (byte)hdr1, (byte)hdr2, colors, count);
+        bool setPl = dev.SetFeature(frame);
+        Console.WriteLine($"  per-LED zone hdr1={hdr1} hdr2={hdr2} count={count} #{colorHex}  "
+                        + $"seed={(seedPl ? "ok" : "FAIL")} send(0x53@{frameLen})={(setPl ? "ok" : "FAIL")}");
+        Console.WriteLine("Watch the strip. If dark, try --hdr1=4/5/6 and --hdr2=0/1, or --enable-all.");
+
+        foreach (HidDevice d in devs) d.Dispose();
+        return setPl ? 0 : 1;
+    }
+
     private static double ProbeArgDouble(string[] args, string prefix, double fallback)
     {
         string s = ProbeArgStr(args, prefix, "");
@@ -748,6 +848,7 @@ internal static class Program
         var srvSensor = new BrokerControlServer(pipeSensor, m => Console.WriteLine("[sensor-srv] " + m), sensorAuth, new MockSmbusBackend(available: true, smuAvailable: true));
         Task t4 = srvSensor.RunAsync(cts.Token);
         failures += await SelfTestCase("sensor.read cpu.temp -> data",   pipeSensor, scopes: new[] { "sensors:read" }, op: "sensor.read", expect: "data", id: "cpu.temp");
+        failures += await SelfTestCase("sensor.read smu.cpu.vcore -> data", pipeSensor, scopes: new[] { "sensors:read" }, op: "sensor.read", expect: "data", id: "smu.cpu.vcore");
         failures += await SelfTestCase("sensor.read unknown id -> deny",  pipeSensor, scopes: new[] { "sensors:read" }, op: "sensor.read", expect: "deny", id: "no.such.sensor");
 
         /*-- Server 5: no SMU -> cpu.temp not available -> sensor.read denied (no oracle) --*/
@@ -905,6 +1006,13 @@ internal static class Program
             var nct6798Temp = new MockSmbusBackend(available: true, superioAvailable: true, superioChipId: 0xD428, superioRaw: 0x8064);
             SensorReading t = bsTemp.Read(nct6798Temp);                   // 0x8064 -> 100 + 0.5
             Check("nct6775 temp decode (0x8064 -> 100.5 C)", t.Ok && Math.Abs(t.Value - 100.5) < 1e-9);
+
+            /* AMD SVI2 voltage decode (zenpower plane_to_vcc): V = 1.550 − 0.00625·((raw>>16)&0xFF),
+               clamped at 0. code 0x50 (80) -> 1.050 V; code 0xFF -> negative -> clamped to 0. */
+            Check("smu SVI voltage decode (0x00500000 -> 1.050 V)",
+                  Math.Abs(SensorDecode.AmdSviVoltageV(0x00500000) - 1.050) < 1e-9);
+            Check("smu SVI voltage clamp (0x00FF0000 -> 0 V)",
+                  SensorDecode.AmdSviVoltageV(0x00FF0000) == 0.0);
         }
         catch (Exception ex)
         {
@@ -1043,6 +1151,77 @@ internal static class Program
                       jrgb != null && jrgb.Kind == RgbZoneKind.Mb12V && jrgb.Transport == RgbTransport.SuperioEc);
                 Check("calibration relabels zone id", jrgb != null && jrgb.Label == "Case 12V Strip (JRGB)");
             }
+
+            /* MSI Mystic Light packet layout (the JRAINBOW double-brightness/flicker fix): an MbArgb
+               (addressable) zone must write the 11-byte RainbowZoneData — the 10 ZoneData fields PLUS
+               the cycle_or_led_num LED-count byte at +10; a non-addressable zone writes ZoneData only
+               and must leave +10 untouched. Static color = effect 0x01, brightness flags 0x7C,
+               colorFlags 0x80 (fixed). zoneOffset 31 = j_rainbow_1; the rainbow byte returns the count. */
+            byte[] argb = new byte[185];
+            int wrote = MysticLightHidController.BuildZonePacket(argb, 31, RgbZoneKind.MbArgb, 0x11, 0x22, 0x33, 60);
+            Check("Mystic Light MbArgb -> ZoneData fields (effect/RGB/brightness/colorFlags)",
+                  argb[31] == 0x01 && argb[32] == 0x11 && argb[33] == 0x22 && argb[34] == 0x33
+                  && argb[35] == 0x7C && argb[39] == 0x80);
+            Check("Mystic Light MbArgb -> cycle_or_led_num LED count at +10",
+                  wrote == 60 && argb[41] == 60);
+
+            byte[] solid = new byte[185];
+            int wrote2 = MysticLightHidController.BuildZonePacket(solid, 1, RgbZoneKind.Mb12V, 0x11, 0x22, 0x33, 60);
+            Check("Mystic Light non-rainbow zone -> ZoneData only (no +10 LED-count byte)",
+                  wrote2 == 0 && solid[1] == 0x01 && solid[1 + 10] == 0x00);
+
+            /* The cycle_or_led_num byte is clamped into the protocol's valid range (1..200), so a
+               malformed/huge LedCount can never write an out-of-range count. */
+            byte[] clampLo = new byte[185]; MysticLightHidController.BuildZonePacket(clampLo, 31, RgbZoneKind.MbArgb, 1, 1, 1, 0);
+            byte[] clampHi = new byte[185]; MysticLightHidController.BuildZonePacket(clampHi, 31, RgbZoneKind.MbArgb, 1, 1, 1, 9999);
+            Check("Mystic Light rainbow LED count clamped to 1..200", clampLo[41] == 1 && clampHi[41] == 200);
+
+            /* Per-LED DIRECT frame (report 0x53): fixed header [0x53,0x25,0x06,0x00,0x00], then literal
+               RGB triplets at ledOffset within the 240-LED array. This is the path that fixes the
+               brightness fold on addressable headers (linear per-LED RGB, no firmware sync engine). */
+            int frameLen = 5 + MysticLightHidController.PerLedMaxLeds * 3;       // 725
+            byte[] pl = new byte[frameLen];
+            MysticLightHidController.BuildPerLedFrame(pl, hdr1: 4, hdr2: 0,
+                new (byte, byte, byte)[] { (0xAA, 0xBB, 0xCC), (0x11, 0x22, 0x33) }, 2);
+            Check("per-LED frame length = 725 (5 header + 240*3)", frameLen == 725);
+            Check("per-LED JRAINBOW1 header (0x53 / 0x25 / hdr1=4 / hdr2=0)",
+                  pl[0] == 0x53 && pl[1] == 0x25 && pl[2] == 0x04 && pl[3] == 0x00);
+            Check("per-LED LED0 at frame index 0 -> bytes 5..7", pl[5] == 0xAA && pl[6] == 0xBB && pl[7] == 0xCC);
+            Check("per-LED LED1 at frame index 1 -> bytes 8..10", pl[8] == 0x11 && pl[9] == 0x22 && pl[10] == 0x33);
+            Check("per-LED leaves LEDs past the count untouched", pl[11] == 0x00);
+
+            byte[] pl2 = new byte[frameLen];
+            MysticLightHidController.BuildPerLedFrame(pl2, hdr1: 4, hdr2: 1,
+                new (byte, byte, byte)[] { (1, 2, 3) }, 1);
+            Check("per-LED JRAINBOW2 selector (hdr1=4 / hdr2=1)", pl2[2] == 0x04 && pl2[3] == 0x01);
+
+            /* The catalog refuses a per-LED zone whose LedCount overruns the 240-LED frame. */
+            var argbBad = new RgbZone("argbbad", "x", RgbZoneKind.MbArgb, RgbTransport.UsbHid, LedCount: 999, HidPerLedHdr1: 4);
+            Check("per-LED zone overrunning the 240-LED frame refused", RgbCatalog.ZoneAddressFault(argbBad) != null);
+
+            /* Razer extended-matrix packet math (the brittle part of the USB-HID port): a 1-LED
+               custom frame with RGB AA BB CC must carry the right header/args and CRC = XOR[3..88]. */
+            byte[] frame = RazerHidController.BuildCustomFrameRow(0, 1, new byte[] { 0xAA, 0xBB, 0xCC });
+            Check("Razer custom frame header (class 0x0F id 0x03, size 0x08)",
+                  frame.Length == 91 && frame[2] == 0x3F && frame[6] == 0x08 && frame[7] == 0x0F && frame[8] == 0x03);
+            Check("Razer custom frame args (row/start/stop + RGB)",
+                  frame[11] == 0x00 && frame[12] == 0x00 && frame[13] == 0x00
+                  && frame[14] == 0xAA && frame[15] == 0xBB && frame[16] == 0xCC);
+            Check("Razer custom frame CRC = XOR[3..88]", frame[89] == 0xD9);
+
+            byte[] apply = RazerHidController.BuildApplyCustom();
+            Check("Razer apply-custom (class 0x0F id 0x02 size 0x0C, effect 0x08, CRC)",
+                  apply[6] == 0x0C && apply[7] == 0x0F && apply[8] == 0x02 && apply[11] == 0x08 && apply[89] == 0x09);
+
+            Check("Razer known-model geometry (Naga 3 LEDs, Cynosa 132 LEDs)",
+                  RazerHidController.KnownModels.Any(m => m.Id == "razer.naga"   && m.Rows * m.Cols == 3) &&
+                  RazerHidController.KnownModels.Any(m => m.Id == "razer.cynosa" && m.Rows * m.Cols == 132));
+
+            /* The Razer command interface is matched by USB interface number, parsed from the
+               Windows HID device path (&mi_NN); a non-composite path yields -1. */
+            Check("HID device-path interface parse (&mi_02 -> 2, none -> -1)",
+                  HidDevice.ParseInterfaceNumber(@"\\?\hid#vid_1532&pid_022a&mi_02#7&xyz#{g}") == 2 &&
+                  HidDevice.ParseInterfaceNumber(@"\\?\hid#vid_1532&pid_0067#abc") == -1);
         }
         catch (Exception ex)
         {

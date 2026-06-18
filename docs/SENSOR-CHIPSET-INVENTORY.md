@@ -19,11 +19,12 @@
 
 ## 1. By chipset / sensor source
 
-### CPU temperature — AMD SMU (SMN) · ✅ Validated
-- **What:** Ryzen Family 17h/19h reported temperature (Tctl) + per-CCD die temps.
-- **How:** `IOCTL_BROKER_SMU_READ` → `SmuAmd.c` (PCI root-complex SMN window). Decode k10temp/zenpower (`SensorDecode.AmdCpuTctlC` / `AmdCcdTempC`).
-- **Channels:** `smu.cpu.temp`, `smu.ccd.0..7` (CCDs presence-gated on the valid bit).
-- **Source:** Linux `k10temp` / `zenpower`. **Replaces WinRing0 for CPU temp.**
+### CPU temperature + voltage — AMD SMU (SMN) · ✅ Validated
+- **What:** Ryzen Family 17h/19h reported temperature (Tctl) + per-CCD die temps + core/SoC voltage (SVI2).
+- **How:** `IOCTL_BROKER_SMU_READ` → `SmuAmd.c` (PCI root-complex SMN window; named sensors only). Decode k10temp/zenpower (`SensorDecode.AmdCpuTctlC` / `AmdCcdTempC` / `AmdSviVoltageV`).
+- **Channels:** `smu.cpu.temp`, `smu.ccd.0..7` (CCDs presence-gated on the valid bit), `smu.cpu.vcore`, `smu.soc.voltage` (voltages presence-gated on a known per-model SVI plane; Matisse/Vermeer).
+- **Source:** Linux `k10temp` (temps) + `zenpower` (SVI voltages). **Replaces WinRing0 for CPU temp + voltage.**
+- **Not exposed:** SVI current/power (board-dependent factor) and PM-table package power / clocks (needs the SMU mailbox + a physical-memory read — outside the bounded-register driver design; see README).
 
 ### Board temps / fans / voltages — Nuvoton NCT668x (EC-space) · ✅ NCT6687D / 🟡 NCT6683 · NCT6686
 - **What:** board temperatures, fan tachometers, voltages.

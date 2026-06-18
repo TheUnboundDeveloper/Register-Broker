@@ -179,12 +179,15 @@ rgb.request("rgb.set", device="ram0",                   # or per-LED, one frame
 
 Rules of the road for RGB consumers:
 
-- **Group by `kind`/`transport`.** Each device carries `kind` (`dram`/`mb12v`/`mbargb`) and
-  `transport` (`smbusene`/`superioec`/`usbhid`). The set is board-specific — motherboard-header
-  zones appear only on a supported board with that transport enabled (e.g. `mbargb` requires the
-  operator's `AllowHidRgb`). Don't hard-code `ram0`; enumerate `rgb.list`.
-- **Per-LED support varies by transport.** DRAM honors the full `colors` array; the USB-HID
-  motherboard zone currently applies the lead color (per-LED streaming there is a future item).
+- **Group by `kind`/`transport`.** Each device carries `kind` (`dram`/`mb12v`/`mbargb`/`keyboard`/
+  `mouse`) and `transport` (`smbusene`/`superioec`/`usbhid`/`usbhidrazer`). Most are board-specific
+  (motherboard-header zones appear only on a supported board with `AllowHidRgb`), but USB-HID
+  **peripherals** (Razer Chroma keyboards/mice) are board-independent — present on any host with the
+  device and `AllowHidRgb`. Treat `kind`/`transport` as opaque strings (new values may appear);
+  don't hard-code `ram0` — enumerate `rgb.list`.
+- **Per-LED support varies by transport.** DRAM and the Razer extended-matrix peripherals honor the
+  full `colors` array; the MSI USB-HID motherboard zone currently applies the lead color (per-LED
+  streaming there is a future item).
 - **Effects are your job.** The broker writes colors; it hosts no animation engine.
   Render frames in your app and send per-LED `rgb.set` calls at your own cadence.
 - The control pipe's rate limit (120 ops/s, burst 240) comfortably fits per-device
