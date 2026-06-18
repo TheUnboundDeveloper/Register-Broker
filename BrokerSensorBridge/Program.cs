@@ -818,6 +818,15 @@ internal static class Program
               gating build the expected device set. --*/
         failures += SelfTestRgbCatalog();
 
+        /*-- Session policy: the lifetime must be the long SLIDING window, not the old hard
+              10-minute cap that silently killed live consumers mid-session. This guards against
+              a regression back to a short TTL (see the BrokerControlServer sliding-expiry fix). --*/
+        {
+            bool ttlOk = BrokerControlServer.SessionTtl >= TimeSpan.FromHours(24);
+            Console.WriteLine($"  [{(ttlOk ? "PASS" : "FAIL")}] session TTL is the 24h sliding window: got {BrokerControlServer.SessionTtl}");
+            failures += ttlOk ? 0 : 1;
+        }
+
         /*-- Server 1: enforcement OFF (audit only) -- hello & scope cases --*/
         const string pipeAudit = "SensorBrokerTest.audit";
         var auditAuth = new ClientAuthorization(false, null, null, m => Console.WriteLine("[audit-srv] " + m));
@@ -850,6 +859,11 @@ internal static class Program
         failures += await SelfTestCase("sensor.read cpu.temp -> data",   pipeSensor, scopes: new[] { "sensors:read" }, op: "sensor.read", expect: "data", id: "cpu.temp");
         failures += await SelfTestCase("sensor.read smu.cpu.vcore -> data", pipeSensor, scopes: new[] { "sensors:read" }, op: "sensor.read", expect: "data", id: "smu.cpu.vcore");
         failures += await SelfTestCase("sensor.read unknown id -> deny",  pipeSensor, scopes: new[] { "sensors:read" }, op: "sensor.read", expect: "deny", id: "no.such.sensor");
+
+        /*-- Stale-session contract: an op carrying an unknown/expired token must DROP the
+              connection (so the client's transport-failure reconnect re-authenticates), NOT
+              reply with a frame the client would treat as a recoverable op failure. --*/
+        failures += await SelfTestStaleSessionCase("stale session token -> connection closed (client must re-hello)", pipeSensor);
 
         /*-- Server 5: no SMU -> cpu.temp not available -> sensor.read denied (no oracle) --*/
         const string pipeNoSmu = "SensorBrokerTest.nosmu";
@@ -1277,6 +1291,47 @@ internal static class Program
                     new { type = "hello", protocol = BrokerProtocol.Version, scopes = new[] { "sensors:read" } }, CancellationToken.None);
                 await BrokerControlServer.ReadFrameAsync(client, CancellationToken.None);
                 Console.WriteLine($"  [FAIL] {name}: server responded instead of closing");
+                return 1;
+            }
+            catch (EndOfStreamException) { Console.WriteLine($"  [PASS] {name}: connection closed by server"); return 0; }
+            catch (IOException)          { Console.WriteLine($"  [PASS] {name}: connection closed by server"); return 0; }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  [FAIL] {name}: exception {ex.Message}");
+            return 1;
+        }
+    }
+
+    /*-----------------------------------------------------------*\
+    | Authenticate normally, then send an op with a bogus token.  |
+    | The broker must close the connection (transport drop) so a  |
+    | real client reconnects, rather than reply with a frame.     |
+    \*-----------------------------------------------------------*/
+    private static async Task<int> SelfTestStaleSessionCase(string name, string pipeName)
+    {
+        try
+        {
+            using var client = new System.IO.Pipes.NamedPipeClientStream(
+                ".", pipeName, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
+            await client.ConnectAsync(3000);
+
+            await BrokerControlServer.WriteFrameAsync(client,
+                new { type = "hello", protocol = BrokerProtocol.Version, scopes = new[] { "sensors:read" } }, CancellationToken.None);
+            JsonElement helloResp = await BrokerControlServer.ReadFrameAsync(client, CancellationToken.None);
+            if (helloResp.GetProperty("type").GetString() != "ok")
+            {
+                Console.WriteLine($"  [FAIL] {name}: hello was not accepted");
+                return 1;
+            }
+
+            /* Valid connection, invalid session token -> broker must drop the connection. */
+            await BrokerControlServer.WriteFrameAsync(client,
+                new { token = "not-a-real-session-token", op = "sensor.readall" }, CancellationToken.None);
+            try
+            {
+                await BrokerControlServer.ReadFrameAsync(client, CancellationToken.None);
+                Console.WriteLine($"  [FAIL] {name}: server replied instead of closing the connection");
                 return 1;
             }
             catch (EndOfStreamException) { Console.WriteLine($"  [PASS] {name}: connection closed by server"); return 0; }

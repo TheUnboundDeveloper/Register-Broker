@@ -66,7 +66,21 @@ internal sealed class BrokerControlServer
     // Active session count per identity (guarded by _sessionGate) for the per-identity cap.
     private readonly Dictionary<string, int> _sessionsByIdentity = new();
 
-    private sealed record Session(HashSet<string> Scopes, DateTime ExpiresUtc, string Who, string Identity, RateLimiter Limiter);
+    // Session lifetime is a SLIDING window: stamped at hello and pushed forward on every
+    // authorized op (see HandleRequestAsync), so a continuously-used connection NEVER expires
+    // — only one that goes genuinely idle (no op for SessionTtl) ages out. This replaces the
+    // old hard 10-minute cap, which silently killed live consumers mid-session: once it fired
+    // the broker rejected every op while the pipe stayed open, and a long-lived client kept
+    // replaying its dead token forever (only a full restart recovered). internal so the
+    // selftest can assert it stayed the long window.
+    internal static readonly TimeSpan SessionTtl = TimeSpan.FromHours(24);
+
+    private sealed record Session(HashSet<string> Scopes, string Who, string Identity, RateLimiter Limiter)
+    {
+        // Mutable so the sliding window can be refreshed in place. The owning connection's
+        // handler is the only writer (its ops are sequential); PruneExpiredSessions only reads.
+        public DateTime ExpiresUtc { get; set; }
+    }
 
     private readonly bool _allowRgbWrite;
     private readonly RgbRegistry? _rgb;
@@ -301,8 +315,10 @@ internal sealed class BrokerControlServer
                 // Share one rate limiter per identity so reconnecting can't reset the bucket.
                 RateLimiter limiter = _limitersByIdentity.GetOrAdd(
                     decision.Identity, _ => new RateLimiter(_policy.MaxOpsPerSecond, _policy.RateBurst));
-                var session = new Session(granted, DateTime.UtcNow.AddMinutes(10), decision.Who,
-                                          decision.Identity, limiter);
+                var session = new Session(granted, decision.Who, decision.Identity, limiter)
+                {
+                    ExpiresUtc = DateTime.UtcNow.Add(SessionTtl)
+                };
                 string sessionToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
                 bool admitted;
                 string denyReason = "";
@@ -335,7 +351,7 @@ internal sealed class BrokerControlServer
                         JsonElement req;
                         try { req = await ReadFrameAsync(pipe, token); }
                         catch (EndOfStreamException) { break; }
-                        await HandleRequestAsync(pipe, req, token);
+                        if (!await HandleRequestAsync(pipe, req, token)) break;  // stale session -> close so client reconnects
                     }
                 }
                 finally
@@ -408,7 +424,14 @@ internal sealed class BrokerControlServer
         }
     }
 
-    private async Task HandleRequestAsync(NamedPipeServerStream pipe, JsonElement req, CancellationToken token)
+    /// <summary>Handle one request frame.</summary>
+    /// <returns><c>true</c> to keep the connection open; <c>false</c> to close it. We CLOSE
+    /// (rather than reply "deny") on an unknown/expired session token so the client sees a
+    /// plain transport drop and its normal reconnect path re-authenticates transparently —
+    /// re-hello, fresh session, resend. This keeps the stale-session contract entirely on the
+    /// broker: no reconnect rule is imposed on consumers (the old "deny + keep pipe open"
+    /// left a long-lived client replaying a dead token forever, recoverable only by restart).</returns>
+    private async Task<bool> HandleRequestAsync(NamedPipeServerStream pipe, JsonElement req, CancellationToken token)
     {
         string? tok = req.TryGetProperty("token", out var tk) ? tk.GetString() : null;
         string? op  = req.TryGetProperty("op", out var o) ? o.GetString() : null;
@@ -416,17 +439,23 @@ internal sealed class BrokerControlServer
 
         if (tok == null || !_sessions.TryGetValue(tok, out var session) || session.ExpiresUtc < DateTime.UtcNow)
         {
-            await WriteFrameAsync(pipe, new { type = "deny" }, token);
-            _audit($"OP deny(no-session) op={op}");
-            return;
+            // No reply: drop the connection so the client reconnects (and resends this op on
+            // the fresh session). Sending a frame here would let it keep the dead session.
+            _audit($"OP close(no-session) op={op}");
+            return false;
         }
+
+        /*-- Slide the session's expiry forward on every authorized op: continued use keeps a
+              connection alive indefinitely, so a long-running consumer never ages out — only a
+              genuinely idle session (no op for SessionTtl) expires and gets pruned. --*/
+        session.ExpiresUtc = DateTime.UtcNow.Add(SessionTtl);
 
         /*-- Rate limit every authorized session, independent of the identity gate. --*/
         if (!session.Limiter.TryConsume())
         {
             await WriteFrameAsync(pipe, new { type = "deny" }, token);
             _audit($"OP rate-limited ({session.Who}) op={op}");
-            return;
+            return true;
         }
 
         string result;
@@ -474,6 +503,7 @@ internal sealed class BrokerControlServer
         }
 
         _audit($"OP ({session.Who}) op={op}{(id != null ? $" id={id}" : "")} -> {result}");
+        return true;
     }
 
     private async Task<string> HandleSensorListAsync(NamedPipeServerStream pipe, CancellationToken token)

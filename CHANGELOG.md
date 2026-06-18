@@ -9,6 +9,29 @@ assembly version, git tags) and the **pipe protocol version** (currently `2`, se
 in the client hello — see `docs/CLIENT-PROTOCOL.md` §8) are independent. New sensors
 and additive ops do not bump the protocol version.
 
+## [1.4.1] — 2026-06-18
+
+### Fixed — stale control session could block reconnection (long-lived clients silently stopped)
+
+- **Bug: a control-session timeout on a still-open connection prevented the client from
+  reconnecting.** Sessions on the `BrokerControl` pipe carried a hard 10-minute lifetime that was
+  never refreshed by activity. When it lapsed, the broker rejected each subsequent op with a
+  `deny` frame **but left the pipe open** — so a long-lived consumer (e.g. an RGB application
+  holding one control connection) kept replaying its now-dead session token indefinitely and never
+  re-authenticated. The symptom was control going silently dead after a while, recoverable only by
+  restarting the consumer process; sensors and hardware writes were otherwise healthy.
+- **Fix 1 — sliding expiry:** a session's lifetime is now refreshed on every authorized op and the
+  window raised to 24 hours, so a continuously-used connection never expires; only one that goes
+  genuinely idle (no op for 24h) ages out and is pruned.
+- **Fix 2 — close-on-stale-session:** an op carrying an unknown or expired session token now causes
+  the broker to **close the connection** instead of replying `deny`. The client sees an ordinary
+  transport drop, and its existing reconnect path re-authenticates and resends transparently — the
+  reconnection contract lives entirely on the broker, with no special-case handling required of any
+  consumer.
+- Broker-only change (no driver/kernel change, no re-sign). Selftest adds two gates: the session
+  TTL is the 24h sliding window, and a stale/expired token closes the connection rather than
+  replying.
+
 ## [1.4.0] — 2026-06-18
 
 ### Added — AMD CPU core & SoC voltage (SVI2 telemetry)
