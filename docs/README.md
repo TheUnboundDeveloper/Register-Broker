@@ -8,6 +8,8 @@ that matches what you want to do.
 | Goal | Read |
 |---|---|
 | **Use it** — read my PC sensors / control my RGB as a normal (non-admin) user | [USER-GUIDE.md](USER-GUIDE.md) |
+| **See it work** — the first-party demonstrator GUI (Reference Console) and how to run it | [REFERENCE-CONSOLE.md](REFERENCE-CONSOLE.md) |
+| **Sync RGB to music** — the standalone audio-reactive consumer (mic / system output) | [`../RgbAudioReactive/README.md`](../RgbAudioReactive/README.md) |
 | **Drive RGB** — the rgb.list / rgb.set command syntax and examples | [RGB-COMMANDS.md](RGB-COMMANDS.md) |
 | **Integrate it** — add sensor/RGB support to my own application (with code samples) | [INTEGRATING.md](INTEGRATING.md) |
 | **Contribute** — build it, add a sensor or RGB device, send a change | [CONTRIBUTING.md](CONTRIBUTING.md) |
@@ -55,7 +57,9 @@ back to the community, but commercial use is available under a separate license.
    catalog** (clients name `cpu.temp`/`ram0`, never an address). Runs as `SensorBroker`
    (sensor reads) and `BrokerControl` (RGB writes) Windows services.
 3. **Any non-admin client** — a consumer that connects to the broker's named pipe and
-   speaks the authenticated protocol (included reference: `BrokerSensorBridge.exe --client`).
+   speaks the authenticated protocol. Two are included: the `BrokerSensorBridge.exe --client`
+   CLI, and the **[Reference Console](REFERENCE-CONSOLE.md)** — a first-party .NET 10 /
+   Avalonia GUI that reads sensors and drives RGB through the broker with no elevation.
 
 ## Authoritative design docs (deeper than these guides)
 
@@ -67,4 +71,6 @@ These predate the guides and remain the source of truth for design decisions:
 - [`CALIBRATION-AND-REGISTRY-PLAN.md`](CALIBRATION-AND-REGISTRY-PLAN.md) — data-driven board calibration (labels/scales as data) + the plan to scale to many chips.
 - [`CODE-REVIEW.md`](CODE-REVIEW.md) — review findings and design notes.
 
-> Target platform is **Windows x64**. Built with **.NET 8** (broker) and **WDK 10.0.26100** (KMDF kernel driver).
+> Target platform is **Windows x64**. Built with **.NET 8** (broker) and **WDK 10.0.26100**
+> (KMDF kernel driver). The optional [Reference Console](REFERENCE-CONSOLE.md) GUI builds
+> separately with the **.NET 10 SDK** (+ Avalonia).

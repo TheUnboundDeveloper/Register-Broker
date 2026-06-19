@@ -34,7 +34,8 @@ Ring-0 surface is a tiny, reviewable IOCTL set instead of "give me any memory."
  ┌──────────────────────────────────────────────────────────────────────────┐
  │ LAYER 4 — Consumers (non-admin, medium integrity)                        │
  │   • any tool speaking the client protocol                                │
- │   • BrokerSensorBridge.exe --client   (the reference consumer)           │
+ │   • BrokerSensorBridge.exe --client   (the reference CLI consumer)       │
+ │   • Reference Console GUI (.NET 10/Avalonia — docs/REFERENCE-CONSOLE.md) │
  └───────────────┬──────────────────────────────────────────────────────────┘
                  │  named pipe, length-prefixed JSON, scoped + authenticated
                  │  (sensors:read / smbus:read on SensorBroker;

@@ -72,13 +72,37 @@ broker's baked report builder is the only write boundary.
 
 ## Build / runtime dependencies
 
+### Broker + driver (the privileged stack)
+
 - **.NET 8** runtime / base class library — MIT (Microsoft).
 - **Microsoft.Extensions.Hosting.WindowsServices** (NuGet) — MIT (Microsoft);
   the Windows-Service host. The only third-party package the broker references.
+
+### First-party demonstrator consumers (not part of the privileged stack)
+
+The **Reference Console** (`Test_GUI/ReferenceConsole/`, the demonstrator GUI) and
+**RgbAudioReactive** (`RgbAudioReactive/`, the standalone music-sync tool) are first-party
+*consumers* of the broker — they speak only the public pipe protocol and are **not** bound by
+the broker's zero-third-party-library rule. They reference permissively-licensed NuGet packages
+(restored at build time, not vendored):
+
+- **.NET 8 / .NET 10** runtime / base class library — MIT (Microsoft). RgbAudioReactive targets
+  .NET 8; the Reference Console targets .NET 10.
+- **Avalonia** (and `Avalonia.Desktop` / `Avalonia.Themes.Fluent` / `Avalonia.Fonts.Inter`
+  / `AvaloniaUI.DiagnosticsSupport`, the last debug-only) — MIT (Avalonia community);
+  cross-platform UI framework for the Reference Console. https://avaloniaui.net
+- **NAudio** — MIT (Mark Heath & contributors); WASAPI microphone + render-endpoint loopback
+  capture for the audio-reactive paths (used by RgbAudioReactive and the console's Audio Spectrum
+  effect). https://github.com/naudio/NAudio
+- The console's `Broker.Client/` and all of RgbAudioReactive's own code have **no** third-party
+  dependencies beyond the above.
+
+No third-party source is vendored in either tree; these are NuGet package references.
 
 ## Summary
 
 | Component | Origin | License of the distributed code |
 |---|---|---|
 | `BrokerSensorBridge/`, `BrokerSmbusDriver/`, `scripts/`, `docs/` | original (hardware register facts reproduced) |  AGPL-3.0 + Commercial Exceptions Clause (see `LICENSE`) |
+| `Test_GUI/ReferenceConsole/`, `RgbAudioReactive/` | original first-party consumers (Avalonia/NAudio referenced via NuGet, MIT) | AGPL-3.0 + Commercial Exceptions Clause (see `LICENSE`) |
 | Linux kernel reference drivers | facts only — not distributed | n/a (no code included) |

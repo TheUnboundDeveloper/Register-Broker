@@ -1,0 +1,166 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:ReferenceConsole"
+        mc:Ignorable="d" d:DesignWidth="960" d:DesignHeight="640"
+        x:Class="ReferenceConsole.MainWindow"
+        Width="1080" Height="780" MinWidth="860" MinHeight="540"
+        Title="Register Broker — Reference Console">
+
+  <Grid RowDefinitions="Auto,*,Auto" Margin="12">
+
+    <!-- ===== Top bar: connection state ===== -->
+    <Border Grid.Row="0" Background="#1E1E2E" CornerRadius="6" Padding="12,8" Margin="0,0,0,10">
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+        <Ellipse Grid.Column="0" Width="12" Height="12" VerticalAlignment="Center"
+                 x:Name="StatusDot" Fill="#888888"/>
+        <TextBlock Grid.Column="1" x:Name="StatusText" Margin="8,0,0,0"
+                   VerticalAlignment="Center" Text="Disconnected" FontWeight="SemiBold"/>
+        <TextBlock Grid.Column="2" x:Name="ScopesText" Margin="16,0" VerticalAlignment="Center"
+                   Foreground="#AAAAAA" Text=""/>
+        <Button Grid.Column="3" x:Name="ConnectButton" Content="Connect"
+                Click="OnConnectClick" Padding="16,4"/>
+      </Grid>
+    </Border>
+
+    <!-- ===== Tabs ===== -->
+    <TabControl Grid.Row="1">
+
+      <!-- Sensors tab -->
+      <TabItem Header="Sensors">
+        <Grid RowDefinitions="Auto,*" Margin="0,8,0,0">
+          <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10" Margin="0,0,0,8">
+            <Button x:Name="SensorReadOnce" Content="Read once" Click="OnSensorReadOnce"/>
+            <ToggleButton x:Name="SensorPollToggle" Content="Live poll" Click="OnSensorPollToggle"/>
+            <TextBlock Text="Interval (ms):" VerticalAlignment="Center"/>
+            <NumericUpDown x:Name="PollInterval" Minimum="250" Maximum="10000"
+                           Increment="250" Value="1000" Width="120"/>
+            <TextBlock x:Name="SensorCount" VerticalAlignment="Center" Foreground="#AAAAAA"/>
+          </StackPanel>
+
+          <Border Grid.Row="1" BorderBrush="#333" BorderThickness="1" CornerRadius="4">
+            <ScrollViewer>
+              <ItemsControl x:Name="SensorList">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="local:SensorRow">
+                    <Grid ColumnDefinitions="220,*,120,70" Margin="10,5">
+                      <TextBlock Grid.Column="0" Text="{Binding Id}" FontFamily="Cascadia Code,Consolas,monospace"/>
+                      <TextBlock Grid.Column="1" Text="{Binding Label}" Foreground="#BBBBBB"/>
+                      <TextBlock Grid.Column="2" Text="{Binding ValueText}" HorizontalAlignment="Right" FontWeight="SemiBold"/>
+                      <TextBlock Grid.Column="3" Text="{Binding Unit}" Margin="8,0,0,0" Foreground="#AAAAAA"/>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </Border>
+        </Grid>
+      </TabItem>
+
+      <!-- RGB tab -->
+      <TabItem Header="RGB">
+        <Grid ColumnDefinitions="300,*" Margin="0,8,0,0">
+
+          <!-- Device list + global controls -->
+          <Grid Grid.Column="0" RowDefinitions="Auto,Auto,*">
+            <StackPanel Grid.Row="0" Spacing="6" Margin="0,0,0,8">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button x:Name="RgbRefresh" Content="Refresh" Click="OnRgbRefresh"/>
+                <Button x:Name="StopAllButton" Content="Stop all" Click="OnStopAll"/>
+              </StackPanel>
+              <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" >
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="FPS" VerticalAlignment="Center" Margin="0,0,8,4"/>
+                <NumericUpDown Grid.Row="0" Grid.Column="1" x:Name="FpsBox" Minimum="1" Maximum="60" Increment="1"
+                               Value="20" FormatString="0" Margin="0,0,0,4" ValueChanged="OnFpsChanged"/>
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Sensor ms" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <NumericUpDown Grid.Row="1" Grid.Column="1" x:Name="RefreshMsBox" Minimum="100" Maximum="10000"
+                               Increment="50" Value="750" FormatString="0" ValueChanged="OnRefreshMsChanged"/>
+              </Grid>
+            </StackPanel>
+            <TextBlock Grid.Row="1" x:Name="EngineStatus" Foreground="#888" FontSize="11" Margin="0,0,0,6"
+                       Text="Connect to drive devices."/>
+            <Border Grid.Row="2" BorderBrush="#333" BorderThickness="1" CornerRadius="4">
+              <ListBox x:Name="RgbDeviceList" SelectionChanged="OnRgbDeviceSelected"
+                       ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="local:RgbRow">
+                    <Grid ColumnDefinitions="Auto,*">
+                      <Ellipse Grid.Column="0" Width="9" Height="9"
+                               VerticalAlignment="Top" Margin="0,5,8,0" Fill="{Binding StatusBrush}"/>
+                      <StackPanel Grid.Column="1" Margin="0,2">
+                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding Summary}" Foreground="#999" FontSize="11" TextWrapping="Wrap"/>
+                      </StackPanel>
+                    </Grid>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Border>
+          </Grid>
+
+          <!-- Effect editor for the selected device (right padding clears the scrollbar) -->
+          <ScrollViewer Grid.Column="1" Margin="16,0,0,0" Padding="0,0,18,0"
+                        HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+            <StackPanel x:Name="EditorPanel" Spacing="12" IsVisible="False">
+              <TextBlock x:Name="RgbSelected" FontSize="16" FontWeight="SemiBold"/>
+
+              <StackPanel Orientation="Horizontal" Spacing="12">
+                <TextBlock Text="Effect:" VerticalAlignment="Center"/>
+                <ComboBox x:Name="EffectCombo" Width="190" SelectionChanged="OnEffectChanged"/>
+                <CheckBox x:Name="DriveCheck" Content="Drive this device" Click="OnDriveToggled"/>
+                <Button x:Name="ApplyOnce" Content="Apply once" Click="OnApplyOnce"/>
+                <Button x:Name="DriveAllButton" Content="Apply to all devices" Click="OnDriveAll"/>
+              </StackPanel>
+
+              <TextBlock Text="Live preview" Foreground="#AAA" FontSize="11"/>
+              <Border BorderBrush="#333" BorderThickness="1" CornerRadius="4" Padding="6" MinHeight="36">
+                <ItemsControl x:Name="LedPreview">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="local:LedCell">
+                      <Border Width="16" Height="16" Margin="2" CornerRadius="2"
+                              Background="{Binding Brush}" BorderBrush="#222" BorderThickness="1"
+                              Tag="{Binding Index}" PointerPressed="OnLedPainted"/>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Border>
+
+              <StackPanel x:Name="ManualTools" Orientation="Horizontal" Spacing="10" IsVisible="False">
+                <Button Content="Fill with brush" Click="OnManualFill"/>
+                <Button Content="Clear" Click="OnManualClear"/>
+                <TextBlock Text="click LEDs above to paint" Foreground="#888" VerticalAlignment="Center"/>
+              </StackPanel>
+
+              <TextBlock Text="Parameters" Foreground="#AAA" FontSize="11"/>
+              <StackPanel x:Name="ParamPanel" Spacing="8"/>
+            </StackPanel>
+          </ScrollViewer>
+        </Grid>
+      </TabItem>
+
+      <!-- Diagnostics tab -->
+      <TabItem Header="Diagnostics">
+        <Grid RowDefinitions="Auto,*" Margin="0,8,0,0">
+          <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10" Margin="0,0,0,8">
+            <Button x:Name="PingButton" Content="Ping broker" Click="OnPing"/>
+            <Button x:Name="ClearLog" Content="Clear log" Click="OnClearLog"/>
+          </StackPanel>
+          <Border Grid.Row="1" BorderBrush="#333" BorderThickness="1" CornerRadius="4">
+            <ScrollViewer>
+              <SelectableTextBlock x:Name="LogBox" Margin="10" FontFamily="Cascadia Code,Consolas,monospace"
+                                   FontSize="12" Text=""/>
+            </ScrollViewer>
+          </Border>
+        </Grid>
+      </TabItem>
+    </TabControl>
+
+    <!-- ===== Footer ===== -->
+    <TextBlock Grid.Row="2" x:Name="Footer" Margin="2,8,0,0" Foreground="#888" FontSize="11"
+               Text="Register Broker reference console — non-admin client over the broker pipes."/>
+  </Grid>
+</Window>

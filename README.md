@@ -10,6 +10,13 @@ over a local pipe. Clients name a *logical register* (`smu.cpu.temp`, `ram0`) �
 **never an address** — and cannot scan, probe, or write outside the broker's baked,
 kernel-enforced map.
 
+![Register Broker Reference Console — the Aurora effect driving DRAM, an MSI ARGB header, and two Razer devices at once, as a non-admin client](docs/images/reference-console-rgb-aurora.png)
+
+> The first-party **[Reference Console](docs/REFERENCE-CONSOLE.md)** above is an ordinary,
+> non-admin desktop app — no elevation, no kernel driver of its own — driving RAM, a
+> motherboard ARGB header, and Razer peripherals together through the broker. That's the whole
+> thesis in one window.
+
 ```
  non-admin clients (any app speaking the pipe protocol)
         │  \\.\pipe\SensorBroker        \\.\pipe\BrokerControl
@@ -63,12 +70,12 @@ is validated, scoped, rate-limited, audited, and exposed through a safe abstract
 instead of uncontrolled register traffic — which also removes a whole class of crashes
 and bricks caused by software poking hardware it doesn't understand.
 
-A real third-party RGB application already drives hardware through the broker with no
-elevation — the model works. (That tool is an independent, pre-existing project used
-only as a convenient live consumer; it is not affiliated with, nor an endorser of, this
-framework.) The next milestone is production driver signing, so it runs outside Windows
-test mode and coexists cleanly with modern Windows security (Secure Boot, HVCI,
-vulnerable-driver blocking).
+A first-party desktop application — the **[Reference Console](docs/REFERENCE-CONSOLE.md)** —
+already reads every sensor and drives every supported RGB device through the broker with no
+elevation. The model works, end to end, and you can see it: sensors, DRAM RGB, motherboard
+ARGB headers, and Razer peripherals, all from one non-admin GUI. The next milestone is
+production driver signing, so it runs outside Windows test mode and coexists cleanly with
+modern Windows security (Secure Boot, HVCI, vulnerable-driver blocking).
 
 From there the same pattern generalizes far past lighting: sensor monitoring, fan
 control, diagnostics, and motherboard utilities all lean on elevation for convenience,
@@ -98,6 +105,36 @@ trust blindly.
 | Intel SMBus host (i801) | SMBus sequential controller | ⬜ implemented, HW-unvalidated |
 
 Full inventory: [docs/SENSOR-CHIPSET-INVENTORY.md](docs/SENSOR-CHIPSET-INVENTORY.md) · Read the inventory for complete per-backend chipset details.
+
+## The Reference Console (the proof, with a GUI)
+
+The framework ships a first-party, **non-admin desktop application** — the **Reference
+Console** ([`Test_GUI/ReferenceConsole/`](Test_GUI/ReferenceConsole/)) — that drives the
+whole framework through nothing but the public pipe protocol. It is the demonstrator: an
+ordinary user-mode process, no elevation and no kernel driver of its own, reading the full
+sensor catalog and lighting DRAM, motherboard ARGB headers, and Razer peripherals — exactly
+what any third-party consumer could do.
+
+- **Sensors tab** — live-polls `sensor.readall`; the session reports `elevated=False`.
+- **RGB tab** — a **client-side** effect engine (Static, Temperature-reactive, Rainbow,
+  Breathing, Comet, Twinkle, Aurora, Manual per-LED, Audio Spectrum). Every animation is rendered in the
+  client and streamed as solid-color frames through the existing `rgb.set` op — **no broker
+  or driver change** — proving the broker stays a pure, auditable transport while consumers
+  do the rich work.
+- **Diagnostics tab** — granted scopes, ping/latency, raw protocol log.
+
+| Sensors | Effects | Diagnostics |
+|---|---|---|
+| ![Sensors tab — 35 sensors read live, non-admin](docs/images/reference-console-sensors.png) | ![RGB tab — the client-side effect picker](docs/images/reference-console-rgb-effects.png) | ![Diagnostics tab — scopes and protocol log](docs/images/reference-console-diagnostics.png) |
+
+Stack: **.NET 10 + Avalonia 12** (the broker stays on .NET 8; the console is a separate
+build). Full walkthrough, requirements, and build/run steps:
+[docs/REFERENCE-CONSOLE.md](docs/REFERENCE-CONSOLE.md).
+
+There's also a standalone, **non-admin** music-sync consumer —
+[`RgbAudioReactive/`](RgbAudioReactive/) (.NET 8 + NAudio) — that reacts to your microphone
+or system audio and drives every zone the broker exposes, over the same public control pipe.
+A downloader gets the GUI, its full effect engine, and this ready-to-run audio tool.
 
 ## RGB status (read this before expecting your build to light up)
 
@@ -188,6 +225,7 @@ Details: [docs/USER-GUIDE.md](docs/USER-GUIDE.md) (run it) ·
 | Doc | What it covers |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | the four layers, end to end |
+| [docs/REFERENCE-CONSOLE.md](docs/REFERENCE-CONSOLE.md) | the first-party demonstrator GUI — what it proves, requirements, build/run |
 | [docs/CLIENT-PROTOCOL.md](docs/CLIENT-PROTOCOL.md) | the named-pipe wire protocol for consumers |
 | [docs/RGB-COMMANDS.md](docs/RGB-COMMANDS.md) | RGB command-line syntax (rgb.list / rgb.set), examples |
 | [docs/RGB-BOARD-BRINGUP.md](docs/RGB-BOARD-BRINGUP.md) | collect the data to add a board's RGB/sensor profile |

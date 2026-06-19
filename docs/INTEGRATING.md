@@ -8,6 +8,12 @@ This is the practical companion to [CLIENT-PROTOCOL.md](CLIENT-PROTOCOL.md) (the
 authoritative wire contract). Read that for the full semantics; copy from here to get
 running in minutes.
 
+> **Want a complete, working reference?** The first-party
+> **[Reference Console](REFERENCE-CONSOLE.md)** ([`Test_GUI/ReferenceConsole/`](../Test_GUI/ReferenceConsole/))
+> is a non-admin GUI that does everything below — sensor polling and per-LED RGB — over these
+> exact pipes. Its `Broker.Client/` project is a portable, dependency-free port of the wire
+> format you can read alongside the snippets here.
+
 ## What integration buys you
 
 - **No elevation.** Your app runs as a normal user; the broker's services hold the only

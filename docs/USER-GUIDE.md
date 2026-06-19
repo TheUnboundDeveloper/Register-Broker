@@ -6,9 +6,12 @@ small service.
 
 > **Honest status (read this first).** This is a working, hardware-validated project, **not
 > yet a polished consumer install.** Two things matter for you:
-> 1. There is no GUI yet. You interact through a small command-line client
->    (`BrokerSensorBridge.exe --client …`). Other applications consume the same named-pipe
->    protocol ([CLIENT-PROTOCOL.md](CLIENT-PROTOCOL.md)).
+> 1. The everyday path in this guide is a small command-line client
+>    (`BrokerSensorBridge.exe --client …`); other applications consume the same named-pipe
+>    protocol ([CLIENT-PROTOCOL.md](CLIENT-PROTOCOL.md)). There **is** also a first-party
+>    GUI — the **[Reference Console](REFERENCE-CONSOLE.md)** (.NET 10 + Avalonia) — that reads
+>    sensors and drives RGB through the broker with no elevation; it's the demonstrator, built
+>    separately (see that doc for requirements).
 > 2. The kernel driver is currently **dev/test-signed**, which means it only loads on a
 >    machine with **test-signing on** (and HVCI/Memory Integrity off). Running on a normal,
 >    locked-down user machine needs **production driver signing** — that work and its

@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Broker.Client/Broker.Client.csproj" />
+  <Project Path="ReferenceConsole/ReferenceConsole.csproj" />
+</Solution>

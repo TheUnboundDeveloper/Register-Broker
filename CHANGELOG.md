@@ -9,6 +9,34 @@ assembly version, git tags) and the **pipe protocol version** (currently `2`, se
 in the client hello — see `docs/CLIENT-PROTOCOL.md` §8) are independent. New sensors
 and additive ops do not bump the protocol version.
 
+## [1.5.0] — 2026-06-19
+
+### Added — Reference Console, the first-party demonstrator GUI (now in the repo)
+
+- **The Reference Console is now committed** under `Test_GUI/ReferenceConsole/` (previously a
+  gitignored sandbox). It is a first-party, **non-admin desktop application** (.NET 10 +
+  Avalonia 12) that drives the entire framework through nothing but the public pipe protocol —
+  the demonstrator that the broker model is functional, safe, and effective end to end.
+  - **Sensors tab** — live `sensor.readall` polling; the session reports `elevated=False`.
+  - **RGB tab** — a client-side effect engine (Static, Temperature-reactive, Rainbow,
+    Breathing, Comet, Manual per-LED, Audio Spectrum) that renders frames in the client and
+    streams them through the existing `rgb.set` op. **No broker or driver change** — the broker
+    stays a pure transport; consumers do the animation.
+  - **Diagnostics tab** — granted scopes, ping/latency, raw protocol log.
+  - `Broker.Client/` is a portable, dependency-free port of the wire format; the UI references
+    Avalonia + NAudio (audio mode) via NuGet (both MIT). Built separately from the broker
+    (.NET 10 SDK), which stays on .NET 8.
+- **`RgbAudioReactive/` is now committed too** — a standalone, **non-admin** .NET 8 console
+  consumer (NAudio, MIT) that captures microphone or system-output (loopback) audio and streams
+  per-LED frames to every zone `rgb.list` reports, over the public control pipe. Like the
+  console's Audio Spectrum effect, it lives outside the broker (animation is the consumer's job)
+  and drives the lights exactly as any third-party app would. So a downloader gets the GUI, the
+  full effect engine, **and** a ready-to-run music-sync tool.
+- **Docs:** new [`docs/REFERENCE-CONSOLE.md`](docs/REFERENCE-CONSOLE.md); the console (and the
+  RgbAudioReactive tool) are now featured in the README, the User Guide, ARCHITECTURE (Layer 4),
+  and INTEGRATING. Build output (`bin/`, `obj/`) remains ignored. No change to the broker,
+  driver, or any shipped binary — this is a repository/tooling milestone.
+
 ## [1.4.1] — 2026-06-18
 
 ### Fixed — stale control session could block reconnection (long-lived clients silently stopped)

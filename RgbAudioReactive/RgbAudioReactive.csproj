@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>RgbAudioReactive</AssemblyName>
+    <RootNamespace>RgbAudioReactive</RootNamespace>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <Version>1.0.0</Version>
+    <Product>Register Broker — Audio-Reactive RGB</Product>
+    <Authors>nvaitehiarna</Authors>
+    <Copyright>Copyright (c) 2026 nvaitehiarna. AGPL-3.0 with Commercial Exception.</Copyright>
+  </PropertyGroup>
+
+  <!-- Standalone broker CONSUMER. It drives RGB only through the broker's public
+       control pipe (named pipe + JSON, docs/CLIENT-PROTOCOL.md §6) exactly like any
+       third-party app would. It is NOT part of the signed broker/driver and is not bound
+       by the broker's zero-third-party-library rule — NAudio is used here for WASAPI audio
+       capture (microphone) and render-endpoint loopback (system output). -->
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+</Project>
