@@ -9,19 +9,24 @@ assembly version, git tags) and the **pipe protocol version** (currently `2`, se
 in the client hello — see `docs/CLIENT-PROTOCOL.md` §8) are independent. New sensors
 and additive ops do not bump the protocol version.
 
-## [1.5.0] — 2026-06-19
+## [Unreleased] — repository additions (not a release; broker stays 1.4.1)
+
+These changes add a first-party **test/validation interface** and demonstrator tooling to the
+repository. The broker and kernel driver — what the project's version actually tracks — are
+**unchanged**, so the release version stays **1.4.1**. The GUI is not versioned separately yet.
 
 ### Added — Reference Console, the first-party demonstrator GUI (now in the repo)
 
 - **The Reference Console is now committed** under `Test_GUI/ReferenceConsole/` (previously a
   gitignored sandbox). It is a first-party, **non-admin desktop application** (.NET 10 +
   Avalonia 12) that drives the entire framework through nothing but the public pipe protocol —
-  the demonstrator that the broker model is functional, safe, and effective end to end.
+  the test/validation interface that shows the broker model is functional, safe, and effective
+  end to end.
   - **Sensors tab** — live `sensor.readall` polling; the session reports `elevated=False`.
   - **RGB tab** — a client-side effect engine (Static, Temperature-reactive, Rainbow,
-    Breathing, Comet, Manual per-LED, Audio Spectrum) that renders frames in the client and
-    streams them through the existing `rgb.set` op. **No broker or driver change** — the broker
-    stays a pure transport; consumers do the animation.
+    Breathing, Comet, Twinkle, Aurora, Manual per-LED, Audio Spectrum) that renders frames in
+    the client and streams them through the existing `rgb.set` op. **No broker or driver
+    change** — the broker stays a pure transport; consumers do the animation.
   - **Diagnostics tab** — granted scopes, ping/latency, raw protocol log.
   - `Broker.Client/` is a portable, dependency-free port of the wire format; the UI references
     Avalonia + NAudio (audio mode) via NuGet (both MIT). Built separately from the broker
