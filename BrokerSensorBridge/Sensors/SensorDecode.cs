@@ -52,6 +52,13 @@ internal static class SensorDecode
     public static int NctFanRpm(uint raw) => (int)(raw & 0xFFFF);
 
     /// <summary>
+    /// NCT668x fan PWM duty as a percentage: the register is an 8-bit duty (0..255, nct6683
+    /// NCT6683_REG_PWM = 0x160+i), so % = raw/255·100. READ-ONLY telemetry — this decodes the
+    /// duty the chip is currently driving; the broker has no path to change it.
+    /// </summary>
+    public static double NctPwmPercent(uint raw) => (raw & 0xFF) / 255.0 * 100.0;
+
+    /// <summary>
     /// NCT6687D voltage ADC reading in millivolts at the chip pin (nct6687d):
     /// mV = (highByte·16) + (lowByte>>4), where raw = (high&lt;&lt;8) | low. This is the PIN reading;
     /// the per-rail divider multiplier is the board calibration's scale, applied later.
@@ -96,7 +103,7 @@ internal static class DecoderRegistry
     public static readonly IReadOnlyDictionary<string, string> Sources = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["smu."]      = "Linux k10temp (AmdCpuTctlC / AmdCcdTempC) + zenpower SVI (AmdSviVoltageV)",
-        ["nct6687d."] = "Linux nct6683 + Fred78290/nct6687d (NctTempC / NctFanRpm / NctVoltageMv)",
+        ["nct6687d."] = "Linux nct6683 + Fred78290/nct6687d (NctTempC / NctFanRpm / NctVoltageMv / NctPwmPercent)",
         ["nct6775."]  = "Linux nct6775-core (NctTempC / NctFanRpm / Nct6775VoltageMv)",
         ["dimm."]     = "Linux jc42 (Jc42TempC)",
     };

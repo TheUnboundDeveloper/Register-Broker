@@ -47,7 +47,14 @@ three family ids via `Nct668xIdMatches()`:
 
 Everything downstream is unchanged: select HWM LDN `0x0B`, read the EC base from SIO
 `0x60/0x61`, then page/index/data reads at `base+0x04 / +0x05 / +0x06`, banks `0x100` (temp),
-`0x120` (voltage), `0x140` (fan).
+`0x120` (voltage), `0x140` (fan), `0x160` (fan PWM duty).
+
+The PWM bank (`0x160 + i`, one duty byte per fan channel; `NCT6683_REG_PWM` in mainline
+`nct6683.c`, same in Fred78290/nct6687d) is exposed **read-only** as `nct6687d.pwm.{i}` —
+the percentage the chip is currently driving each header at. It rides the existing Super-I/O
+read IOCTL as a new `kind` (no new IOCTL, no new capability bit). There is **no fan-write
+path anywhere in the driver**: reading the duty cannot change it. Writing fan speed/mode would
+be a separate, deliberately-gated future step (thermal-safety design + a re-signed driver).
 
 ### Sensor catalog (broker — `BrokerSensorBridge/Sensors/RawChannel.cs`)
 The chip-family gate `IsNct` was widened to `IsNctEcId(id)` = `(id&0xFFF0)` ∈
@@ -58,8 +65,9 @@ sensors therefore still appear as `nct6687d.temp.{i}` / `.fan.{i}` / `.volt.{i}`
 human-readable labels come from board calibration data as usual.
 
 ### Decode (broker — `BrokerSensorBridge/Sensors/SensorDecode.cs`)
-Unchanged. `NctTempC` (signed byte + half-degree bit), `NctFanRpm` (16-bit RPM direct),
-`NctVoltageMv` (`high*16 + (low>>4)`) are reused exactly.
+`NctTempC` (signed byte + half-degree bit), `NctFanRpm` (16-bit RPM direct),
+`NctVoltageMv` (`high*16 + (low>>4)`) are reused exactly; `NctPwmPercent` (`raw/255·100`)
+decodes the read-only PWM-duty byte.
 
 ## The one divergence we deliberately did NOT port
 

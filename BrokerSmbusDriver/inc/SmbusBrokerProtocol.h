@@ -159,12 +159,16 @@ typedef enum _BROKER_SMU_SENSOR
      * NCT668x EC family (6683/6686/6687D): temp = valueByte | (halfByte<<8);
        fan/volt = 16-bit big-endian.
      * NCT6775 family (bank-select): temp = valueByte | (halfByte<<8) (PECI byte-only);
-       fan = 16-bit big-endian RPM; volt = single ADC byte (8 mV/LSB, broker-decoded). */
+       fan = 16-bit big-endian RPM; volt = single ADC byte (8 mV/LSB, broker-decoded).
+   PWM is the one single-byte kind: raw = the 8-bit duty (0..255), broker -> percent.
+   PWM is READ-ONLY telemetry on this same read IOCTL — there is NO fan-WRITE path in the
+   driver (no kind, no IOCTL, no CAP bit alters a fan); reading the duty cannot change it. */
 typedef enum _BROKER_SUPERIO_KIND
 {
     BrokerSuperioTemp    = 0,
     BrokerSuperioFan     = 1,
-    BrokerSuperioVoltage = 2
+    BrokerSuperioVoltage = 2,
+    BrokerSuperioPwm     = 3         /* fan PWM duty: single byte 0..255 (read-only)       */
 } BROKER_SUPERIO_KIND;
 
 /* Generous upper bounds covering all backends; each backend bounds Index to its own
@@ -172,6 +176,7 @@ typedef enum _BROKER_SUPERIO_KIND
 #define BROKER_SUPERIO_TEMP_COUNT   7u
 #define BROKER_SUPERIO_FAN_COUNT    8u
 #define BROKER_SUPERIO_VOLT_COUNT   16u    /* EC voltage bank 0x120..0x13E (before fans @0x140) */
+#define BROKER_SUPERIO_PWM_COUNT    8u     /* fan PWM-duty bytes (read-only), one per fan channel */
 
 /* Detected Super-I/O backend family (the broker derives decode/labels from the raw
    SuperioChipId; these document the ranges). NCT668x EC ids: 0xC73x/0xD44x/0xD59x.

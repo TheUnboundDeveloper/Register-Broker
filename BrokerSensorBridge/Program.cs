@@ -1021,6 +1021,22 @@ internal static class Program
             SensorReading t = bsTemp.Read(nct6798Temp);                   // 0x8064 -> 100 + 0.5
             Check("nct6775 temp decode (0x8064 -> 100.5 C)", t.Ok && Math.Abs(t.Value - 100.5) < 1e-9);
 
+            /* NCT668x fan PWM duty (READ-ONLY): an EC chip lights nct6687d.pwm.*, the bank-select
+               family does not (no pwm channels), and the byte decodes to a percentage. */
+            SensorCatalogEntry? ecPwm = SensorCatalog.Find("nct6687d.pwm.0");
+            Check("catalog has nct6687d.pwm.0", ecPwm != null);
+            if (ecPwm != null)
+            {
+                Check("NCT6683 id lights the PWM channel", ecPwm.IsAvailable(nct6683));
+                Check("NCT6798 id does NOT light the EC PWM channel", !ecPwm.IsAvailable(nct6798));
+                var ecFull = new MockSmbusBackend(available: true, superioAvailable: true, superioChipId: 0xD592, superioRaw: 0xFF);
+                SensorReading p = ecPwm.Read(ecFull);                     // 0xFF -> 100 %
+                Check("nct6687 pwm decode (0xFF -> 100 %)", p.Ok && p.Unit == "%" && Math.Abs(p.Value - 100.0) < 1e-9);
+            }
+            Check("nct6687 pwm decode (128 -> ~50 %, 0 -> 0 %)",
+                  Math.Abs(SensorDecode.NctPwmPercent(0x80) - (128.0 / 255.0 * 100.0)) < 1e-9 &&
+                  SensorDecode.NctPwmPercent(0) == 0.0);
+
             /* AMD SVI2 voltage decode (zenpower plane_to_vcc): V = 1.550 − 0.00625·((raw>>16)&0xFF),
                clamped at 0. code 0x50 (80) -> 1.050 V; code 0xFF -> negative -> clamped to 0. */
             Check("smu SVI voltage decode (0x00500000 -> 1.050 V)",

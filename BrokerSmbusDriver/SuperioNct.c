@@ -18,6 +18,7 @@
 |     * EC space (rel. base): page +0x04, index +0x05, data +0x06           |
 |     * temps: signed byte at 0x100+i*2, half-deg bit at (0x101+i*2)>>7      |
 |     * fans:  16-bit big-endian RPM at 0x140+i*2                            |
+|     * pwm:   single duty byte (0..255) at 0x160+i (READ-ONLY telemetry)     |
 |                                                                            |
 |   NARROW BY DESIGN: the IOCTL selects a named {kind,index}; the EC register |
 |   is computed from a baked-in formula here. The client never names an EC    |
@@ -53,6 +54,7 @@
 #define NCT6687_TEMP_BASE     0x100      /* temp i:    0x100 + i*2 (value), +1 (half bit)  */
 #define NCT6687_VOLTAGE_BASE  0x120      /* voltage i: 0x120 + i*2 (16-bit mV, big-endian) */
 #define NCT6687_FAN_BASE      0x140      /* fan  i:    0x140 + i*2 (16-bit RPM, big-endian) */
+#define NCT6687_PWM_BASE      0x160      /* pwm  i:    0x160 + i   (single duty byte 0..255) */
 
 static KMUTEX  g_SuperioLock;
 static BOOLEAN g_SuperioLockReady = FALSE;
@@ -174,9 +176,10 @@ VOID SuperioNctDetect(SMBUS_CONTROLLER* Controller)
 
 UINT32 SuperioNctRead(const SMBUS_CONTROLLER* Controller, UINT32 Kind, UINT32 Index, UINT32* Raw)
 {
-    USHORT base = Controller->SuperioBase;
-    USHORT addr;
-    UCHAR  a, b;
+    USHORT  base = Controller->SuperioBase;
+    USHORT  addr;
+    UCHAR   a, b;
+    BOOLEAN single = FALSE;                       /* PWM is one byte; the rest are two */
 
     *Raw = 0;
 
@@ -200,6 +203,14 @@ UINT32 SuperioNctRead(const SMBUS_CONTROLLER* Controller, UINT32 Kind, UINT32 In
             addr = (USHORT)(NCT6687_VOLTAGE_BASE + Index * 2);
             break;
 
+        case BrokerSuperioPwm:
+            /* READ-ONLY: the duty register is read here and returned verbatim; nothing in
+               this driver ever WRITES it. Single byte at 0x160+i (no *2 stride). */
+            if (Index >= BROKER_SUPERIO_PWM_COUNT) return BrokerSmbusBadRequest;
+            addr = (USHORT)(NCT6687_PWM_BASE + Index);
+            single = TRUE;
+            break;
+
         default:
             return BrokerSmbusBadRequest;
     }
@@ -207,13 +218,15 @@ UINT32 SuperioNctRead(const SMBUS_CONTROLLER* Controller, UINT32 Kind, UINT32 In
     /* EC page/index/data is global controller state — serialize. */
     KeWaitForSingleObject(&g_SuperioLock, Executive, KernelMode, FALSE, NULL);
     a = EcRead(base, addr);
-    b = EcRead(base, (USHORT)(addr + 1));
+    b = single ? (UCHAR)0 : EcRead(base, (USHORT)(addr + 1));
     KeReleaseMutex(&g_SuperioLock, FALSE);
 
     if (Kind == BrokerSuperioTemp)
         *Raw = (UINT32)a | ((UINT32)b << 8);     /* value byte + half-degree byte         */
+    else if (Kind == BrokerSuperioPwm)
+        *Raw = (UINT32)a;                        /* 8-bit duty 0..255                      */
     else
-        *Raw = ((UINT32)a << 8) | (UINT32)b;     /* 16-bit big-endian (RPM or millivolts) */
+        *Raw = ((UINT32)a << 8) | (UINT32)b;     /* 16-bit big-endian (RPM or millivolts)  */
 
     return BrokerSmbusOk;
 }

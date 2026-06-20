@@ -9,11 +9,31 @@ assembly version, git tags) and the **pipe protocol version** (currently `2`, se
 in the client hello — see `docs/CLIENT-PROTOCOL.md` §8) are independent. New sensors
 and additive ops do not bump the protocol version.
 
-## [Unreleased] — repository additions (not a release; broker stays 1.4.1)
+## [Unreleased]
+
+### Added — Fan PWM duty telemetry (read-only) [NCT668x]
+
+- **The broker now serves each NCT668x fan header's current PWM duty** as read-only sensors
+  `nct6687d.pwm.0`–`.7` (`%`), decoded from the EC duty byte at `0x160 + i`
+  (`raw/255·100`, `NctPwmPercent`; ported from mainline `nct6683.c` / Fred78290/nct6687d). This
+  is **telemetry only — there is no fan-write path anywhere in the driver**: reading the duty
+  cannot change a fan's speed or mode. Driving fans (speed/function) would be a separate,
+  deliberately thermal-safety-gated future step.
+- Rides the **existing** Super-I/O read IOCTL as a new `kind` — **no new IOCTL, no new
+  capability bit, no protocol-version change.** Kernel adds one read-only branch (`SuperioNct.c`)
+  gated by the same `CAP_SUPERIO`; the NCT6775 bank-select family does not expose PWM yet.
+- Broker: new `nct6687d.pwm.*` channels (`ChannelRegistry`), `NctPwmPercent` decode, default
+  labels `Fan {i} PWM`, and selftest gates (EC chip lights PWM; bank-select family does not;
+  `0xFF → 100 %`). Selftest green; driver compiles `/W4 /WX` clean.
+- **Status:** built and selftest-validated; **live hardware validation + a driver redeploy are
+  pending** (the driver rebuild/sign/install needs elevation). Version bump deferred until then.
+
+### Added — Reference Console + demonstrator tooling (repository additions; do not themselves bump the broker version)
 
 These changes add a first-party **test/validation interface** and demonstrator tooling to the
-repository. The broker and kernel driver — what the project's version actually tracks — are
-**unchanged**, so the release version stays **1.4.1**. The GUI is not versioned separately yet.
+repository. They do not change the broker or kernel driver — what the project's version actually
+tracks — so on their own the release version would stay **1.4.1**. The GUI is not versioned
+separately yet.
 
 ### Added — Reference Console, the first-party demonstrator GUI (now in the repo)
 

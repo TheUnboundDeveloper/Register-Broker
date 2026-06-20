@@ -59,7 +59,7 @@ internal static class ChipFamilies
 internal static class ChannelRegistry
 {
     /* Super-I/O kind constants (mirror the driver's BROKER_SUPERIO_KIND_*). */
-    private const uint Temp = 0, Fan = 1, Voltage = 2;
+    private const uint Temp = 0, Fan = 1, Voltage = 2, Pwm = 3;
 
     /* Chip-family gates. The chipId == 0 fallback keeps an NCT-era driver that predates
        the INFO SuperioChipId field serving the validated NCT6687D channels. */
@@ -132,6 +132,15 @@ internal static class ChannelRegistry
                 list.Add(new RawChannel($"nct6687d.fan.{idx}", "RPM", 0, IsNct,
                     b => b.TryReadSuperioRaw(Fan, (uint)idx, out uint raw, out SmbusStatus st)
                         ? new RawReading(true, SensorDecode.NctFanRpm(raw), "Ok") : new RawReading(false, 0, st.ToString())));
+            }
+            /* Fan PWM duty (READ-ONLY telemetry): the percentage the chip is currently driving
+               each fan header at. One per fan channel; no write path exists. */
+            for (int i = 0; i < 8; i++)
+            {
+                int idx = i;
+                list.Add(new RawChannel($"nct6687d.pwm.{idx}", "%", 0, IsNct,
+                    b => b.TryReadSuperioRaw(Pwm, (uint)idx, out uint raw, out SmbusStatus st)
+                        ? new RawReading(true, SensorDecode.NctPwmPercent(raw), "Ok") : new RawReading(false, 0, st.ToString())));
             }
             for (int i = 0; i < 15; i++)
             {
