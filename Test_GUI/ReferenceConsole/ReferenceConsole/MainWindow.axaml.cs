@@ -48,6 +48,8 @@ public partial class MainWindow : Window
     private bool _suppressEffectCombo;
     private DateTime _lastPreview = DateTime.MinValue;
 
+    private readonly ConsoleSettings _settings;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -55,7 +57,68 @@ public partial class MainWindow : Window
         RgbDeviceList.ItemsSource = _rgbRows;
         LedPreview.ItemsSource = _ledCells;
         EffectCombo.ItemsSource = EffectNames;
-        Closing += (_, _) => Cleanup();
+
+        _settings = ConsoleSettings.Load();
+        ApplyGlobalSettings();
+
+        Closing += (_, _) => { SaveSettings(); Cleanup(); };
+    }
+
+    // ===================================================================
+    //  Persisted settings (see ConsoleSettings)
+    // ===================================================================
+
+    /// <summary>Restore the global render knobs into their controls (called once at startup).</summary>
+    private void ApplyGlobalSettings()
+    {
+        PollInterval.Value = _settings.PollIntervalMs;
+        FpsBox.Value = _settings.Fps;
+        RefreshMsBox.Value = _settings.SensorRefreshMs;
+    }
+
+    /// <summary>Capture the current UI + per-device effect state and write it to disk.</summary>
+    private void SaveSettings()
+    {
+        _settings.Fps = (int)(FpsBox.Value ?? 20);
+        _settings.SensorRefreshMs = (int)(RefreshMsBox.Value ?? 750);
+        _settings.PollIntervalMs = (int)(PollInterval.Value ?? 1000);
+
+        // Only refresh device entries when an engine exists; otherwise keep what we loaded.
+        if (_engine is not null)
+        {
+            foreach (var row in _rgbRows)
+            {
+                var eff = _engine.GetEffect(row.Id);
+                if (eff is null) { _settings.Devices.Remove(row.Id); continue; }
+                _settings.Devices[row.Id] = DeviceSettings.Capture(eff, _engine.IsEnabled(row.Id), row.LedCount);
+            }
+        }
+
+        try { _settings.Save(); }
+        catch (Exception ex) { Log("Settings save failed: " + ex.Message); }
+    }
+
+    /// <summary>Re-apply saved effects to the devices the broker just reported.</summary>
+    private void RestoreDeviceSettings()
+    {
+        if (_engine is null) return;
+        int restored = 0;
+        foreach (var row in _rgbRows)
+        {
+            if (!_settings.Devices.TryGetValue(row.Id, out var ds)) continue;
+            var eff = CreateEffect(ds.Effect);
+            if (eff is null) continue;
+            if (eff is ISensorAware sa) sa.SetSensorIds(_sensorIds);
+            ds.ApplyTo(eff, row.LedCount);
+
+            _engine.AssignEffect(row.Id, row.LedCount, eff);
+            _engine.SetEnabled(row.Id, ds.Drive);
+            row.SetEffect(eff.Name);
+            row.SetEnabled(ds.Drive);
+            if (eff is TemperatureEffect && ds.Drive) EnsureSensorPoll();
+            restored++;
+        }
+        if (restored > 0) Log($"Restored {restored} saved device setting(s).");
     }
 
     // ===================================================================
@@ -63,7 +126,7 @@ public partial class MainWindow : Window
     // ===================================================================
     private async void OnConnectClick(object? sender, RoutedEventArgs e)
     {
-        if (_sensors is not null || _control is not null) { Cleanup(); SetStatus(false, "Disconnected", ""); return; }
+        if (_sensors is not null || _control is not null) { SaveSettings(); Cleanup(); SetStatus(false, "Disconnected", ""); return; }
 
         ConnectButton.IsEnabled = false;
         try
@@ -105,6 +168,7 @@ public partial class MainWindow : Window
 
             await ReadSensorsOnce();
             await RefreshRgbDevices();
+            RestoreDeviceSettings();
         }
         catch (BrokerException bx)
         {
@@ -426,6 +490,15 @@ public partial class MainWindow : Window
             row.Children.Add(swatch);
             row.Children.Add(new TextBlock { Text = "#", VerticalAlignment = VerticalAlignment.Center });
             row.Children.Add(hex);
+            // Basic colour quick-picks (setting hex re-runs the handler above).
+            foreach (var preset in Palette)
+            {
+                RgbColor.TryParseHex(preset, out var pc);
+                var swatchBtn = new Button { Width = 18, Height = 18, Background = ToBrush(pc),
+                    BorderBrush = Brushes.Gray, BorderThickness = new Avalonia.Thickness(1), Padding = new Avalonia.Thickness(0) };
+                swatchBtn.Click += (_, _) => { hex.Text = preset; };
+                row.Children.Add(swatchBtn);
+            }
             row.Children.Add(remove);
             host.Children.Add(row);
         }

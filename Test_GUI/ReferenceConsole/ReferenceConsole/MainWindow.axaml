@@ -6,6 +6,7 @@
         mc:Ignorable="d" d:DesignWidth="960" d:DesignHeight="640"
         x:Class="ReferenceConsole.MainWindow"
         Width="1080" Height="780" MinWidth="860" MinHeight="540"
+        Icon="/Assets/rc-logo.ico"
         Title="Register Broker — Reference Console">
 
   <Grid RowDefinitions="Auto,*,Auto" Margin="12">
@@ -160,7 +161,13 @@
     </TabControl>
 
     <!-- ===== Footer ===== -->
-    <TextBlock Grid.Row="2" x:Name="Footer" Margin="2,8,0,0" Foreground="#888" FontSize="11"
-               Text="Register Broker reference console — non-admin client over the broker pipes."/>
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,8,0,0">
+      <TextBlock Grid.Column="0" x:Name="Footer" Margin="2,0,0,0" Foreground="#888" FontSize="11"
+                 VerticalAlignment="Center"
+                 Text="Register Broker reference console — non-admin client over the broker pipes."/>
+      <TextBlock Grid.Column="1" x:Name="FooterNote" Margin="16,0,2,0" Foreground="#888" FontSize="11"
+                 VerticalAlignment="Center" HorizontalAlignment="Right" TextAlignment="Right"
+                 Text="This is a test GUI interface. The core project is the framework providing the data used here."/>
+    </Grid>
   </Grid>
 </Window>

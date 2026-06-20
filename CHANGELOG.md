@@ -42,6 +42,34 @@ repository. The broker and kernel driver — what the project's version actually
   and INTEGRATING. Build output (`bin/`, `obj/`) remains ignored. No change to the broker,
   driver, or any shipped binary — this is a repository/tooling milestone.
 
+### Added — Reference Console: session persistence, branding, and effect polish
+
+- **Settings persistence.** The console now remembers your setup between runs. The global
+  FPS / sensor-refresh / poll-interval knobs and, per RGB device, the assigned effect, every
+  parameter value, drive state, gradient stops, and hand-painted per-LED colours are saved to
+  `%APPDATA%\RegisterBroker\ReferenceConsole\settings.json` on close/disconnect and restored on
+  the next **Connect**. UI convenience only — it stores no addresses, scopes, or anything the
+  broker acts on.
+- **App icon / branding.** An **RC** logo (a dark "chip" badge with a red→green→blue gradient
+  monogram) is embedded in the executable and set as the window icon, so it appears in the title
+  bar and in the taskbar while running.
+- **Footer note** clarifies the console is a test/validation interface and that the core project
+  is the framework providing the data.
+
+### Fixed — Reference Console effects
+
+- **Audio "Level" mode no longer pegs the strip at full.** Level is now derived as the RMS of the
+  smoothed spectrum bands (the same perceptually-tuned signal Spectrum mode uses) rather than the
+  near-saturated raw loudness, so the gain / noise-floor / smoothing knobs behave identically in
+  both modes and the lights actually track loudness.
+- **Temperature effect fades between colours instead of snapping.** The sensor updates coarsely
+  and slowly, which made the colour switch like a relay; the rendered colour now eases toward the
+  target with a new **Fade (s)** knob (default 0.35 s — soft but quick; 0 = instant).
+- **Colour quick-picks everywhere.** The Temperature gradient-stop editor gained the same basic
+  colour swatches the other effects' colour pickers already had.
+
+(All console-only — no broker, driver, or shipped-binary change; broker stays **1.4.1**.)
+
 ## [1.4.1] — 2026-06-18
 
 ### Fixed — stale control session could block reconnection (long-lived clients silently stopped)

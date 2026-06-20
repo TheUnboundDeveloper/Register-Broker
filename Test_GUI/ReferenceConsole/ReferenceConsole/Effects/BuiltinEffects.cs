@@ -34,9 +34,15 @@ public sealed class TemperatureEffect : IEffect, ISensorAware, IGradientEffect
 {
     private readonly EffectParam _sensor = EffectParam.Choice("sensor", "Sensor", new[] { "smu.cpu.temp" });
     private readonly EffectParam _bright = EffectParam.Slider("bright", "Brightness", 0, 1, 1, 0.01);
+    private readonly EffectParam _fade = EffectParam.Slider("fade", "Fade (s)", 0, 2, 0.35, 0.01);
 
     // Swapped atomically on add/remove so the render thread always sees a consistent array.
     private GradientStop[] _stops;
+
+    // Eased on-screen colour so it glides between stops instead of snapping (sensor
+    // updates are coarse and slow — without this the strip switches like a relay).
+    private RgbColor _shown = RgbColor.Black;
+    private bool _primed;
 
     public TemperatureEffect()
     {
@@ -47,7 +53,7 @@ public sealed class TemperatureEffect : IEffect, ISensorAware, IGradientEffect
 
     public string Name => "Temperature";
     public bool IsAnimated => true; // value drifts; re-render each tick
-    public IReadOnlyList<EffectParam> Parameters => new[] { _sensor, _bright };
+    public IReadOnlyList<EffectParam> Parameters => new[] { _sensor, _bright, _fade };
     public IReadOnlyList<GradientStop> Stops => _stops;
 
     public void SetSensorIds(IReadOnlyList<string> ids)
@@ -111,7 +117,18 @@ public sealed class TemperatureEffect : IEffect, ISensorAware, IGradientEffect
             }
             col = col.Scale(_bright.Num);
         }
-        for (int i = 0; i < leds.Length; i++) leds[i] = col;
+
+        // Temporal fade toward the target colour: alpha = 1 - e^(-dt/tau). A small
+        // tau (default 0.35 s) makes the change soft but quick. tau = 0 snaps.
+        double tau = _fade.Num;
+        if (!_primed || tau <= 0.0001) { _shown = col; _primed = true; }
+        else
+        {
+            double alpha = 1 - Math.Exp(-Math.Max(0, ctx.Dt) / tau);
+            _shown = RgbColor.Lerp(_shown, col, alpha);
+        }
+
+        for (int i = 0; i < leds.Length; i++) leds[i] = _shown;
     }
 }
 
@@ -304,7 +321,6 @@ public sealed class AudioSpectrumEffect : IEffect
     private readonly EffectParam _high = EffectParam.Color("high", "High colour", "FF0000");
 
     private float[] _ema = Array.Empty<float>();
-    private float _levelEma;
 
     public string Name => "Audio Spectrum";
     public bool IsAnimated => true;
@@ -319,16 +335,28 @@ public sealed class AudioSpectrumEffect : IEffect
 
         for (int i = 0; i < nb; i++)
             _ema[i] = (float)(_ema[i] + a * (bands[i] - _ema[i]));
-        _levelEma = (float)(_levelEma + a * (ctx.Audio.Level - _levelEma));
 
         bool level = _mode.SelectedChoice == "Level";
+
+        // Level mode: derive overall loudness from the (perceptually-compressed,
+        // smoothed) bands rather than the raw capture level. The raw level is
+        // near-saturated and, once the gain knob is applied, pegs the whole strip
+        // at full almost always. RMS across the bands keeps the same dynamic range
+        // as a single Spectrum band, so the gain/floor/smoothing knobs behave the
+        // same way in both modes.
+        float lvl = 0;
+        if (level)
+        {
+            double s = 0;
+            for (int i = 0; i < nb; i++) s += _ema[i] * _ema[i];
+            lvl = (float)Math.Sqrt(s / Math.Max(1, nb));
+        }
+
         int n = Math.Max(1, leds.Length);
         for (int i = 0; i < leds.Length; i++)
         {
             double frac = i / (double)n;             // position along strip → colour
-            double energy;
-            if (level) energy = _levelEma;
-            else { int b = Math.Min(nb - 1, (int)(frac * nb)); energy = _ema[b]; }
+            double energy = level ? lvl : _ema[Math.Min(nb - 1, (int)(frac * nb))];
 
             energy = Math.Clamp(energy * _gain.Num, 0, 1);
             if (energy < _floor.Num) { leds[i] = RgbColor.Black; continue; }

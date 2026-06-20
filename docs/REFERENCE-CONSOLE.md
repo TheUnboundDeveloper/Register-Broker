@@ -103,17 +103,24 @@ Temperature effect), and starts/stops audio capture automatically. **Apply to al
 the current effect onto every device; **Stop all** disables them. Global **FPS** is adjustable
 (default 20 — safe under the control service's 120/240 ops/s limit).
 
+**Session persistence.** The console remembers your setup between runs. The global FPS /
+sensor-refresh / poll-interval knobs and, per device, the assigned effect, every parameter value,
+drive state, gradient stops, and hand-painted per-LED colours are saved to
+`%APPDATA%\RegisterBroker\ReferenceConsole\settings.json` on close/disconnect and restored on the
+next **Connect**. It is UI convenience only — it stores no addresses, scopes, or anything the
+broker acts on.
+
 | Effect | Demonstrates | Key live parameters |
 |---|---|---|
 | Static | whole-device colour | colour |
-| Temperature | colour-by-sensor (auto-enables Sensors live poll) | sensor picker, cold/hot temps, cold/hot colours, brightness |
+| Temperature | colour-by-sensor, with a soft fade between colours (auto-enables Sensors live poll) | sensor picker, temp→colour stops (add/remove, colour quick-picks), brightness, fade |
 | Rainbow | animation | speed, spread, saturation, brightness |
 | Breathing | animation | colour, Hz, min/max brightness |
 | Comet | per-LED chase animation | colour, background, speed, tail |
 | Twinkle | random per-LED sparkles igniting and fading over a background | background, twinkle colour, density, fade rate, random-colours toggle |
 | Aurora | an original effect — drifting curtains of light from three blended palette colours | speed, wave scale, brightness, colours A / B / C |
 | Manual per-LED | click LEDs to paint individually | brush colour (+ Fill / Clear) |
-| Audio Spectrum | WASAPI loopback → FFT bands | reactive factor, smoothing, noise floor, low/high colour, Spectrum/Level mode |
+| Audio Spectrum | WASAPI loopback → FFT bands (Level mode tracks overall loudness from the same tuned bands) | reactive factor, smoothing, noise floor, low/high colour, Spectrum/Level mode |
 
 Every effect declares a typed `EffectParam` list (`Slider` / `Color` / `Toggle` / `Choice`); the UI
 builds the controls generically, so any knob is adjustable live with zero per-effect UI code.
