@@ -9,7 +9,7 @@ assembly version, git tags) and the **pipe protocol version** (currently `2`, se
 in the client hello — see `docs/CLIENT-PROTOCOL.md` §8) are independent. New sensors
 and additive ops do not bump the protocol version.
 
-## [Unreleased]
+## [1.5.0] — 2026-06-19
 
 ### Added — Fan PWM duty telemetry (read-only) [NCT668x]
 
@@ -25,15 +25,17 @@ and additive ops do not bump the protocol version.
 - Broker: new `nct6687d.pwm.*` channels (`ChannelRegistry`), `NctPwmPercent` decode, default
   labels `Fan {i} PWM`, and selftest gates (EC chip lights PWM; bank-select family does not;
   `0xFF → 100 %`). Selftest green; driver compiles `/W4 /WX` clean.
-- **Status:** built and selftest-validated; **live hardware validation + a driver redeploy are
-  pending** (the driver rebuild/sign/install needs elevation). Version bump deferred until then.
+- **HW-validated on the dev box (NCT6687D):** `nct6687d.fan.3` = 4137 RPM at `nct6687d.pwm.3`
+  = 27 % (the lone populated SIO header — a small M.2 fan), read non-admin through the broker;
+  unpopulated headers report their configured default duty. This is the broker+driver change
+  that bumps the release to **1.5.0**.
 
-### Added — Reference Console + demonstrator tooling (repository additions; do not themselves bump the broker version)
+### Added — Reference Console + demonstrator tooling (ships in 1.5.0)
 
 These changes add a first-party **test/validation interface** and demonstrator tooling to the
-repository. They do not change the broker or kernel driver — what the project's version actually
-tracks — so on their own the release version would stay **1.4.1**. The GUI is not versioned
-separately yet.
+repository. They do not themselves change the broker or kernel driver (the GUI is a *consumer*
+and is not versioned separately yet) — they ride along in the 1.5.0 release, whose version bump
+is driven by the fan-PWM telemetry feature above.
 
 ### Added — Reference Console, the first-party demonstrator GUI (now in the repo)
 
