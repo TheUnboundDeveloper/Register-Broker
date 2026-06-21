@@ -29,6 +29,9 @@ public sealed class ConsoleSettings
     public int SensorRefreshMs { get; set; } = 750;
     public int PollIntervalMs { get; set; } = 1000;
 
+    /// <summary>When true, minimizing hides the window to a system-tray icon instead of the taskbar.</summary>
+    public bool MinimizeToTray { get; set; }
+
     /// <summary>Per-device effect configuration, keyed by the broker's device id.</summary>
     public Dictionary<string, DeviceSettings> Devices { get; set; } = new();
 

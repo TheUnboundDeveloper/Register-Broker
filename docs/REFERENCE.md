@@ -135,7 +135,7 @@ The exe is a `WinExe` (no console window): `--client` / `--once` / `--calibratio
 |---|---|---|
 | `DevProbes` | `false` | `true` defines `BROKER_DEV_PROBES` → compiles in the raw probes + a `DEV BUILD` banner. **Never `true` for a deployment build.** |
 | `SelfContained` | `false` | publish a self-contained .NET app |
-| `TargetFramework` | `net8.0-windows` | TFM (dev override only) |
+| `TargetFramework` | `net10.0-windows` | TFM (dev override only) |
 
 ---
 

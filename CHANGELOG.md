@@ -9,6 +9,22 @@ assembly version, git tags) and the **pipe protocol version** (currently `2`, se
 in the client hello — see `docs/CLIENT-PROTOCOL.md` §8) are independent. New sensors
 and additive ops do not bump the protocol version.
 
+## [Unreleased]
+
+### Changed — whole repository now targets .NET 10
+
+- **The broker (`BrokerSensorBridge`) and the `RgbAudioReactive` consumer moved from
+  `net8.0-windows` to `net10.0-windows`**, matching the Reference Console (already .NET 10). The
+  repository now builds entirely on the **.NET 10 SDK** — the .NET 8 SDK/runtime is no longer
+  required and can be uninstalled. `Microsoft.Extensions.Hosting.WindowsServices` bumped to
+  `10.0.9` to match. No source/behavioural change: the broker selftest passes unchanged and the
+  pipe protocol version is untouched.
+- Build scripts (`Build-BrokerSensorBridge.ps1` default TFM, `Sign-BrokerSensorBridge.ps1`
+  fallback paths) and CI/release/CodeQL workflows (`setup-dotnet` → `10.0.x`) updated to match.
+- **Re-publish + redeploy the broker** (`Build-All.ps1` / `Install-SensorBrokerService.ps1`,
+  elevated) before removing the .NET 8 runtime — the currently deployed `publish\` binaries are
+  still the .NET 8 build until then.
+
 ## [1.5.0] — 2026-06-19
 
 ### Added — Fan PWM duty telemetry (read-only) [NCT668x]
@@ -51,9 +67,9 @@ is driven by the fan-PWM telemetry feature above.
     change** — the broker stays a pure transport; consumers do the animation.
   - **Diagnostics tab** — granted scopes, ping/latency, raw protocol log.
   - `Broker.Client/` is a portable, dependency-free port of the wire format; the UI references
-    Avalonia + NAudio (audio mode) via NuGet (both MIT). Built separately from the broker
-    (.NET 10 SDK), which stays on .NET 8.
-- **`RgbAudioReactive/` is now committed too** — a standalone, **non-admin** .NET 8 console
+    Avalonia + NAudio (audio mode) via NuGet (both MIT). Built separately from the broker, though
+    the whole repository now targets **.NET 10** (see below).
+- **`RgbAudioReactive/` is now committed too** — a standalone, **non-admin** .NET 10 console
   consumer (NAudio, MIT) that captures microphone or system-output (loopback) audio and streams
   per-LED frames to every zone `rgb.list` reports, over the public control pipe. Like the
   console's Audio Spectrum effect, it lives outside the broker (animation is the consumer's job)

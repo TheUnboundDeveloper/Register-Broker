@@ -7,7 +7,9 @@
   cl.exe / link.exe directly against the installed WDK, producing the same
   x64\Release\BrokerSmbus.sys that Sign-Driver-TestCert.ps1 / Install-Driver.ps1
   expect. The driver is non-PnP and loads via `sc create type= kernel`, so no INF
-  is required.
+  is required for the DEV test-sign path. An INF (BrokerSmbus.inf) DOES exist for
+  Microsoft attestation signing — see docs/DRIVER-SIGNING-ATTESTATION.md. This
+  script also compiles BrokerSmbus.rc (VERSIONINFO) into the .sys.
 
   Requires: Visual Studio (or Build Tools) with the C++ x64 toolset, and the WDK
   (winget: Microsoft.WindowsWDK.10.0.26100). Does NOT need elevation.
@@ -65,7 +67,8 @@ cd /d "$projDir"
 if not exist "x64\$Configuration" mkdir "x64\$Configuration"
 cl /nologo /c /W4 /WX /kernel /GS- $defs /Fo"$obj\\" SmbusAmd.c SmbusIntel.c SmuAmd.c SuperioNct.c SuperioNct6775.c Smbus.c SmbusDetect.c || exit /b 1
 cl /nologo /c /W4 /WX /wd4324 /wd4201 /kernel /GS- $defs /DKMDF_VERSION_MAJOR=$kmdfMajor /DKMDF_VERSION_MINOR=$kmdfMinor /Fo"$obj\\" Driver.c || exit /b 1
-link /nologo /OUT:"x64\$Configuration\BrokerSmbus.sys" /MACHINE:X64 /SUBSYSTEM:NATIVE /DRIVER /ENTRY:FxDriverEntry /NODEFAULTLIB /RELEASE /OPT:REF /OPT:ICF /LIBPATH:"$kmlib" /LIBPATH:"$kmdflib" "$obj\Driver.obj" "$obj\Smbus.obj" "$obj\SmbusDetect.obj" "$obj\SmbusAmd.obj" "$obj\SmbusIntel.obj" "$obj\SmuAmd.obj" "$obj\SuperioNct.obj" "$obj\SuperioNct6775.obj" WdfDriverEntry.lib WdfLdr.lib ntoskrnl.lib hal.lib wmilib.lib wdmsec.lib BufferOverflowFastFailK.lib || exit /b 1
+rc /nologo /I"$KitRoot\Include\$sdkVer\um" /I"$KitRoot\Include\$sdkVer\shared" /fo"$obj\BrokerSmbus.res" BrokerSmbus.rc || exit /b 1
+link /nologo /OUT:"x64\$Configuration\BrokerSmbus.sys" /MACHINE:X64 /SUBSYSTEM:NATIVE /DRIVER /ENTRY:FxDriverEntry /NODEFAULTLIB /RELEASE /OPT:REF /OPT:ICF /LIBPATH:"$kmlib" /LIBPATH:"$kmdflib" "$obj\Driver.obj" "$obj\Smbus.obj" "$obj\SmbusDetect.obj" "$obj\SmbusAmd.obj" "$obj\SmbusIntel.obj" "$obj\SmuAmd.obj" "$obj\SuperioNct.obj" "$obj\SuperioNct6775.obj" "$obj\BrokerSmbus.res" WdfDriverEntry.lib WdfLdr.lib ntoskrnl.lib hal.lib wmilib.lib wdmsec.lib BufferOverflowFastFailK.lib || exit /b 1
 "@
 $batFile = Join-Path $env:TEMP "build-brokersmbus.cmd"
 Set-Content -Path $batFile -Value $bat -Encoding Ascii

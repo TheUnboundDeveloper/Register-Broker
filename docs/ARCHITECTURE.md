@@ -95,7 +95,7 @@ SMBus/SMU/EC share firmware state). Detection (`SmbusDetect.c`) scans PCI and di
 sensor sources; each is auto-detect-gated and inert when its chip is absent.
 
 ### Layer 3 — `BrokerSensorBridge` (broker)
-A GUI-less .NET 8 `WinExe`, normally run as a **LocalSystem Windows service**. It is the
+A GUI-less .NET 10 `WinExe`, normally run as a **LocalSystem Windows service**. It is the
 **only** process that opens the driver device. Responsibilities:
 
 - **Authentication** — every connecting pipe client is identified by peer-process identity +

@@ -28,8 +28,8 @@ if (-not $ExePath) {
     # win-x64 RuntimeIdentifier subfolder, then a plain Release build.
     $candidates = @(
         (Join-Path $PSScriptRoot "..\publish\BrokerSensorBridge\BrokerSensorBridge.exe"),
-        (Join-Path $PSScriptRoot "..\BrokerSensorBridge\bin\Release\net8.0-windows\win-x64\BrokerSensorBridge.exe"),
-        (Join-Path $PSScriptRoot "..\BrokerSensorBridge\bin\Release\net8.0-windows\BrokerSensorBridge.exe")
+        (Join-Path $PSScriptRoot "..\BrokerSensorBridge\bin\Release\net10.0-windows\win-x64\BrokerSensorBridge.exe"),
+        (Join-Path $PSScriptRoot "..\BrokerSensorBridge\bin\Release\net10.0-windows\BrokerSensorBridge.exe")
     )
     $ExePath = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 }

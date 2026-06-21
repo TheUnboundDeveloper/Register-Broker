@@ -74,7 +74,7 @@ broker's baked report builder is the only write boundary.
 
 ### Broker + driver (the privileged stack)
 
-- **.NET 8** runtime / base class library — MIT (Microsoft).
+- **.NET 10** runtime / base class library — MIT (Microsoft).
 - **Microsoft.Extensions.Hosting.WindowsServices** (NuGet) — MIT (Microsoft);
   the Windows-Service host. The only third-party package the broker references.
 
@@ -86,8 +86,8 @@ The **Reference Console** (`Test_GUI/ReferenceConsole/`, the demonstrator GUI) a
 the broker's zero-third-party-library rule. They reference permissively-licensed NuGet packages
 (restored at build time, not vendored):
 
-- **.NET 8 / .NET 10** runtime / base class library — MIT (Microsoft). RgbAudioReactive targets
-  .NET 8; the Reference Console targets .NET 10.
+- **.NET 10** runtime / base class library — MIT (Microsoft). Both RgbAudioReactive and the
+  Reference Console target .NET 10.
 - **Avalonia** (and `Avalonia.Desktop` / `Avalonia.Themes.Fluent` / `Avalonia.Fonts.Inter`
   / `AvaloniaUI.DiagnosticsSupport`, the last debug-only) — MIT (Avalonia community);
   cross-platform UI framework for the Reference Console. https://avaloniaui.net

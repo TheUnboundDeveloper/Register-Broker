@@ -5,6 +5,9 @@
 # --- Internal engineering log (dev-box paths, session history) ---
 CLAUDE.md
 
+# --- Internal planning / thinking artifacts (not shipped) ---
+FRAMEWORK-EVOLUTION-PLAN.md
+
 # --- Wiki content (lives in the separate GitHub .wiki.git repo, not here) ---
 /wiki/
 

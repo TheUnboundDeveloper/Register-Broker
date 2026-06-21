@@ -53,12 +53,19 @@ account → submit driver → Microsoft signs it.**
 
 ## 3. Driver signing — the attestation path
 
+> **Command-by-command runbook:** [`DRIVER-SIGNING-ATTESTATION.md`](DRIVER-SIGNING-ATTESTATION.md)
+> walks the whole submission (build → `Inf2Cat` → `MakeCab` → EV-sign → upload → deploy). The
+> INF ([`BrokerSmbus.inf`](../BrokerSmbusDriver/BrokerSmbus.inf)) and the `.sys` version resource
+> ([`BrokerSmbus.rc`](../BrokerSmbusDriver/BrokerSmbus.rc)) already exist in the tree. This
+> section is the summary.
+
 Once the cert + account exist:
 
 1. **Make a driver package.** Even though `BrokerSmbus` is a non-PnP driver loaded via
-   `sc create type=kernel`, the Partner Center submission needs an **INF** + the **`.sys`** +
-   symbols, packaged into a **CAB**. Author a minimal INF describing the non-PnP/legacy
-   service install. Keep the architecture x64.
+   `sc create type=kernel`, the Partner Center submission needs an **INF** + the **`.sys`**,
+   packaged into a **CAB**. The minimal non-PnP/legacy-service INF is already authored
+   (`BrokerSmbus.inf`); keep its `DriverVer`/`KmdfLibraryVersion` in sync per the runbook.
+   Architecture is x64.
 2. **Sign the CAB** with the EV cert (`signtool`, with a trusted timestamp).
 3. **Submit to Partner Center** as a driver submission and request **attestation signing**.
    Microsoft validates and returns a **Microsoft-signed** driver package (`.cat` + the signed

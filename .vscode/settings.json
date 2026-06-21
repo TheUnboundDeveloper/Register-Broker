@@ -1,3 +1,6 @@
 {
-  "dotnet.defaultSolution": "RegisterBroker.sln"
+  "dotnet.defaultSolution": "RegisterBroker.sln",
+  "files.associations": {
+    "calibration*.json": "jsonc"
+  }
 }

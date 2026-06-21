@@ -13,14 +13,22 @@
 
     <!-- ===== Top bar: connection state ===== -->
     <Border Grid.Row="0" Background="#1E1E2E" CornerRadius="6" Padding="12,8" Margin="0,0,0,10">
-      <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
         <Ellipse Grid.Column="0" Width="12" Height="12" VerticalAlignment="Center"
                  x:Name="StatusDot" Fill="#888888"/>
         <TextBlock Grid.Column="1" x:Name="StatusText" Margin="8,0,0,0"
                    VerticalAlignment="Center" Text="Disconnected" FontWeight="SemiBold"/>
         <TextBlock Grid.Column="2" x:Name="ScopesText" Margin="16,0" VerticalAlignment="Center"
                    Foreground="#AAAAAA" Text=""/>
-        <Button Grid.Column="3" x:Name="ConnectButton" Content="Connect"
+        <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" Margin="0,0,12,0"
+                    VerticalAlignment="Center">
+          <TextBlock Text="Minimize to:" VerticalAlignment="Center" Foreground="#AAAAAA"/>
+          <ComboBox x:Name="MinimizeTargetCombo" Width="110" SelectionChanged="OnMinimizeTargetChanged">
+            <ComboBoxItem>Taskbar</ComboBoxItem>
+            <ComboBoxItem>Tray</ComboBoxItem>
+          </ComboBox>
+        </StackPanel>
+        <Button Grid.Column="4" x:Name="ConnectButton" Content="Connect"
                 Click="OnConnectClick" Padding="16,4"/>
       </Grid>
     </Border>
@@ -30,7 +38,7 @@
 
       <!-- Sensors tab -->
       <TabItem Header="Sensors">
-        <Grid RowDefinitions="Auto,*" Margin="0,8,0,0">
+        <Grid RowDefinitions="Auto,Auto,*" Margin="0,8,0,0">
           <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10" Margin="0,0,0,8">
             <Button x:Name="SensorReadOnce" Content="Read once" Click="OnSensorReadOnce"/>
             <ToggleButton x:Name="SensorPollToggle" Content="Live poll" Click="OnSensorPollToggle"/>
@@ -40,14 +48,24 @@
             <TextBlock x:Name="SensorCount" VerticalAlignment="Center" Foreground="#AAAAAA"/>
           </StackPanel>
 
-          <Border Grid.Row="1" BorderBrush="#333" BorderThickness="1" CornerRadius="4">
+          <!-- Column headers (kept in lock-step with the row template below) -->
+          <Border Grid.Row="1" Background="#252535" BorderBrush="#333" BorderThickness="1,1,1,0"
+                  CornerRadius="4,4,0,0" Padding="0,6">
+            <Grid ColumnDefinitions="260,220,150,*" Margin="10,0">
+              <TextBlock Grid.Column="0" Text="Sensor Name"   FontWeight="Bold" Foreground="#CCCCCC"/>
+              <TextBlock Grid.Column="1" Text="Sensor Origin" FontWeight="Bold" Foreground="#CCCCCC"/>
+              <TextBlock Grid.Column="2" Text="Sensor Data"   FontWeight="Bold" Foreground="#CCCCCC"/>
+            </Grid>
+          </Border>
+
+          <Border Grid.Row="2" BorderBrush="#333" BorderThickness="1,0,1,1" CornerRadius="0,0,4,4">
             <ScrollViewer>
               <ItemsControl x:Name="SensorList">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="local:SensorRow">
-                    <Grid ColumnDefinitions="220,*,120,70" Margin="10,5">
-                      <TextBlock Grid.Column="0" Text="{Binding Id}" FontFamily="Cascadia Code,Consolas,monospace"/>
-                      <TextBlock Grid.Column="1" Text="{Binding Label}" Foreground="#BBBBBB"/>
+                    <Grid ColumnDefinitions="260,220,90,60,*" Margin="10,5">
+                      <TextBlock Grid.Column="0" Text="{Binding DisplayName}" FontWeight="SemiBold"/>
+                      <TextBlock Grid.Column="1" Text="{Binding Id}" Foreground="#888888" FontFamily="Cascadia Code,Consolas,monospace"/>
                       <TextBlock Grid.Column="2" Text="{Binding ValueText}" HorizontalAlignment="Right" FontWeight="SemiBold"/>
                       <TextBlock Grid.Column="3" Text="{Binding Unit}" Margin="8,0,0,0" Foreground="#AAAAAA"/>
                     </Grid>

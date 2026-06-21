@@ -4,11 +4,13 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform;
 using Avalonia.Threading;
 using Broker.Client;
 using ReferenceConsole.Effects;
@@ -49,6 +51,7 @@ public partial class MainWindow : Window
     private DateTime _lastPreview = DateTime.MinValue;
 
     private readonly ConsoleSettings _settings;
+    private TrayIcon? _trayIcon;
 
     public MainWindow()
     {
@@ -59,9 +62,11 @@ public partial class MainWindow : Window
         EffectCombo.ItemsSource = EffectNames;
 
         _settings = ConsoleSettings.Load();
+        SetupTrayIcon();
+        PropertyChanged += OnWindowPropertyChanged;
         ApplyGlobalSettings();
 
-        Closing += (_, _) => { SaveSettings(); Cleanup(); };
+        Closing += (_, _) => { SaveSettings(); Cleanup(); _trayIcon?.Dispose(); _trayIcon = null; };
     }
 
     // ===================================================================
@@ -74,6 +79,7 @@ public partial class MainWindow : Window
         PollInterval.Value = _settings.PollIntervalMs;
         FpsBox.Value = _settings.Fps;
         RefreshMsBox.Value = _settings.SensorRefreshMs;
+        MinimizeTargetCombo.SelectedIndex = _settings.MinimizeToTray ? 1 : 0;
     }
 
     /// <summary>Capture the current UI + per-device effect state and write it to disk.</summary>
@@ -82,6 +88,7 @@ public partial class MainWindow : Window
         _settings.Fps = (int)(FpsBox.Value ?? 20);
         _settings.SensorRefreshMs = (int)(RefreshMsBox.Value ?? 750);
         _settings.PollIntervalMs = (int)(PollInterval.Value ?? 1000);
+        _settings.MinimizeToTray = MinimizeTargetCombo.SelectedIndex == 1;
 
         // Only refresh device entries when an engine exists; otherwise keep what we loaded.
         if (_engine is not null)
@@ -119,6 +126,66 @@ public partial class MainWindow : Window
             restored++;
         }
         if (restored > 0) Log($"Restored {restored} saved device setting(s).");
+    }
+
+    // ===================================================================
+    //  Minimize target (taskbar vs. system tray)
+    // ===================================================================
+
+    /// <summary>Build the tray icon (hidden until the window is minimized to tray).</summary>
+    private void SetupTrayIcon()
+    {
+        try
+        {
+            using var stream = AssetLoader.Open(new Uri("avares://ReferenceConsole/Assets/rc-logo.ico"));
+            var menu = new NativeMenu();
+            var showItem = new NativeMenuItem("Show");
+            showItem.Click += (_, _) => RestoreFromTray();
+            var exitItem = new NativeMenuItem("Exit");
+            exitItem.Click += (_, _) => Close();
+            menu.Add(showItem);
+            menu.Add(exitItem);
+
+            _trayIcon = new TrayIcon
+            {
+                Icon = new WindowIcon(stream),
+                ToolTipText = "Register Broker — Reference Console",
+                IsVisible = false,
+                Menu = menu,
+            };
+            _trayIcon.Clicked += (_, _) => RestoreFromTray();
+        }
+        catch { _trayIcon = null; }   // no tray support -> fall back to plain taskbar minimize
+    }
+
+    private void OnMinimizeTargetChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        _settings.MinimizeToTray = MinimizeTargetCombo.SelectedIndex == 1;
+        // Switching back to "Taskbar" while already hidden -> bring the window back.
+        if (!_settings.MinimizeToTray && _trayIcon is { IsVisible: true }) RestoreFromTray();
+    }
+
+    private void OnWindowPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property == WindowStateProperty && WindowState == WindowState.Minimized)
+            HideToTrayIfRequested();
+    }
+
+    private void HideToTrayIfRequested()
+    {
+        if (!_settings.MinimizeToTray || _trayIcon is null) return;
+        _trayIcon.IsVisible = true;
+        ShowInTaskbar = false;
+        Hide();
+    }
+
+    private void RestoreFromTray()
+    {
+        if (_trayIcon is not null) _trayIcon.IsVisible = false;
+        ShowInTaskbar = true;
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
     }
 
     // ===================================================================
@@ -642,6 +709,8 @@ public sealed class SensorRow : System.ComponentModel.INotifyPropertyChanged
     public string Id { get; }
     public string Label { get; private set; }
     public string Unit { get; private set; }
+    /// <summary>Human-facing name: the calibrated label when present, otherwise the raw id.</summary>
+    public string DisplayName => string.IsNullOrWhiteSpace(Label) ? Id : Label;
     private string _valueText = "—";
     public string ValueText { get => _valueText; private set { _valueText = value; Raise(nameof(ValueText)); } }
 
@@ -651,7 +720,7 @@ public sealed class SensorRow : System.ComponentModel.INotifyPropertyChanged
     {
         Label = s.Label; Unit = s.Unit;
         ValueText = s.Value is { } v ? v.ToString("F2", CultureInfo.InvariantCulture) : "—";
-        Raise(nameof(Label)); Raise(nameof(Unit));
+        Raise(nameof(Label)); Raise(nameof(DisplayName)); Raise(nameof(Unit));
     }
 
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;

@@ -71,6 +71,6 @@ These predate the guides and remain the source of truth for design decisions:
 - [`CALIBRATION-AND-REGISTRY-PLAN.md`](CALIBRATION-AND-REGISTRY-PLAN.md) — data-driven board calibration (labels/scales as data) + the plan to scale to many chips.
 - [`CODE-REVIEW.md`](CODE-REVIEW.md) — review findings and design notes.
 
-> Target platform is **Windows x64**. Built with **.NET 8** (broker) and **WDK 10.0.26100**
+> Target platform is **Windows x64**. Built with **.NET 10** (broker) and **WDK 10.0.26100**
 > (KMDF kernel driver). The optional [Reference Console](REFERENCE-CONSOLE.md) GUI builds
-> separately with the **.NET 10 SDK** (+ Avalonia).
+> separately, also on **.NET 10** (+ Avalonia).

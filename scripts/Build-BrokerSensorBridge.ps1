@@ -1,6 +1,6 @@
 ﻿param(
     [string]$Root = (Split-Path -Parent $PSScriptRoot),
-    [string]$TargetFramework = "net8.0-windows",
+    [string]$TargetFramework = "net10.0-windows",
     [switch]$SelfContained,
     [switch]$Clean,
     # Bring-up ONLY: compiles in the raw hardware probes (smbus-read/smu-read/superio-read/
@@ -41,7 +41,7 @@ function Resolve-Dotnet {
         }
         throw "dotnet on PATH resolved to '$cmd', which is outside trusted system directories. Refusing to run it from an elevated build (PATH-hijack guard)."
     }
-    throw "dotnet.exe not found in Program Files. Install the .NET 8 SDK."
+    throw "dotnet.exe not found in Program Files. Install the .NET 10 SDK."
 }
 $Dotnet = Resolve-Dotnet
 Write-Host "[BridgeBuild] Using dotnet: $Dotnet"

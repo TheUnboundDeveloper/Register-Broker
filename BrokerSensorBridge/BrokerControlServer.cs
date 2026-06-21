@@ -525,7 +525,7 @@ internal sealed class BrokerControlServer
         foreach (SensorCatalogEntry e in SensorCatalog.Available(_smbus))
         {
             SensorReading r = e.Read(_smbus);
-            if (r.Ok) items.Add(new { id = e.Id, value = r.Value, unit = r.Unit });
+            if (r.Ok) items.Add(new { id = e.Id, label = e.Label, value = r.Value, unit = r.Unit });
         }
         await WriteFrameAsync(pipe, new { type = "data", op = "sensor.readall", sensors = items }, token);
         return "data";

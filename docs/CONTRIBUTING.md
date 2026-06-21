@@ -17,7 +17,7 @@ want to add — a **new sensor** and a **new RGB device**.
 
 | Component | Toolchain | Build command |
 |---|---|---|
-| **Broker** (`BrokerSensorBridge/`, C# .NET 8) | .NET 8 SDK | `.\scripts\Build-BrokerSensorBridge.ps1` (or `.\scripts\Build-All.ps1`, elevated — publishing stops the services) |
+| **Broker** (`BrokerSensorBridge/`, C# .NET 10) | .NET 10 SDK | `.\scripts\Build-BrokerSensorBridge.ps1` (or `.\scripts\Build-All.ps1`, elevated — publishing stops the services) |
 | **Driver** (`BrokerSmbusDriver/`, C / KMDF) | WDK 10.0.26100 + VS Build Tools | `.\BrokerSmbusDriver\scripts\Build-Driver-DirectLink.ps1` (auto-test-signs; `-NoSign` to skip) |
 
 There are **no third-party DLLs to vendor** — the broker has no external hardware libraries;

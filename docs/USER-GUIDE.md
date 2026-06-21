@@ -25,7 +25,7 @@ small service.
 ## 1. What you need
 
 - **Windows x64** (Windows 10/11).
-- **.NET 8 SDK** (to build the broker) — `winget install Microsoft.DotNet.SDK.8`.
+- **.NET 10 SDK** (to build the broker) — `winget install Microsoft.DotNet.SDK.10`.
 - **WDK 10.0.26100** (to build the driver) — `winget install Microsoft.WindowsWDK.10.0.26100`
   — plus Visual Studio (or Build Tools) with the C++ x64 toolset.
 - For the driver to load today: **test-signing enabled** and **Memory Integrity off** (see

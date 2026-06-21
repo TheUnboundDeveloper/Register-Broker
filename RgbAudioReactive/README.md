@@ -20,10 +20,10 @@ cd "C:\Users\natha\AppData\Roaming\VSC\Register Broker\RgbAudioReactive"
 dotnet build -c Release
 
 # react to system audio with a rainbow FFT visualiser (default)
-.\bin\Release\net8.0-windows\win-x64\RgbAudioReactive.exe --source=output --mode=spectrum
+.\bin\Release\net10.0-windows\win-x64\RgbAudioReactive.exe --source=output --mode=spectrum
 
 # react to the mic as a VU meter
-.\bin\Release\net8.0-windows\win-x64\RgbAudioReactive.exe --source=mic --mode=level
+.\bin\Release\net10.0-windows\win-x64\RgbAudioReactive.exe --source=mic --mode=level
 ```
 
 Ctrl+C stops it and blacks out the zones.

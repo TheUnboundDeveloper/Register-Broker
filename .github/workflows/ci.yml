@@ -31,7 +31,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
       - name: Publish bridge (Release, default flags — no DevProbes)
         run: dotnet publish BrokerSensorBridge/BrokerSensorBridge.csproj -c Release -o ci-publish

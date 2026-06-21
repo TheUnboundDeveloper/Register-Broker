@@ -9,7 +9,7 @@ driver* internals behind it.
 
 ## File map
 
-### Broker — `BrokerSensorBridge/` (C#, .NET 8)
+### Broker — `BrokerSensorBridge/` (C#, .NET 10)
 
 | File | Responsibility |
 |---|---|

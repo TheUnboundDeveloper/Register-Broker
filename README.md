@@ -86,7 +86,7 @@ trust blindly.
 
 ## What works today
 
-**35-sensor catalog** served to non-admin clients over authenticated pipe; RGB drivable on DRAM, **motherboard headers, and USB peripherals (Razer)**.
+**43-sensor catalog** (incl. read-only fan-PWM duty) served to non-admin clients over authenticated pipe; RGB drivable on DRAM, **motherboard headers, and USB peripherals (Razer)**.
 
 | Capability | Mechanism | Status |
 |---|---|---|
@@ -96,6 +96,7 @@ trust blindly.
 | Board temps / fans / voltages | Nuvoton NCT6686 EC (0xD440) | 🟡 implemented, HW-unvalidated |
 | Board temps / fans / voltages | Nuvoton NCT6687D EC (0xD590) | ✅ hardware-validated |
 | Board temps / fans / voltages | Nuvoton NCT6775 family (6779, 6791–6798) | 🟡 implemented, HW-unvalidated |
+| Fan PWM duty % (read-only telemetry) | NCT668x EC duty byte → `nct6687d.pwm.*` (no fan-write path) | ✅ hardware-validated (NCT6687D) |
 | DIMM temperatures | JC42 / TSE2004av over SMBus | ✅ hardware-validated |
 | Per-LED DRAM RGB (non-admin!) | ENE/Aura (block write, 1–32 B atomic) | ✅ hardware-validated |
 | Motherboard ARGB headers (non-admin!) | MSI Mystic Light over USB-HID (JRAINBOW) | ✅ hardware-validated (MSI B550I) — opt-in |
@@ -125,14 +126,14 @@ what any third-party consumer could do.
 
 | Sensors | Effects | Diagnostics |
 |---|---|---|
-| ![Sensors tab — 35 sensors read live, non-admin](docs/images/reference-console-sensors.png) | ![RGB tab — the client-side effect picker](docs/images/reference-console-rgb-effects.png) | ![Diagnostics tab — scopes and protocol log](docs/images/reference-console-diagnostics.png) |
+| ![Sensors tab — 43 sensors read live, non-admin](docs/images/reference-console-sensors.png) | ![RGB tab — the client-side effect picker](docs/images/reference-console-rgb-effects.png) | ![Diagnostics tab — scopes and protocol log](docs/images/reference-console-diagnostics.png) |
 
-Stack: **.NET 10 + Avalonia 12** (the broker stays on .NET 8; the console is a separate
-build). Full walkthrough, requirements, and build/run steps:
+Stack: **.NET 10 + Avalonia 12** (the console is a separate build). Full walkthrough,
+requirements, and build/run steps:
 [docs/REFERENCE-CONSOLE.md](docs/REFERENCE-CONSOLE.md).
 
 There's also a standalone, **non-admin** music-sync consumer —
-[`RgbAudioReactive/`](RgbAudioReactive/) (.NET 8 + NAudio) — that reacts to your microphone
+[`RgbAudioReactive/`](RgbAudioReactive/) (.NET 10 + NAudio) — that reacts to your microphone
 or system audio and drives every zone the broker exposes, over the same public control pipe.
 A downloader gets the GUI, its full effect engine, and this ready-to-run audio tool.
 
@@ -154,9 +155,11 @@ zones; the client contract (`rgb.list` / `rgb.set`) is identical across transpor
   `AllowHidRgb` in the control service's `appsettings.json`. It's pinned to the controller's USB
   product id so only the intended device is driven. See
   [docs/RGB-BOARD-BRINGUP.md](docs/RGB-BOARD-BRINGUP.md).
-- **Colors only, no effects.** `rgb.set` writes solid colors. Animation (breathing, rainbow,
-  music sync) is the **consumer's job**: render frames client-side and send colors at your own
-  rate (the control service allows 120 ops/s, burst 240). The broker hosts no effects engine.
+- **No effects engine — but per-LED frames are supported.** `rgb.set` takes either one whole-device
+  color (`color`) or a per-LED array (`colors[]`), so addressable headers (MSI JRAINBOW via the
+  `0x53` direct frame), DRAM, and Razer matrices update per-LED. What the broker does *not* host is an
+  animation engine: breathing, rainbow, and music sync are the **consumer's job** — render frames
+  client-side and stream them at your own rate (the control service allows 120 ops/s, burst 240).
 - **Adding a board is broker-only.** Zones live in signed code (`RgbCatalog.cs`); the kernel
   exposes only stable, class-wide write windows, so a new board/zone needs no driver
   recompile/re-sign. Walkthrough: [docs/RGB-BOARD-BRINGUP.md](docs/RGB-BOARD-BRINGUP.md).
@@ -181,8 +184,9 @@ zones; the client contract (`rgb.list` / `rgb.set`) is identical across transpor
 ## Quick start (dev box)
 
 ```powershell
-# Build everything (elevated: republishing stops the running services)
-.\scripts\Build-All.ps1 -Driver -Clean
+# Build everything (elevated: republishing stops the running services).
+# NOTE: pass BOTH switches — `-Driver` alone builds only the driver, not the bridge.
+.\scripts\Build-All.ps1 -Bridge -Driver -Clean
 
 # Register the kernel driver + services (elevated; refuses an unsigned driver)
 .\scripts\Install-SensorBrokerService.ps1 -WithRgbControl
@@ -215,10 +219,11 @@ Details: [docs/USER-GUIDE.md](docs/USER-GUIDE.md) (run it) ·
   a **separate, opt-in driver+service** that a security-conscious user can simply decline, leaving
   the core driver's assurances intact. **We'll revisit it if it's frequently requested** — open an
   issue if you want it.
-- **RGB scope**: DRAM (SMBus) + motherboard ARGB headers (USB-HID, opt-in) + Razer Chroma
-  peripherals (USB-HID, opt-in, board-independent), colors only; the
-  NCT6687 EC 12V-header path is wired but inert pending validation — see
-  [RGB status](#rgb-status-read-this-before-expecting-your-build-to-light-up).
+- **RGB scope boundary**: whole-device and per-LED colors are supported, but the broker has **no
+  built-in effects/animation engine** (animation is the consumer's job) and GPUs / AIO liquid
+  coolers are unsupported. The NCT6687 EC 12V-header (JRGB) path is wired but inert pending
+  EC-register validation. The working transports (DRAM, MSI ARGB headers, Razer Chroma) are listed
+  under [RGB status](#rgb-status-read-this-before-expecting-your-build-to-light-up).
 
 ## Documentation map
 

@@ -17,7 +17,7 @@ its proof that the broker model is functional, safe, and effective.
 | `Broker.Client/` | Portable, dependency-free port of the broker wire format: 4-byte BE length + UTF-8 JSON frames, hello/ok identity handshake, scoped `{token,op}` requests. Owns `RgbColor` and the typed ops (`SensorReadAllAsync`, `RgbListAsync`, `RgbSetLedsAsync`, …). Pipe I/O is serialized so streamed effect frames never interleave with manual sends. |
 | `ReferenceConsole/` | The Avalonia app. One window, three tabs. `Effects/` holds the client-side effect engine. |
 | `ReferenceConsole.slnx` | Solution (new XML format; .NET 10 default). |
-| `global.json` | Pins the .NET 10 SDK (`10.0.301`) so this tree builds on 10 while the broker stays on its .NET 8 SDK. |
+| `global.json` | Pins the .NET 10 SDK (`10.0.301`) for this tree. The broker also targets .NET 10. |
 
 ## Build & run
 

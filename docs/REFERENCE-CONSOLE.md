@@ -32,8 +32,8 @@ code; it only speaks the wire protocol ([CLIENT-PROTOCOL.md](CLIENT-PROTOCOL.md)
 
 ## Stack & requirements
 
-The console is **separate from the broker build** — it targets a newer SDK and a cross-platform
-UI framework, while the broker stays on .NET 8.
+The console is **separate from the broker build** — it has its own solution and a cross-platform
+UI framework, though the whole repository now targets **.NET 10** (the broker included).
 
 - **.NET 10 SDK** (`10.0.301`, pinned by `Test_GUI/ReferenceConsole/global.json`) — the runtime
   alone is not enough. Install with `winget install Microsoft.DotNet.SDK.10`.
@@ -79,7 +79,7 @@ Authenticode signer would need to be pinned (see [SIGNING-AND-DEPLOYMENT.md](SIG
 | `Broker.Client/` | Portable, dependency-free port of the broker wire format: 4-byte BE length + UTF-8 JSON frames, hello/ok identity handshake, scoped `{token,op}` requests. Owns `RgbColor` and the typed ops (`SensorReadAllAsync`, `RgbListAsync`, `RgbSetLedsAsync`, …). Pipe I/O is serialized so streamed effect frames never interleave with manual sends. |
 | `ReferenceConsole/` | The Avalonia app. One window, three tabs. `Effects/` holds the client-side effect engine. |
 | `ReferenceConsole.slnx` | Solution (new XML format; .NET 10 default). |
-| `global.json` | Pins the .NET 10 SDK so this tree builds on 10 while the broker stays on its .NET 8 SDK. |
+| `global.json` | Pins the .NET 10 SDK (`10.0.301`) for this tree. The broker also targets .NET 10. |
 
 ## Tabs
 

@@ -1,0 +1,68 @@
+;-----------------------------------------------------------------------------;
+; BrokerSmbus.inf                                                             ;
+;                                                                             ;
+;   Install INF for the BrokerSmbus narrow KMDF kernel service. The driver    ;
+;   is NON-PnP (no hardware id) — it is loaded as a demand-start kernel       ;
+;   service via [DefaultInstall]/[DefaultInstall.Services]. An INF exists for ;
+;   ONE reason: Microsoft attestation signing (Partner Center) requires a     ;
+;   valid INF + .cat for the submission package. See:                         ;
+;       docs/DRIVER-SIGNING-ATTESTATION.md                                    ;
+;                                                                             ;
+;   Installing via this INF (pnputil /add-driver BrokerSmbus.inf /install)    ;
+;   copies the .sys into the Driver Store (%13%) and points the service at    ;
+;   that stable path — which FIXES the "ImagePath points at the build tree"   ;
+;   time-bomb (Open items #6). The legacy `sc create` path still works for    ;
+;   dev, but production installs should use this INF.                         ;
+;                                                                             ;
+;   DriverVer below MUST match BrokerSmbus.rc's VER_PRODUCTVERSION_STR and be ;
+;   bumped on every signed build. KmdfLibraryVersion MUST match the KMDF the  ;
+;   .sys was actually linked against (Build-Driver-DirectLink.ps1 prints it   ;
+;   as "[driver] KMDF : <maj.min>").                                          ;
+;-----------------------------------------------------------------------------;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = System
+ClassGuid   = {4D36E97D-E325-11CE-BFC1-08002BE10318}
+Provider    = %ManufacturerName%
+CatalogFile = BrokerSmbus.cat
+DriverVer   = 06/20/2026,1.5.0.0
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 13                 ; 13 = Driver Store (DIRID_DRIVERSTORE)
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+BrokerSmbus.sys = 1,,
+
+; --- x64 only (the project ships Windows x64 exclusively) --------------------
+[DefaultInstall.NTamd64]
+CopyFiles = BrokerSmbus.CopyFiles
+
+[BrokerSmbus.CopyFiles]
+BrokerSmbus.sys
+
+[DefaultInstall.NTamd64.Services]
+AddService = BrokerSmbus,0x00000000,BrokerSmbus.Service
+
+[BrokerSmbus.Service]
+DisplayName   = %ServiceDesc%
+ServiceType   = 1                   ; SERVICE_KERNEL_DRIVER
+StartType     = 3                   ; SERVICE_DEMAND_START (matches `start= demand`)
+ErrorControl  = 1                   ; SERVICE_ERROR_NORMAL
+ServiceBinary = %13%\BrokerSmbus.sys
+
+; --- KMDF binding: KmdfLibraryVersion MUST equal the linked KMDF version -----
+[DefaultInstall.NTamd64.Wdf]
+KmdfService = BrokerSmbus, BrokerSmbus.wdfsect
+
+[BrokerSmbus.wdfsect]
+KmdfLibraryVersion = 1.35
+
+[Strings]
+ManufacturerName = "Register Broker Project"
+DiskName         = "Register Broker Driver Install Disk"
+ServiceDesc      = "Register Broker SMBus Driver"

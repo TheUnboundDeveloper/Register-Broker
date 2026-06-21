@@ -34,7 +34,7 @@ bcdedit /set testsigning on    # elevated, then reboot (off: /set testsigning of
 
 ## Setup (≈15 minutes)
 
-You need: Windows 11 x64 · .NET 8 SDK · Visual Studio Build Tools (C++ x64 workload) ·
+You need: Windows 11 x64 · .NET 10 SDK · Visual Studio Build Tools (C++ x64 workload) ·
 WDK (`winget install Microsoft.WindowsWDK.10.0.26100`).
 
 ```powershell
