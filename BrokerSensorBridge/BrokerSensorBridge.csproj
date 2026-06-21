@@ -14,7 +14,7 @@
          FileVersion / InformationalVersion all derive from it). Bump with CHANGELOG.md;
          tag releases vX.Y.Z. The pipe protocol has its own version (2) and changes
          independently — see docs/CLIENT-PROTOCOL.md §8. -->
-    <Version>1.5.0</Version>
+    <Version>1.5.1</Version>
     <Product>Register Broker</Product>
     <Authors>nvaitehiarna</Authors>
     <Copyright>Copyright (c) 2026 nvaitehiarna. AGPL-3.0 with Commercial Exception.</Copyright>

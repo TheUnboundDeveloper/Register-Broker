@@ -9,7 +9,7 @@ assembly version, git tags) and the **pipe protocol version** (currently `2`, se
 in the client hello — see `docs/CLIENT-PROTOCOL.md` §8) are independent. New sensors
 and additive ops do not bump the protocol version.
 
-## [Unreleased]
+## [1.5.1] — 2026-06-20
 
 ### Changed — whole repository now targets .NET 10
 
@@ -21,9 +21,10 @@ and additive ops do not bump the protocol version.
   pipe protocol version is untouched.
 - Build scripts (`Build-BrokerSensorBridge.ps1` default TFM, `Sign-BrokerSensorBridge.ps1`
   fallback paths) and CI/release/CodeQL workflows (`setup-dotnet` → `10.0.x`) updated to match.
-- **Re-publish + redeploy the broker** (`Build-All.ps1` / `Install-SensorBrokerService.ps1`,
-  elevated) before removing the .NET 8 runtime — the currently deployed `publish\` binaries are
-  still the .NET 8 build until then.
+- **Deployed:** the `publish\` broker has been re-published on .NET 10 and re-signed with the
+  `Broker Test Cert` (same thumbprint as before; republish wiped the prior Authenticode
+  signature). Selftest — including the signature gates — passes against the redeployed binary.
+  The .NET 8 SDK/runtime can now be removed.
 
 ## [1.5.0] — 2026-06-19
 
