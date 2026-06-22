@@ -25,10 +25,12 @@ namespace BrokerSensorBridge;
 \*---------------------------------------------------------------------------*/
 internal enum RgbTransport
 {
-    SmbusEne,    // ENE/Aura DRAM over SMBus (kernel brick-guarded write)
+    SmbusEne,    // ENE/Aura DRAM over SMBus (kernel brick-guarded write); WriteClass = EneDram
     SuperioEc,   // NCT6687 EC register RGB (kernel brick-guarded EC write)
     UsbHid,      // MSI Mystic Light over USB-HID (user-mode, broker-only)
-    UsbHidRazer  // Razer Chroma peripherals over USB-HID (user-mode, board-independent)
+    UsbHidRazer, // Razer Chroma peripherals over USB-HID (user-mode, board-independent)
+    Smbus        // Non-ENE SMBus RGB (DRAM/GPU/motherboard); controller + kernel window
+                 // selected by the zone's WriteClass (device-aware brick-guard).
 }
 
 /// <summary>The logical capability classes every board profile is expected to cover where the
@@ -39,7 +41,9 @@ internal enum RgbZoneKind
     Mb12V,       // 12V non-addressable motherboard header (JRGB) — a single solid-color zone
     MbArgb,      // 5V addressable motherboard header (JRAINBOW / JARGB) — per-LED
     Keyboard,    // USB-HID keyboard peripheral (not a board zone; not part of board parity)
-    Mouse        // USB-HID mouse peripheral (not a board zone; not part of board parity)
+    Mouse,       // USB-HID mouse peripheral (not a board zone; not part of board parity)
+    Cooler,      // USB-HID CPU cooler / fan (not a board zone; not part of board parity)
+    Mousepad     // USB-HID mousepad / mousemat (not a board zone; not part of board parity)
 }
 
 /// <summary>
@@ -74,7 +78,12 @@ internal sealed record RgbZone(
     int HidZoneIndex = 0,
     int HidPerLedHdr1 = 0,
     int HidPerLedHdr2 = 0,
-    int HidProductId = 0);
+    int HidProductId = 0,
+    // Device-aware brick-guard class for SMBus RGB zones (RgbTransport.Smbus): selects BOTH the
+    // user-mode controller protocol AND the kernel write window. EneDram (the default) is the
+    // legacy ENE/Aura window used by RgbTransport.SmbusEne zones; non-ENE SMBus families set
+    // their own class. Meaningful only for SMBus transports.
+    RgbWriteClass WriteClass = RgbWriteClass.EneDram);
 
 /// <summary>
 /// A board's RGB hardware map, selected by DMI identity. The generic profile (empty

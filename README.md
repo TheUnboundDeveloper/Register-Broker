@@ -10,7 +10,7 @@ over a local pipe. Clients name a *logical register* (`smu.cpu.temp`, `ram0`) �
 **never an address** — and cannot scan, probe, or write outside the broker's baked,
 kernel-enforced map.
 
-![Register Broker Reference Console — the Aurora effect driving DRAM, an MSI ARGB header, and two Razer devices at once, as a non-admin client](docs/images/reference-console-rgb-aurora.png)
+![Register Broker Reference Console — a sensor-reactive effect driving DRAM, an MSI ARGB header, and two Razer devices at once, as a non-admin client](docs/images/reference-console-rgb-aurora.png)
 
 > The first-party **[Reference Console](docs/REFERENCE-CONSOLE.md)** above is an ordinary,
 > non-admin desktop app — no elevation, no kernel driver of its own — driving RAM, a
@@ -150,10 +150,11 @@ zones; the client contract (`rgb.list` / `rgb.set`) is identical across transpor
 | USB-HID (Razer Chroma) | keyboards / mice (board-independent) | **broker** baked report builder + USB id/usage match, *no kernel guard* | ✅ validated (Naga Trinity, Cynosa Chroma); **opt-in** |
 | Super-I/O EC (NCT6687) | 12V motherboard header (JRGB) | **kernel** EC RGB-register brick-guard | 🟡 wired, **inert** until the EC RGB window is validated |
 
-- **USB-HID is opt-in and reduced-assurance.** It's a user-mode transport (the broker talks to
-  the controller directly, no kernel brick-guard), so it's **off by default** — enable
-  `AllowHidRgb` in the control service's `appsettings.json`. It's pinned to the controller's USB
-  product id so only the intended device is driven. See
+- **USB-HID is reduced-assurance but on by default.** It's a user-mode transport (the broker talks
+  to the controller directly, no kernel brick-guard). It's **enabled by default** (`AllowHidRgb`)
+  because most hosts running RGB control want it — set `AllowHidRgb` to `false` in the control
+  service's `appsettings.json` to opt out. Each device is pinned to its USB product id / usage so
+  only the intended controller is driven. See
   [docs/RGB-BOARD-BRINGUP.md](docs/RGB-BOARD-BRINGUP.md).
 - **No effects engine — but per-LED frames are supported.** `rgb.set` takes either one whole-device
   color (`color`) or a per-LED array (`colors[]`), so addressable headers (MSI JRAINBOW via the

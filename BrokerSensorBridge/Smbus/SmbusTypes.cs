@@ -11,6 +11,26 @@ internal enum SmbusOp
     ReadBlock = 2
 }
 
+/// <summary>
+/// SMBus RGB write device-class (mirror BROKER_RGB_WRITE_CLASS). A bounded write names the
+/// class; the kernel permits ONLY that class's baked address window. Class 0 = ENE/Aura DRAM
+/// (the legacy windows, the default for any caller that does not specify one). Each new value
+/// must have a matching g_RgbWriteProfiles row in the driver (Smbus.c).
+/// </summary>
+internal enum RgbWriteClass : uint
+{
+    EneDram        = 0,   // ENE/Aura DRAM: 0x70-0x77 + 0x39-0x3A
+    CorsairDram    = 1,   // Corsair Vengeance RGB Pro/RT DRAM: 0x58-0x5F
+    CrucialDram    = 2,   // Crucial Ballistix: 0x20-0x27 + 0x39-0x3C
+    HyperXDram     = 3,   // HyperX Predator/Fury: 0x27
+    FuryDram       = 4,   // Kingston Fury: 0x58-0x67
+    ViperDram      = 5,   // Patriot Viper / Viper Steel: 0x77
+    XtreemDram     = 6,   // T-Force Xtreem (ENE): 0x70-0x78 + 0x39-0x3D
+    CorsairVenDram = 7,   // Corsair Vengeance (original): 0x58-0x5F
+    AsrockMb       = 8,   // ASRock Polychrome / ASR RGB motherboard: 0x6A
+    EvgaMb         = 9    // EVGA ACX30 motherboard: 0x28
+}
+
 internal enum SmbusStatus
 {
     Ok             = 0,
@@ -113,15 +133,17 @@ internal interface ISmbusBackend
     /// </summary>
     bool TryReadDimmTempRaw(int index, out uint raw, out SmbusStatus status);
 
-    /// <summary>Bounded SMBus write (byte/word), kernel brick-guarded to RGB addresses only.</summary>
-    bool TryWrite(int bus, int address, int command, int data, bool word, out SmbusStatus status);
+    /// <summary>Bounded SMBus write (byte/word), kernel brick-guarded to the
+    /// <paramref name="deviceClass"/>'s address window only.</summary>
+    bool TryWrite(int bus, int address, int command, int data, bool word, RgbWriteClass deviceClass, out SmbusStatus status);
 
     /// <summary>
-    /// Bounded SMBus BLOCK write (1..32 bytes in one bus transaction), same kernel
-    /// brick-guard. One RGB LED's 3 color bytes land atomically instead of as three
-    /// byte transactions — this is what makes per-LED frames fast and tear-free.
+    /// Bounded SMBus BLOCK write (1..32 bytes in one bus transaction), kernel brick-guarded
+    /// to the <paramref name="deviceClass"/>'s address window only. One RGB LED's 3 color
+    /// bytes land atomically instead of as three byte transactions — this is what makes
+    /// per-LED frames fast and tear-free.
     /// </summary>
-    bool TryWriteBlock(int bus, int address, int command, ReadOnlySpan<byte> data, out SmbusStatus status);
+    bool TryWriteBlock(int bus, int address, int command, ReadOnlySpan<byte> data, RgbWriteClass deviceClass, out SmbusStatus status);
 
     /// <summary>
     /// Bounded NCT6687 EC RGB register write (1..32 bytes to consecutive EC addresses from

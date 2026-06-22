@@ -325,7 +325,7 @@ VOID BrokerSmbusEvtIoDeviceControl(WDFQUEUE Queue, WDFREQUEST Request,
         resp = (BROKER_SMBUS_WRITE_RESPONSE*)outBuf;
         RtlZeroMemory(resp, sizeof(*resp));
 
-        if (reqLocal.Op == BrokerSmbusWriteBlock && inLen < sizeof(BROKER_SMBUS_WRITE_REQUEST))
+        if (reqLocal.Op == BrokerSmbusWriteBlock && inLen < BROKER_SMBUS_WRITE_REQUEST_BLOCK_SIZE)
         {
             resp->Status = BrokerSmbusBadRequest;
         }

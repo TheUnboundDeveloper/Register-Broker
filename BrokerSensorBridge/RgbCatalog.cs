@@ -33,7 +33,30 @@ internal static class RgbCatalog
          a profile can never even *attempt* an out-of-window target. --*/
     private const int SmbusRgbMin = 0x70, SmbusRgbMax = 0x77;     // BROKER_SMBUS_RGB_ADDR_*
     private const int SmbusDramMin = 0x39, SmbusDramMax = 0x3A;   // BROKER_SMBUS_DRAM_ADDR_*
+    private const int CorsairDramMin = 0x58, CorsairDramMax = 0x5F; // BROKER_RGB_CORSAIR_DRAM_ADDR_*
     private const int Nct6687RgbMin = 0x0F00, Nct6687RgbMax = 0x0FFF; // BROKER_NCT6687_RGB_ADDR_*
+
+    /// <summary>
+    /// Broker MIRROR of the kernel g_RgbWriteProfiles windows (Smbus.c) keyed by device class. Returns
+    /// true if <paramref name="address"/> is inside the class's allowed window(s). The kernel guard is
+    /// authoritative; this lets the broker refuse an out-of-window zone at load instead of per-write.
+    /// </summary>
+    private static bool InWin(int a, int lo, int hi) => a >= lo && a <= hi;
+
+    private static bool SmbusClassAllows(RgbWriteClass cls, int a) => cls switch
+    {
+        RgbWriteClass.EneDram        => InWin(a, SmbusRgbMin, SmbusRgbMax) || InWin(a, SmbusDramMin, SmbusDramMax),
+        RgbWriteClass.CorsairDram    => InWin(a, CorsairDramMin, CorsairDramMax),
+        RgbWriteClass.CrucialDram    => InWin(a, 0x20, 0x27) || InWin(a, 0x39, 0x3C),
+        RgbWriteClass.HyperXDram     => a == 0x27,
+        RgbWriteClass.FuryDram       => InWin(a, 0x58, 0x67),
+        RgbWriteClass.ViperDram      => a == 0x77,
+        RgbWriteClass.XtreemDram     => InWin(a, 0x70, 0x78) || InWin(a, 0x39, 0x3D),
+        RgbWriteClass.CorsairVenDram => InWin(a, 0x58, 0x5F),
+        RgbWriteClass.AsrockMb       => a == 0x6A,
+        RgbWriteClass.EvgaMb         => a == 0x28,
+        _ => false,   // unknown class — refuse, mirroring the kernel
+    };
 
     /// <summary>
     /// Returns a fault message if <paramref name="z"/>'s baked hardware address is outside the kernel
@@ -46,6 +69,9 @@ internal static class RgbCatalog
             (z.Address >= SmbusRgbMin && z.Address <= SmbusRgbMax) ||
             (z.Address >= SmbusDramMin && z.Address <= SmbusDramMax)
                 ? null : $"SMBus address 0x{z.Address:X2} is outside the kernel RGB windows",
+        RgbTransport.Smbus =>
+            SmbusClassAllows(z.WriteClass, z.Address)
+                ? null : $"SMBus address 0x{z.Address:X2} is outside the {z.WriteClass} kernel window",
         RgbTransport.SuperioEc =>
             z.EcAddress >= Nct6687RgbMin && z.EcAddress + 2 <= Nct6687RgbMax
                 ? null : $"EC address 0x{z.EcAddress:X4} is outside the NCT6687 RGB window",

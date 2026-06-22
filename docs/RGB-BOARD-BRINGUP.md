@@ -46,9 +46,10 @@ MOTHERBOARD RGB (NCT6687 EC) — advanced, optional
 - The broker built and deployed (`scripts\Build-All.ps1`), services running. A normal,
   non-elevated PowerShell for the client; an elevated one only for reading the service log and
   stopping/starting services.
-- **Close every vendor RGB app** before any write test — OpenRGB, MSI Center / Mystic Light,
-  Dragon Center. They hold the controller open and stream frames; if they're running you can't tell
-  whether *your* write worked. (Reading/enumeration is safe with them open; writing is not.)
+- **Close every vendor RGB app** before any write test — e.g. MSI Center / Mystic Light,
+  Dragon Center, or any other lighting controller. They hold the controller open and stream frames;
+  if they're running you can't tell whether *your* write worked. (Reading/enumeration is safe with
+  them open; writing is not.)
 - The binary is a **WinExe** (no console). To capture its output, redirect through `cmd /c`:
   `cmd /c ".\publish\BrokerSensorBridge\BrokerSensorBridge.exe <args> > out.txt 2>&1"` then
   `Get-Content out.txt`. (PowerShell's bare `>` can silently capture nothing.)
@@ -195,7 +196,7 @@ for `RgbZoneKind.MbArgb` zones when the device advertises a ≥725-byte feature 
 The one per-board unknown is **where the header's LEDs sit in the flat 240-LED direct array**
 (`RgbZone.HidLedOffset`). Find it empirically with the dev probe (build with `-p:DevProbes=true`):
 
-1. Close OpenRGB / MSI Center and stop the control service so nothing else drives the strip.
+1. Close any other RGB control app (e.g. MSI Center) and stop the control service so nothing else drives the strip.
 2. Confirm direct mode lights the strip at all (and that brightness no longer folds):
    `--mystic-perled --index=0 --count=240 --color=200000` then `--color=ff0000` — the strip should get
    **monotonically brighter**, not fold.
@@ -298,17 +299,20 @@ In `calibration.default.json`, under your board's `match`, relabel zones by id (
 .\scripts\Start-BrokerServices.ps1           # elevated
 ```
 
-**Enable USB-HID on the service** (it's the *service* that registers `mb.argb0`, not the client —
-`--allow-hid-rgb` on a client invocation does nothing). Easiest is to install with the switch:
+**USB-HID is on by default** (as of 2026-06-22, `AllowHidRgb` defaults to `true`), so `mb.argb0`
+and the peripheral zones register without any extra step — it's the *service* that registers them,
+not the client (`--allow-hid-rgb` on a client invocation does nothing). The `-WithHidRgb` install
+switch still works and explicitly writes the flag (handy if you keep a hardened appsettings):
 
 ```powershell
 .\scripts\Install-SensorBrokerService.ps1 -WithHidRgb     # writes AllowHidRgb=true, implies -WithRgbControl
 ```
 
-Or set `"AllowHidRgb": true` in `publish\BrokerSensorBridge\appsettings.json` **after** the republish
-(the build overwrites it) and restart `BrokerControl`.
+To opt *out*, set `"AllowHidRgb": false` in `publish\BrokerSensorBridge\appsettings.json` **after**
+the republish (the build overwrites it from the source `appsettings.json`, which now ships
+`true`) and restart `BrokerControl`.
 
-Then, from a **non-elevated** shell with **OpenRGB/MSI Center closed**:
+Then, from a **non-elevated** shell with **other RGB apps (e.g. MSI Center) closed**:
 
 ```powershell
 # confirm the zone shows up (no --allow-hid-rgb here — it's a service setting)

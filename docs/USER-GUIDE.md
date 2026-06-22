@@ -133,17 +133,20 @@ Requires the control service (`-WithRgbControl` at install) and a driver with th
 capability.
 
 > **RGB scope today:** DRAM modules (ENE/Aura over SMBus, validated on G.Skill DDR4), **motherboard
-> ARGB headers** (MSI Mystic Light over USB-HID — opt-in, validated on MSI B550I), **and Razer Chroma
-> peripherals** (keyboards/mice over USB-HID — opt-in, board-independent, validated on Naga Trinity
-> + Cynosa Chroma). The 12V JRGB header via the NCT6687 EC is wired but inert pending validation. GPUs and AIOs are
+> ARGB headers** (MSI Mystic Light over USB-HID — `AllowHidRgb` on by default, validated on MSI B550I),
+> **and Razer Chroma peripherals** (keyboards/mice over USB-HID — same `AllowHidRgb` gate,
+> board-independent, validated on Naga Trinity + Cynosa Chroma). The 12V JRGB header via the NCT6687
+> EC is wired but inert pending validation. GPUs and AIOs are
 > not supported. It's **colors only**: effects (breathing, rainbow, music sync) are the consumer
 > app's job — render frames and send `rgb.set` updates at your own rate. The broker hosts no
 > effects engine. Full command reference: [RGB-COMMANDS.md](RGB-COMMANDS.md); full scope
 > statement: the "RGB status" section of the main [README](../README.md).
 >
-> Motherboard headers (`mb.argb0`) are **off by default** — enable `AllowHidRgb` in the control
-> service's `appsettings.json` (see [RGB-BOARD-BRINGUP.md](RGB-BOARD-BRINGUP.md) §9) and close
-> other RGB apps (OpenRGB / MSI Center) before driving them.
+> USB-HID devices (motherboard headers like `mb.argb0`, plus peripherals — keyboards, mice, coolers)
+> are driven over a user-mode transport gated by `AllowHidRgb`, which is **on by default**. Set
+> `AllowHidRgb: false` in the control service's `appsettings.json` for the stricter posture (see
+> [RGB-BOARD-BRINGUP.md](RGB-BOARD-BRINGUP.md) §9). Close other RGB apps (e.g. MSI Center) before
+> driving the same device.
 
 ```powershell
 cd "publish\BrokerSensorBridge"

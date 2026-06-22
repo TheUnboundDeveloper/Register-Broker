@@ -197,8 +197,8 @@ is identical across all transports. What bounds a write differs:
 |---|---|---|---|---|
 | `SmbusEne` | ENE/Aura DRAM | `IOCTL_SMBUS_WRITE` | **Kernel** address brick-guard (`0x70–0x77` / `0x39–0x3A`) | validated |
 | `SuperioEc` | NCT6687 12V header (JRGB) | `IOCTL_SUPERIO_RGB_WRITE` | **Kernel** EC RGB-register brick-guard | wired but **inert** — `SuperioRgbImplemented`/`CAP_SUPERIO_RGB` off until the EC RGB window is hardware-validated |
-| `UsbHid` | MSI Mystic Light addressable headers | user-mode HID feature reports | **Broker only** — baked report builder, *no kernel guard* | opt-in (`AllowHidRgb`, default off); validated |
-| `UsbHidRazer` | Razer Chroma keyboards / mice | user-mode HID feature reports (90-byte extended-matrix protocol) | **Broker only** — baked report builder, *no kernel guard* | opt-in (`AllowHidRgb`, default off); **validated** (Naga Trinity, Cynosa Chroma — 2026-06-17) |
+| `UsbHid` | MSI Mystic Light headers + many USB-HID peripherals (Logitech, SteelSeries, Corsair iCUE V2, HyperX, Cooler Master, NZXT, Roccat, Redragon, ASUS, Lian Li, AMD Wraith Prism — see `RGB-DEVICE-COVERAGE.md`) | user-mode HID feature/output/input reports | **Broker only** — baked report builder, *no kernel guard* | `AllowHidRgb` **on by default** (set `false` to opt out); MSI Mystic Light validated, most peripherals HW-unvalidated |
+| `UsbHidRazer` | Razer Chroma keyboards / mice | user-mode HID feature reports (90-byte extended-matrix protocol) | **Broker only** — baked report builder, *no kernel guard* | `AllowHidRgb` **on by default**; **validated** (Naga Trinity, Cynosa Chroma — 2026-06-17) |
 
 **Driver-stability contract:** adding a board/zone — or a USB-HID peripheral — is a **broker-only**
 change. The kernel exposes only stable, class-wide write windows (the SMBus RGB range; the NCT6687

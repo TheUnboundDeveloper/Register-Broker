@@ -46,6 +46,12 @@ public partial class MainWindow : Window
     private DispatcherTimer? _pollTimer;
 
     private List<string> _sensorIds = new();
+
+    // Per-device, per-effect-name effect instances, kept alive for the whole session so
+    // switching effects and back retains each effect's configured parameters (temperature
+    // stops + colours, slider values, etc.). Keyed "deviceId|effectName".
+    private readonly Dictionary<string, IEffect> _effectCache = new();
+
     private string? _selectedDeviceId;
     private bool _suppressEffectCombo;
     private DateTime _lastPreview = DateTime.MinValue;
@@ -118,6 +124,7 @@ public partial class MainWindow : Window
             if (eff is ISensorAware sa) sa.SetSensorIds(_sensorIds);
             ds.ApplyTo(eff, row.LedCount);
 
+            _effectCache[EffectKey(row.Id, eff.Name)] = eff;
             _engine.AssignEffect(row.Id, row.LedCount, eff);
             _engine.SetEnabled(row.Id, ds.Drive);
             row.SetEffect(eff.Name);
@@ -229,6 +236,7 @@ public partial class MainWindow : Window
                 };
                 _engine.FrameRendered += OnFrameRendered;
                 _engine.PushFailed += (id, msg) => Log($"[{id}] {msg}");
+                _engine.ConnectionLost += OnEngineConnectionLost;
                 _engine.Start();
                 EngineStatus.Text = "Engine running. Pick an effect, tick \"Drive\".";
             }
@@ -355,8 +363,7 @@ public partial class MainWindow : Window
     {
         if (_suppressEffectCombo || _engine is null || SelectedRow is not { } row) return;
         string name = EffectCombo.SelectedItem as string ?? "(none)";
-        IEffect? eff = CreateEffect(name);
-        if (eff is ISensorAware sa) sa.SetSensorIds(_sensorIds);
+        IEffect? eff = GetOrCreateEffect(row.Id, name);
 
         _engine.AssignEffect(row.Id, row.LedCount, eff);
         row.SetEffect(name);
@@ -378,7 +385,11 @@ public partial class MainWindow : Window
         foreach (var r in _rgbRows)
         {
             if (r.Id != row.Id)
-                _engine.AssignEffect(r.Id, r.LedCount, CloneEffect(src));   // others get their own instance
+            {
+                var clone = CloneEffect(src);   // others get their own instance...
+                if (clone is not null) _effectCache[EffectKey(r.Id, clone.Name)] = clone;   // ...cached so it sticks on switch-back
+                _engine.AssignEffect(r.Id, r.LedCount, clone);
+            }
             _engine.SetEnabled(r.Id, true);
             r.SetEffect(src.Name);
             r.SetEnabled(true);
@@ -485,6 +496,19 @@ public partial class MainWindow : Window
         await _engine.RenderOnceAsync(row.Id);
     }
 
+    // The render loop hit a dead control pipe and stopped itself. Tear the session
+    // down once, on the UI thread, instead of letting failures storm the log.
+    private void OnEngineConnectionLost(string reason)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_sensors is null && _control is null) return;   // already cleaned up
+            Log("Connection lost: " + reason + " — disconnected.");
+            Cleanup();
+            SetStatus(false, "Connection lost", "");
+        });
+    }
+
     // Engine raises this on its loop thread; copy + marshal a throttled preview.
     private void OnFrameRendered(string deviceId, RgbColor[] colors)
     {
@@ -557,6 +581,9 @@ public partial class MainWindow : Window
             row.Children.Add(swatch);
             row.Children.Add(new TextBlock { Text = "#", VerticalAlignment = VerticalAlignment.Center });
             row.Children.Add(hex);
+            var pick = new Button { Content = "Pick…", VerticalAlignment = VerticalAlignment.Center };
+            pick.Click += async (_, _) => await PickColorInto(hex);
+            row.Children.Add(pick);
             // Basic colour quick-picks (setting hex re-runs the handler above).
             foreach (var preset in Palette)
             {
@@ -608,6 +635,9 @@ public partial class MainWindow : Window
                 row.Children.Add(swatch);
                 row.Children.Add(new TextBlock { Text = "#", VerticalAlignment = VerticalAlignment.Center });
                 row.Children.Add(hex);
+                var pick = new Button { Content = "Pick…", VerticalAlignment = VerticalAlignment.Center };
+                pick.Click += async (_, _) => await PickColorInto(hex);
+                row.Children.Add(pick);
                 foreach (var preset in Palette)
                 {
                     RgbColor.TryParseHex(preset, out var pc);
@@ -638,11 +668,36 @@ public partial class MainWindow : Window
         return root;
     }
 
+    /// <summary>Open the HSV picker seeded from the hex box and, on OK, write the chosen
+    /// colour back as hex — re-running that box's own handler to update swatch + effect.</summary>
+    private async Task PickColorInto(TextBox hex)
+    {
+        var current = RgbColor.TryParseHex(hex.Text, out var c) ? c : RgbColor.Black;
+        var picked = await new ColorPickerWindow(current).ShowDialog<RgbColor?>(this);
+        if (picked is { } p) hex.Text = p.ToHex();
+    }
+
     private static string FormatNum(EffectParam p)
         => (p.Step < 1 ? p.Num.ToString("0.00", CultureInfo.InvariantCulture)
                        : p.Num.ToString("0", CultureInfo.InvariantCulture));
 
     private static ISolidColorBrush ToBrush(RgbColor c) => new SolidColorBrush(Color.FromRgb(c.R, c.G, c.B));
+
+    private static string EffectKey(string deviceId, string name) => deviceId + "|" + name;
+
+    /// <summary>Return this device's existing instance of the named effect (retaining its
+    /// configured parameters), creating and caching a fresh one on first use. "(none)" → null.</summary>
+    private IEffect? GetOrCreateEffect(string deviceId, string name)
+    {
+        if (name == "(none)") return null;
+        var key = EffectKey(deviceId, name);
+        if (_effectCache.TryGetValue(key, out var cached)) return cached;
+        var eff = CreateEffect(name);
+        if (eff is null) return null;
+        if (eff is ISensorAware sa) sa.SetSensorIds(_sensorIds);
+        _effectCache[key] = eff;
+        return eff;
+    }
 
     private static IEffect? CreateEffect(string name) => name switch
     {
@@ -674,12 +729,29 @@ public partial class MainWindow : Window
         catch (Exception ex) { Log("ping failed: " + ex.Message); }
     }
 
-    private void OnClearLog(object? sender, RoutedEventArgs e) => LogBox.Text = "";
+    private void OnClearLog(object? sender, RoutedEventArgs e) { LogBox.Text = ""; _logLines = 0; }
+
+    private int _logLines;
 
     private void Log(string msg)
     {
         var line = $"[{DateTime.Now:HH:mm:ss}] {msg}";
-        Dispatcher.UIThread.Post(() => LogBox.Text = string.IsNullOrEmpty(LogBox.Text) ? line : LogBox.Text + "\n" + line);
+        Dispatcher.UIThread.Post(() => AppendLog(line));
+    }
+
+    // Keep the log bounded. Appending to an ever-growing SelectableTextBlock is O(n^2)
+    // and re-lays-out the whole block each time; under an error flood that pins the UI
+    // thread until it freezes/OOMs. Cap it and trim in batches to amortise the cost.
+    private void AppendLog(string line)
+    {
+        const int MaxLines = 500;
+        LogBox.Text = string.IsNullOrEmpty(LogBox.Text) ? line : LogBox.Text + "\n" + line;
+        if (++_logLines > MaxLines + 100)
+        {
+            var kept = LogBox.Text.Split('\n');
+            LogBox.Text = string.Join("\n", kept[^MaxLines..]);
+            _logLines = MaxLines;
+        }
     }
 
     private void Cleanup()
@@ -692,6 +764,7 @@ public partial class MainWindow : Window
         }
         _ = DisposeClient(_sensors); _sensors = null;
         _ = DisposeClient(_control); _control = null;
+        _effectCache.Clear();   // a reconnect builds a fresh engine; restore re-seeds the cache
         _selectedDeviceId = null;
         EditorPanel.IsVisible = false;
         EngineStatus.Text = "Connect to drive devices.";

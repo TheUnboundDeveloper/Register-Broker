@@ -520,7 +520,7 @@ internal static class Program
         }
 
         /* Brick-guard proof: a write to SPD must be refused in-kernel. */
-        backend.TryWrite(0, 0x50, 0x00, 0x00, word: false, out SmbusStatus spd);
+        backend.TryWrite(0, 0x50, 0x00, 0x00, word: false, RgbWriteClass.EneDram, out SmbusStatus spd);
         Console.WriteLine($"brick-guard: write to SPD 0x50 -> {spd}  (expect Forbidden)");
 
         /* DDR4 SPD page reset. The SPD is 512 bytes across two 256-byte pages selected
@@ -1152,6 +1152,250 @@ internal static class Program
             Check("out-of-window SMBus zone (SPD 0x50) refused", RgbCatalog.ZoneAddressFault(spd) != null);
             Check("out-of-window EC zone (sensor bank 0x0100) refused", RgbCatalog.ZoneAddressFault(ecBad) != null);
 
+            /* DEVICE-AWARE brick-guard (mirror of the kernel g_RgbWriteProfiles): each device class
+               permits ONLY its own window. A Corsair zone (0x58-0x5F, CorsairDram class) is accepted
+               in its window; the SAME address under the ENE class, and an ENE address under the
+               Corsair class, are BOTH refused — proving per-device isolation, not one shared window. */
+            var corsair  = new RgbZone("corsair.dram0", "x", RgbZoneKind.Dram, RgbTransport.Smbus, 10, Bus: 0, Address: 0x58, WriteClass: RgbWriteClass.CorsairDram);
+            var corsairHi = new RgbZone("corsair.hi", "x", RgbZoneKind.Dram, RgbTransport.Smbus, 10, Bus: 0, Address: 0x5F, WriteClass: RgbWriteClass.CorsairDram);
+            var corsairOut = new RgbZone("corsair.bad", "x", RgbZoneKind.Dram, RgbTransport.Smbus, 10, Bus: 0, Address: 0x39, WriteClass: RgbWriteClass.CorsairDram);
+            var eneAt58  = new RgbZone("ene.bad", "x", RgbZoneKind.Dram, RgbTransport.SmbusEne, 5, Bus: 0, Address: 0x58);
+            Check("Corsair zone in its window (0x58-0x5F) accepted",
+                  RgbCatalog.ZoneAddressFault(corsair) == null && RgbCatalog.ZoneAddressFault(corsairHi) == null);
+            Check("Corsair class refuses an ENE address (0x39) — per-device isolation", RgbCatalog.ZoneAddressFault(corsairOut) != null);
+            Check("ENE class refuses the Corsair window (0x58) — per-device isolation", RgbCatalog.ZoneAddressFault(eneAt58) != null);
+
+            /* Corsair DRAM protocol math (testable without hardware): CRC-8 (poly 0x07) known-answer,
+               the DIRECT packet layout ([ledCount, R,G,B..., CRC]) and the reverse-wiring fact. */
+            Check("Corsair CRC-8 known answer (\"123456789\" -> 0xF4)",
+                  CorsairDramController.Crc8(System.Text.Encoding.ASCII.GetBytes("123456789")) == 0xF4);
+            byte[] cpkt = CorsairDramController.BuildDirectPacket(
+                new (byte, byte, byte)[] { (0x11, 0x22, 0x33), (0x44, 0x55, 0x66) }, ledCount: 2, reverse: false);
+            Check("Corsair DIRECT packet [ledCount, R,G,B..., CRC]",
+                  cpkt.Length == 8 && cpkt[0] == 2 && cpkt[1] == 0x11 && cpkt[4] == 0x44
+                  && cpkt[7] == CorsairDramController.Crc8(cpkt.AsSpan(0, 7)));
+            byte[] crev = CorsairDramController.BuildDirectPacket(
+                new (byte, byte, byte)[] { (0x11, 0x22, 0x33), (0x44, 0x55, 0x66) }, ledCount: 2, reverse: true);
+            Check("Corsair reverse wiring flips LED order", crev[1] == 0x44 && crev[4] == 0x11);
+            Check("Corsair model table: PID 0x0200 = Dominator Platinum DDR4, 12 LEDs reversed",
+                  CorsairDramController.ResolveModel(0x0200) is { LedCount: 12, Reverse: true }
+                  && CorsairDramController.SupportsDirect(4) && !CorsairDramController.SupportsDirect(3));
+
+            /* Each new DRAM family's device-aware window (mirror of g_RgbWriteProfiles): in-window
+               accepted, and the family's class refuses an address outside its own window. */
+            RgbZone Z(RgbWriteClass cls, int a) => new("z", "x", RgbZoneKind.Dram, RgbTransport.Smbus, 8, Bus: 0, Address: a, WriteClass: cls);
+            Check("Crucial window (0x20-0x27, 0x39-0x3C) accepted; 0x30 refused",
+                  RgbCatalog.ZoneAddressFault(Z(RgbWriteClass.CrucialDram, 0x23)) == null
+                  && RgbCatalog.ZoneAddressFault(Z(RgbWriteClass.CrucialDram, 0x3C)) == null
+                  && RgbCatalog.ZoneAddressFault(Z(RgbWriteClass.CrucialDram, 0x30)) != null);
+            Check("Fury window (0x58-0x67) accepted; 0x57 (SPD edge) refused",
+                  RgbCatalog.ZoneAddressFault(Z(RgbWriteClass.FuryDram, 0x67)) == null
+                  && RgbCatalog.ZoneAddressFault(Z(RgbWriteClass.FuryDram, 0x57)) != null);
+            Check("Viper window (0x77) accepted; 0x76 refused",
+                  RgbCatalog.ZoneAddressFault(Z(RgbWriteClass.ViperDram, 0x77)) == null
+                  && RgbCatalog.ZoneAddressFault(Z(RgbWriteClass.ViperDram, 0x76)) != null);
+            Check("Xtreem window (0x70-0x78, 0x39-0x3D) accepted; 0x79 refused",
+                  RgbCatalog.ZoneAddressFault(Z(RgbWriteClass.XtreemDram, 0x78)) == null
+                  && RgbCatalog.ZoneAddressFault(Z(RgbWriteClass.XtreemDram, 0x3D)) == null
+                  && RgbCatalog.ZoneAddressFault(Z(RgbWriteClass.XtreemDram, 0x79)) != null);
+            Check("Corsair Vengeance refuses the JC42 alias (0x18) — only 0x58-0x5F permitted",
+                  RgbCatalog.ZoneAddressFault(Z(RgbWriteClass.CorsairVenDram, 0x18)) != null
+                  && RgbCatalog.ZoneAddressFault(Z(RgbWriteClass.CorsairVenDram, 0x58)) == null);
+
+            /* T-Force Xtreem folded-strip remap (logical -> physical): 0,14,1,13,... */
+            Check("T-Force folded offset (0->0, 1->14, 2->1, 3->13)",
+                  TForceXtreemController.FoldedOffset(0, 15) == 0 && TForceXtreemController.FoldedOffset(1, 15) == 14
+                  && TForceXtreemController.FoldedOffset(2, 15) == 1 && TForceXtreemController.FoldedOffset(3, 15) == 13);
+            Check("DRAM fixed LED counts (Crucial 8, Xtreem 15, Corsair Vengeance 1)",
+                  CrucialDramController.LedCount == 8 && TForceXtreemController.LedCount == 15
+                  && CorsairVengeanceController.LedCount == 1);
+
+            /* Motherboard SMBus RGB device-aware windows (single-address each). */
+            Check("ASRock window (0x6A) accepted; 0x6B refused",
+                  RgbCatalog.ZoneAddressFault(Z(RgbWriteClass.AsrockMb, 0x6A)) == null
+                  && RgbCatalog.ZoneAddressFault(Z(RgbWriteClass.AsrockMb, 0x6B)) != null);
+            Check("EVGA window (0x28) accepted; SPD 0x50 refused under EVGA class",
+                  RgbCatalog.ZoneAddressFault(Z(RgbWriteClass.EvgaMb, 0x28)) == null
+                  && RgbCatalog.ZoneAddressFault(Z(RgbWriteClass.EvgaMb, 0x50)) != null);
+
+            /* AMD Wraith Prism USB-HID direct packets: enable (0x41/0x80/0x03), apply (0x51/0x28, [5]=0xE0),
+               and a 0xC0 direct packet with {id,R,G,B} entries at offset 5 (R,G,B order, 17 LEDs total). */
+            byte[] en = WraithPrismController.BuildEnableDirect();
+            byte[] ap = WraithPrismController.BuildApply();
+            Check("Wraith Prism enable/apply packets (0x41/0x80/0x03; 0x51/0x28 [5]=0xE0)",
+                  en.Length == 65 && en[1] == 0x41 && en[2] == 0x80 && en[3] == 0x03
+                  && ap[1] == 0x51 && ap[2] == 0x28 && ap[5] == 0xE0);
+            byte[] dp = WraithPrismController.BuildDirectPacket(
+                new (byte, byte, byte, byte)[] { (0x00, 0x11, 0x22, 0x33), (0x01, 0x44, 0x55, 0x66) });
+            Check("Wraith Prism direct packet [0xC0,0x01,size,0x00, id,R,G,B...]",
+                  dp[1] == 0xC0 && dp[2] == 0x01 && dp[3] == 2
+                  && dp[5] == 0x00 && dp[6] == 0x11 && dp[7] == 0x22 && dp[8] == 0x33
+                  && dp[9] == 0x01 && dp[10] == 0x44 && dp[11] == 0x55 && dp[12] == 0x66);
+            Check("Wraith Prism LED map = 17 (Logo, Fan, 15 ring); ring id order starts 0x08",
+                  WraithPrismController.LedCount == 17 && WraithPrismController.LedIds[2] == 0x08);
+
+            /* Logitech G203 mouse DIRECT (report 0x11, 0x12/0x10, 3 LED selectors 0x01/0x02/0x03 R,G,B). */
+            byte[] g203 = LogitechG203LController.BuildDirect(new (byte, byte, byte)[] { (0x11, 0x22, 0x33), (0x44, 0x55, 0x66), (0x77, 0x88, 0x99) });
+            Check("Logitech G203 direct packet (0x11/0xFF/0x12/0x10, sel+RGB, end 0xFF@16)",
+                  g203[0] == 0x11 && g203[2] == 0x12 && g203[3] == 0x10
+                  && g203[4] == 0x01 && g203[5] == 0x11 && g203[8] == 0x02 && g203[9] == 0x44 && g203[16] == 0xFF);
+            /* Logitech keyboard PER-KEY: key-table sizes (G810/G910 117, G Pro 94) + the report-0x12
+               direct frame ([0x12,0xFF,directB2,0x3D,0,zone,0,count], then {idx,R,G,B}). */
+            Check("Logitech key tables (G810 117, G910 117, G Pro 94)",
+                  LogitechGKeyboardController.BuildKeyTable(LogitechGKeyboardController.LayoutG810).Length == 117
+                  && LogitechGKeyboardController.BuildKeyTable(LogitechGKeyboardController.LayoutG910).Length == 117
+                  && LogitechGKeyboardController.BuildKeyTable(LogitechGKeyboardController.LayoutGPro).Length == 94);
+            byte[] gfr = LogitechGKeyboardController.BuildDirectFrame(0x0C, 0x01,
+                new (byte, byte, byte, byte)[] { (0x04, 0x11, 0x22, 0x33), (0x05, 0x44, 0x55, 0x66) });
+            Check("Logitech direct frame (0x12/0xFF/0x0C/0x3D, zone, count, idx+RGB@8)",
+                  gfr[0] == 0x12 && gfr[2] == 0x0C && gfr[3] == 0x3D && gfr[5] == 0x01 && gfr[7] == 2
+                  && gfr[8] == 0x04 && gfr[9] == 0x11 && gfr[12] == 0x05 && gfr[13] == 0x44);
+
+            /* SteelSeries Rival 3 (cmd 0x05, 8-byte, zoneVal+RGB+brightness) and Aerox (cmd 0x21,
+               bitmask 1<<zone, RGB at 3+zone*3). */
+            byte[] r3 = SteelSeriesRival3Controller.BuildZone(2, 0x11, 0x22, 0x33, 0x64);
+            Check("SteelSeries Rival 3 zone packet (05/00/zoneVal/RGB/bright)",
+                  r3.Length == 8 && r3[1] == 0x05 && r3[3] == 0x02 && r3[4] == 0x11 && r3[5] == 0x22 && r3[6] == 0x33 && r3[7] == 0x64);
+            byte[] ax = SteelSeriesAeroxController.BuildZone(2, 0xAA, 0xBB, 0xCC);
+            Check("SteelSeries Aerox zone packet (0x21, mask 1<<2, RGB at 3+2*3)",
+                  ax.Length == 65 && ax[1] == 0x21 && ax[2] == 0x04 && ax[9] == 0xAA && ax[10] == 0xBB && ax[11] == 0xCC);
+
+            /* Corsair iCUE V2: CTRL2 triplet buffer ([0x12,0x00, RGB...]), CTRL1 planar buffer
+               (all R, all G, all B), and the BLK_W1 first-packet framing (write_cmd@1, 16-bit length
+               @4..5, data@8). 2 LEDs of (R,G,B)=(11,22,33),(44,55,66). */
+            var ccol = new (byte, byte, byte)[] { (0x11, 0x22, 0x33), (0x44, 0x55, 0x66) };
+            byte[] trip = CorsairV2Controller.BuildBufferTriplet(ccol, 2);
+            Check("Corsair V2 CTRL2 triplet buffer ([0x12,0x00,R,G,B...], len count*3+2)",
+                  trip.Length == 8 && trip[0] == 0x12 && trip[1] == 0x00
+                  && trip[2] == 0x11 && trip[3] == 0x22 && trip[4] == 0x33 && trip[5] == 0x44);
+            byte[] plan = CorsairV2Controller.BuildBufferPlanar(ccol, 2);
+            Check("Corsair V2 CTRL1 planar buffer ([R0,R1, G0,G1, B0,B1], len count*3)",
+                  plan.Length == 6 && plan[0] == 0x11 && plan[1] == 0x44 && plan[2] == 0x22 && plan[3] == 0x55 && plan[4] == 0x33 && plan[5] == 0x66);
+            byte[] blk = CorsairV2Controller.BuildBlockFirst(0x08, trip, out int consumed);
+            Check("Corsair V2 BLK_W1 framing (wc@1, cmd 0x06, len@4..5, data@8)",
+                  blk.Length == 65 && blk[1] == 0x08 && blk[2] == 0x06 && blk[4] == 8 && blk[5] == 0
+                  && blk[8] == 0x12 && consumed == 8);
+
+            /* SteelSeries Apex 3 8-zone (cmd 0x21, bitmask 0xFF, 8 RGB triplets at 3) and T-zone
+               (cmd 0x0B color, RGB triplets at 3; brightness cmd 0x0A at [3]). */
+            byte[] e8 = SteelSeriesApex3Controller.BuildEightZone(new (byte, byte, byte)[] { (0x11, 0x22, 0x33), (0x44, 0x55, 0x66) });
+            Check("SteelSeries Apex3 8-zone (00/21/FF, RGB triplets at 3)",
+                  e8.Length == 65 && e8[1] == 0x21 && e8[2] == 0xFF && e8[3] == 0x11 && e8[4] == 0x22 && e8[5] == 0x33 && e8[6] == 0x44);
+            byte[] tz = SteelSeriesApex3Controller.BuildTZoneColor(new (byte, byte, byte)[] { (0xAA, 0xBB, 0xCC) }, 10);
+            byte[] tb = SteelSeriesApex3Controller.BuildTZoneBrightness(0x64);
+            Check("SteelSeries Apex3 T-zone (color 00/0B RGB@3; brightness 00/0A @3)",
+                  tz.Length == 33 && tz[1] == 0x0B && tz[3] == 0xAA && tz[4] == 0xBB && tz[5] == 0xCC
+                  && tb[1] == 0x0A && tb[3] == 0x64);
+
+            /* SteelSeries OldApex 5-zone RGBA ([00,07,00, R,G,B,A...]) and Sensei 2-zone (cmd 0x5B,
+               static flag @0x14, count @0x1C, RGB duplicated @0x1D & 0x20). */
+            byte[] oa = SteelSeriesOldApexController.BuildColor(new (byte, byte, byte)[] { (0x11, 0x22, 0x33) });
+            Check("SteelSeries OldApex (00/07/00, R,G,B,Alpha=FF)",
+                  oa.Length == 33 && oa[1] == 0x07 && oa[3] == 0x11 && oa[4] == 0x22 && oa[5] == 0x33 && oa[6] == 0xFF);
+            byte[] sn = SteelSeriesSenseiController.BuildZone(1, 0xAA, 0xBB, 0xCC);
+            Check("SteelSeries Sensei (5B, zone@3, flag@14, RGB@1D & dup@20)",
+                  sn.Length == 66 && sn[1] == 0x5B && sn[3] == 0x01 && sn[0x14] == 0x01 && sn[0x1C] == 0x01
+                  && sn[0x1D] == 0xAA && sn[0x20] == 0xAA && sn[0x22] == 0xCC);
+
+            /* NZXT Lift (0x00 prefix; header 0x43/0xAE; LEDs at 26 stride 4, remapped slot order 2,1,0,...). */
+            byte[] lift = NzxtLiftController.BuildColor(new (byte, byte, byte)[] { (0x10, 0x20, 0x30), (0x40, 0x50, 0x60), (0x70, 0x80, 0x90), (1, 2, 3), (4, 5, 6), (7, 8, 9) });
+            Check("NZXT Lift (00 prefix, 0x43/0xAE header, marker@25, slot0=colors[2]@26)",
+                  lift.Length == 65 && lift[1] == 0x43 && lift[2] == 0xAE && lift[25] == 0x06
+                  && lift[26] == 0x70 && lift[27] == 0x80 && lift[28] == 0x90);
+
+            /* Roccat Kone Aimo (feature 0x0D/0x2E, 11×4 bytes) and Kone Pro (direct 0x0D/0x0B, 2×3). */
+            byte[] aimo = RoccatKoneAimoController.BuildColor(new (byte, byte, byte)[] { (0x11, 0x22, 0x33) });
+            Check("Roccat Kone Aimo (0x0D/0x2E, R,G,B,pad@2)",
+                  aimo.Length == 46 && aimo[0] == 0x0D && aimo[1] == 0x2E && aimo[2] == 0x11 && aimo[3] == 0x22 && aimo[4] == 0x33);
+            byte[] kpro = RoccatKoneProController.BuildColor(new (byte, byte, byte)[] { (0xAA, 0xBB, 0xCC), (0xDD, 0xEE, 0xFF) });
+            Check("Roccat Kone Pro direct (0x0D/0x0B, 2×RGB@2) + control enable 0x0E",
+                  kpro.Length == 11 && kpro[0] == 0x0D && kpro[1] == 0x0B && kpro[2] == 0xAA && kpro[5] == 0xDD
+                  && Roccat.BuildControl(0x01) is [0x0E, 0x06, 0x01, 0x01, 0x00, 0xFF]);
+
+            /* Redragon mouse: register-write (0xF3, addr LE @2..3, len@4, data@8) + apply (0xF1). */
+            byte[] rw = RedragonMouseController.BuildWrite(0x0449, new byte[] { 0x11, 0x22, 0x33 });
+            byte[] rap = RedragonMouseController.BuildApply();
+            Check("Redragon write (02/F3, addr 49/04, len 3, RGB@8) + apply (02/F1)",
+                  rw.Length == 16 && rw[0] == 0x02 && rw[1] == 0xF3 && rw[2] == 0x49 && rw[3] == 0x04 && rw[4] == 0x03
+                  && rw[8] == 0x11 && rw[9] == 0x22 && rw[10] == 0x33 && rap[1] == 0xF1 && rap[2] == 0x02);
+            /* Cooler Master MP750 static (00, 01, 04, R,G,B, speed). */
+            byte[] mp = CoolerMasterMp750Controller.BuildStatic(0xAA, 0xBB, 0xCC);
+            Check("Cooler Master MP750 static (00/01/04, RGB@3, speed@6)",
+                  mp.Length == 65 && mp[1] == 0x01 && mp[2] == 0x04 && mp[3] == 0xAA && mp[4] == 0xBB && mp[5] == 0xCC);
+
+            /* HyperX mice: FPS Pro (07/0A, RGB@2, A0@8), Raid (2 LEDs), Haste (setup 04/F2 + color 81),
+               Surge (planar strip R@8/G@28/B@48, logo@6C). */
+            byte[] hfps = HyperXPulsefireFpsProController.BuildColor(0x11, 0x22, 0x33);
+            Check("HyperX FPS Pro (07/0A, RGB@2, 0xA0@8)",
+                  hfps.Length == 264 && hfps[0] == 0x07 && hfps[1] == 0x0A && hfps[2] == 0x11 && hfps[3] == 0x22 && hfps[4] == 0x33 && hfps[8] == 0xA0);
+            byte[] hhs = HyperXPulsefireHasteController.BuildSetup();
+            byte[] hhc = HyperXPulsefireHasteController.BuildColor(0xAA, 0xBB, 0xCC);
+            Check("HyperX Haste (setup 04/F2/02@8; color 81, RGB@2, 02@8)",
+                  hhs[1] == 0x04 && hhs[2] == 0xF2 && hhs[8] == 0x02 && hhc[1] == 0x81 && hhc[2] == 0xAA && hhc[8] == 0x02);
+            byte[] hsg = HyperXPulsefireSurgeController.BuildColor(new (byte, byte, byte)[] { (0x10, 0x20, 0x30) });
+            Check("HyperX Surge planar (14/A0; strip0 R@8 G@28 B@48)",
+                  hsg[1] == 0x14 && hsg[3] == 0xA0 && hsg[0x08] == 0x10 && hsg[0x28] == 0x20 && hsg[0x48] == 0x30);
+
+            /* HyperX Alloy FPS: channel-scatter (first key at 0x08). */
+            byte[] hch = HyperXAlloyFpsController.BuildChannel(0x01, new (byte, byte, byte)[] { (0x77, 0x88, 0x99) });
+            Check("HyperX Alloy FPS channel R (07/16/01/A0; value at KeyOffset[0]=0x08)",
+                  hch[0] == 0x07 && hch[1] == 0x16 && hch[2] == 0x01 && hch[3] == 0xA0 && hch[0x08] == 0x77);
+
+            /* HyperX Origins-family: 4-byte color groups [0x81,R,G,B], blanks inserted at skip indices. */
+            byte[] hinit = HyperXOriginsController.BuildInit(0x09);
+            Check("HyperX Origins init (04/F2/09@9)", hinit[1] == 0x04 && hinit[2] == 0xF2 && hinit[9] == 0x09);
+            var hpk = HyperXOriginsController.BuildColorPackets(
+                new (byte, byte, byte)[] { (0xA1, 0xA2, 0xA3), (0xB1, 0xB2, 0xB3), (0xC1, 0xC2, 0xC3) }, new[] { 1 }, 1);
+            Check("HyperX Origins groups + skip insert (g0=A, g1=blank, g2=B)",
+                  hpk[0][1] == 0x81 && hpk[0][2] == 0xA1 && hpk[0][5] == 0x81 && hpk[0][6] == 0x00
+                  && hpk[0][9] == 0x81 && hpk[0][10] == 0xB1);
+
+            /* HyperX 0x44 keyboards (Eve 1800 / Origins2 65): init 44/01/04; color 44/02/seq, triplets@4. */
+            byte[] h44i = HyperX44KeyboardController.BuildInit();
+            byte[] h44c = HyperX44KeyboardController.BuildColorPacket(0, new (byte, byte, byte)[] { (0x11, 0x22, 0x33) }, 0, 1);
+            Check("HyperX 0x44 keyboard (init 44/01/04; color 44/02/seq, RGB@4)",
+                  h44i[0] == 0x44 && h44i[1] == 0x01 && h44i[2] == 0x04 && h44c[0] == 0x44 && h44c[1] == 0x02 && h44c[4] == 0x11 && h44c[6] == 0x33);
+
+            /* Keepalive wiring: a normal device reports 0; Corsair K55 reports its ~30 s interval. */
+            Check("keepalive default is 0 (devices hold their color)",
+                  CorsairV2Controller.KnownModels.First(m => m.Id == "corsair.darkcorese").KeepaliveMs == 0
+                  && CorsairV2Controller.KnownModels.First(m => m.Id == "corsair.k55pro").KeepaliveMs == 30000);
+
+            /* SteelSeries Rival 100 (cmd 0x05, zone byte 0x00) and Rival 300 (cmd 0x08, zone+1). */
+            byte[] r100 = SteelSeriesRivalLegacyController.BuildColor(0x05, 0x00, 0x11, 0x22, 0x33);
+            byte[] r300 = SteelSeriesRivalLegacyController.BuildColor(0x08, 0x02, 0xAA, 0xBB, 0xCC);
+            Check("SteelSeries Rival 100/300 color (cmd/zone/RGB)",
+                  r100.Length == 10 && r100[1] == 0x05 && r100[2] == 0x00 && r100[3] == 0x11
+                  && r300[1] == 0x08 && r300[2] == 0x02 && r300[3] == 0xAA && r300[5] == 0xCC
+                  && SteelSeriesRivalLegacyController.BuildModeDirect(0x00)[1] == 0x07);
+
+            /* Cooler Master mice: init (41/80) + DIRECT (seed 51/A8) with family-specific zone offsets.
+               MM530 = 3 LEDs (wheel@11, buttons@5, logo@8); MM7xx = 2 LEDs (wheel@5, logo@8). */
+            var cmMm530 = CoolerMasterMouseController.KnownModels.First(m => m.Id == "cm.mm530");
+            byte[] cmd = CoolerMasterMouseController.BuildDirect(
+                new (byte, byte, byte)[] { (0x10, 0x11, 0x12), (0x20, 0x21, 0x22), (0x30, 0x31, 0x32) }, cmMm530.ZoneOffsets);
+            Check("CM mouse init (41/80) + MM530 direct (51/A8; wheel@11, buttons@5, logo@8)",
+                  CoolerMasterMouseController.BuildInit()[1] == 0x41 && cmd[1] == 0x51 && cmd[2] == 0xA8
+                  && cmd[11] == 0x10 && cmd[5] == 0x20 && cmd[8] == 0x30);
+
+            /* ASUS ROG Ally: init "ASUS Tech.Inc." + DIRECT feature (5A/D1/08/0C, 4×RGB@4). */
+            byte[] allyInit = AsusRogAllyController.BuildInit2();
+            byte[] allyDir = AsusRogAllyController.BuildDirect(new (byte, byte, byte)[] { (0x11, 0x22, 0x33), (0x44, 0x55, 0x66), (0x77, 0x88, 0x99), (0xAA, 0xBB, 0xCC) });
+            Check("ROG Ally init (5D/41 + 'ASUS') + direct (5A/D1/08/0C, RGB@4)",
+                  allyInit[0] == 0x5D && allyInit[1] == 0x41 && allyInit[2] == (byte)'A' && allyInit[5] == (byte)'S'
+                  && allyDir[0] == 0x5A && allyDir[1] == 0xD1 && allyDir[2] == 0x08 && allyDir[3] == 0x0C
+                  && allyDir[4] == 0x11 && allyDir[7] == 0x44 && allyDir[13] == 0xAA);
+
+            /* Lian Li Uni Hub SL V2: START (E0/10/60, (ch<<4)|fans), COLOR (E0, 0x30+ch, R,B,G order),
+               COMMIT (E0, 0x10+ch, static 0x01), + the R+B+G>460 power limiter. */
+            byte[] llStart = LianLiUniHubSlV2Controller.BuildStart(2, 1);
+            byte[] llColor = LianLiUniHubSlV2Controller.BuildColor(2, new (byte, byte, byte)[] { (0x10, 0x20, 0x30) }, 0, 1);
+            Check("Lian Li SL V2 START/COLOR (E0/10/60, ch<<4|fans; E0/0x32, R,B,G@2)",
+                  llStart[0] == 0xE0 && llStart[2] == 0x60 && llStart[3] == 0x21 && llColor[1] == 0x32
+                  && llColor[2] == 0x10 && llColor[3] == 0x30 && llColor[4] == 0x20);   // R, B(=0x30), G(=0x20)
+            var lim = LianLiUniHubSlV2Controller.Limit(200, 200, 200);   // sum 600 > 460 -> scaled
+            Check("Lian Li power limiter (R+B+G>460 scaled down)", lim.R < 200 && lim.R == 200 * 460 / 600);
+
             /* USB-HID product-id pin: a pinned PID selects exactly that device; a pinned-but-absent
                PID refuses (never falls back to another MSI HID); unpinned takes the first candidate. */
             var pids = new ushort[] { 0x7C92, 0x1563 };
@@ -1518,13 +1762,15 @@ internal sealed class BridgeConfig
     public string AuditLogFile { get; set; } = "%LOCALAPPDATA%\\BrokerSensorBridge\\audit.log";
 
     /*-----------------------------------------------------------*\
-    | Opt-in USB-HID RGB (MSI Mystic Light) for addressable        |
-    | motherboard headers. OFF by default: unlike the SMBus/EC     |
-    | paths it does NOT pass the kernel brick-guard, so the broker's|
-    | baked report builder is the only boundary (see SECURITY.md). |
-    | Enable via appsettings.json (installer flag) or --allow-hid-rgb.|
+    | USB-HID RGB (MSI Mystic Light / Razer / peripherals) for     |
+    | addressable headers and devices. ON by default: most hosts   |
+    | with RGB control want it, so the common case shouldn't need a |
+    | flag. Unlike the SMBus/EC paths it does NOT pass the kernel   |
+    | brick-guard, so the broker's baked report builder is the only |
+    | boundary (see SECURITY.md). Set false in appsettings.json to  |
+    | opt out; --allow-hid-rgb forces it on regardless.            |
     \*-----------------------------------------------------------*/
-    public bool AllowHidRgb { get; set; } = false;
+    public bool AllowHidRgb { get; set; } = true;
 
     [JsonIgnore]
     public string LogFileExpanded => Environment.ExpandEnvironmentVariables(LogFile);

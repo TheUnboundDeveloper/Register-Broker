@@ -41,8 +41,9 @@ Ctrl+C stops it and blacks out the zones.
 ## Notes
 
 - **Zone discovery is automatic** — it drives every device `rgb.list` returns. Use
-  `--devices` to narrow it. DRAM zones work out of the box; motherboard-header (`mb.argb0`)
-  and Razer zones require `AllowHidRgb` enabled on the control service.
+  `--devices` to narrow it. DRAM zones work out of the box; the USB-HID zones (motherboard
+  header `mb.argb0`, Razer and other peripherals) are gated by `AllowHidRgb` on the control
+  service, which is **on by default** — set it `false` there to opt out.
 - **Rate limit:** the control service allows 120 ops/s (burst 240) per identity, and each
   zone is one op per frame. The tool auto-caps FPS to `110 / zoneCount` so all zones together
   stay under the limit; `--fps` can only lower it. Unchanged frames (e.g. during silence) are

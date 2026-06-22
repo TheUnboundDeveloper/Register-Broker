@@ -63,7 +63,7 @@ reports `kind` (`dram`/`mb12v`/`mbargb`) and `transport` (`smbusene`/`superioec`
 |---|---|---|---|---|
 | `ram0` | dram / smbusene | bus 0, addr `0x39` | "GSkill RGB (DIMM 0)", 5 LEDs; `EneController` write | ✅ live (non-admin, per-LED) |
 | `ram1` | dram / smbusene | bus 0, addr `0x3A` | "GSkill RGB (DIMM 1)", 5 LEDs; same | ✅ |
-| `mb.argb0` | mbargb / usbhid | MSI Mystic Light, USB PID `0x7C92`, packet offset 31 (JRAINBOW1) | 60 LEDs; `MysticLightHidController`; **opt-in** `AllowHidRgb`, listed only when enabled | ✅ live (solid color validated on dev box) |
+| `mb.argb0` | mbargb / usbhid | MSI Mystic Light, USB PID `0x7C92`, packet offset 31 (JRAINBOW1) | 60 LEDs; `MysticLightHidController`; `AllowHidRgb` (**on by default**), listed only when the device is present | ✅ live (per-LED validated on dev box) |
 | `mb.jrgb0` | mb12v / superioec | NCT6687 EC RGB window | 1 LED zone; `MysticLightEcController`; **inert** until the EC window is HW-validated (`CAP_SUPERIO_RGB` off) | 🟡 wired, not listed |
 
 The ENE/Aura and MSI Mystic Light protocols are publicly documented hardware protocols, reproduced

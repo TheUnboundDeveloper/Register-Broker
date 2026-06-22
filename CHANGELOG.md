@@ -9,6 +9,222 @@ assembly version, git tags) and the **pipe protocol version** (currently `2`, se
 in the client hello — see `docs/CLIENT-PROTOCOL.md` §8) are independent. New sensors
 and additive ops do not bump the protocol version.
 
+## [1.6.0] — 2026-06-22 — device-aware brick-guard + RGB device expansion + USB-HID RGB on by default
+
+> Building out RGB device coverage ported from the public hardware register maps (facts only —
+> our own code; Gigabyte/ITE stay retired).
+> **Status at tagging:** broker selftest green; the new USB-HID peripherals + SMBus RGB families are
+> HW-UNVALIDATED on this dev box (which owns none of the hardware). The device-aware kernel
+> brick-guard requires an elevated WDK rebuild + re-sign + redeploy to go live — **not yet
+> redeployed**; the live `publish\` services run the prior build until then.
+
+### Changed — USB-HID RGB transport now on by default (`AllowHidRgb`)
+
+- **`AllowHidRgb` now defaults to `true`** (was `false`). The USB-HID RGB transport — MSI Mystic
+  Light motherboard headers plus all the board-independent peripherals (Logitech, SteelSeries,
+  Corsair, HyperX, Razer, …) — is enabled out of the box, since nearly every host running RGB
+  control wants it and a fresh `-WithRgbControl` install otherwise surfaced only the DRAM zones.
+  The C# default (`BridgeConfig.AllowHidRgb`) and the shipped `appsettings.json` (source +
+  `publish\`) all now carry `true`. Set `"AllowHidRgb": false` for the previous stricter posture.
+- **Posture note:** this is a deliberate default-assurance change. The transport is still
+  user-mode and reduced-assurance (no kernel brick-guard; bounded by the broker's baked report
+  builder + a per-device USB id/usage pin) and its blast radius is the RGB controller only.
+  `SECURITY.md`, `ARCHITECTURE.md`, `CLIENT-PROTOCOL.md`, `REFERENCE.md`, the user/RGB guides and
+  the device-coverage doc were updated to match. No protocol-version change; broker behaviour for
+  an already-`AllowHidRgb`-enabled install is unchanged.
+
+### Added — device-aware kernel brick-guard (the architectural keystone)
+
+- **The SMBus write brick-guard is now per-device-class.** A bounded write names a
+  `BROKER_RGB_WRITE_CLASS` (appended `DeviceClass` field, zero-fills to the legacy ENE windows for
+  old callers); the kernel `g_RgbWriteProfiles` table (`Smbus.c`) permits ONLY that class's address
+  window(s). This is strictly TIGHTER than the previous single shared window — a DRAM-RGB write can
+  no longer reach a GPU/ENE address and vice-versa, and an unknown class is refused outright. The
+  per-device maps live in SIGNED KERNEL CODE, never data. Broker mirror (`RgbCatalog.SmbusClassAllows`)
+  refuses an out-of-window zone at load. New `RgbWriteClass` (C# mirror) + `RgbZone.WriteClass` +
+  `RgbTransport.Smbus`. Driver files touched: `inc/SmbusBrokerProtocol.h`, `Smbus.c`, `Driver.c`.
+
+### Added — SMBus DRAM RGB families (facts ported from public register maps)
+
+Each family gets its own tightly-scoped `BROKER_RGB_WRITE_CLASS` + kernel window (overlaps across
+classes are fine — the guard only matches the named class). All detection matches a positive
+signature **at the RGB address** (never via SPD, which the kernel refuses to read), preserving the
+anti-brick SPD guard. Board-independent detection in `RgbRegistry.DetectSmbusDram` (first family to
+claim an address wins; read-only signatures checked before any identify-writes). HW-UNVALIDATED.
+
+- **Corsair Vengeance RGB Pro / Dominator** (newer per-LED, `corsair.dram{n}`) — `CorsairDram` class
+  (0x58–0x5F): DIRECT `[ledCount, RGB…, CRC-8]` block frame, device-info VID/PID/protocol probe,
+  per-model LED table.
+- **Corsair Vengeance** (original single-color, `corsair.ven{n}`) — `CorsairVenDram` class (0x58–0x5F
+  only; the device's 0x18–0x1F alias is **refused** because it overlaps the JC42 DIMM-temp range).
+- **Crucial Ballistix** (`crucial.dram{n}`, 8 LEDs) — `CrucialDram` class (0x20–0x27 + 0x39–0x3C):
+  ENE-style indirection, planar R/G/B block writes, ramp + "Micron" signature.
+- **T-Force Xtreem** (`tforce.dram{n}`, 15 LEDs) — `XtreemDram` class (0x70–0x78 + 0x39–0x3D): ENE
+  controller, folded-strip LED remap, R-B-G order, ramp signature.
+
+Device classes/windows are also **reserved** for **Kingston Fury** (`FuryDram`, 0x58–0x67) and
+**HyperX** / **Patriot Viper** (`HyperXDram` 0x27 / `ViperDram` 0x77). HyperX and Patriot are
+**deliberately not auto-detected**: their identity lives in the SPD bytes the kernel refuses to read,
+so a safe detector would conflict with the SPD-refusal guardrail (documented gap, not an oversight).
+
+13 new RGB selftest gates total (device-class isolation, CRC-8, packet/planar layout, folded-strip
+remap, the JC42-alias refusal, per-family windows).
+
+### Added — motherboard SMBus RGB (host SMBus, DMI-vendor gated)
+
+- **ASRock Polychrome / ASR RGB** (`mb.asrock`, `AsrockMb` class, 0x6A): one device, three firmware
+  variants auto-detected from the major byte at reg 0x00 (ASR 0x01 / Polychrome V1 0x02 / V2 0x03);
+  drives a solid whole-board STATIC color across the populated zones (read from the 0x33 config).
+- **EVGA ACX30** (`mb.evga`, `EvgaMb` class, 0x28): unlock/lock-bracketed byte writes, with NVRAM-wear
+  dedup (the controller persists every update to flash).
+
+Both are **gated on the board's DMI manufacturer** so they are never probed at 0x6A/0x28 on other
+boards. 2 new selftest gates.
+
+### Scope decisions (architecture, not backlog)
+
+- **GPU SMBus RGB (~20 controllers) is OUT of scope.** Drives GPU RGB over the **GPU's own
+  I2C bus** (via the display driver / NVAPI; `REGISTER_I2C_PCI_DETECTOR`, `is_amd_gpu_i2c_bus`), not
+  the motherboard SMBus host controller this driver implements. Supporting it would mean a whole new
+  GPU-I2C/NVAPI subsystem (likely GPU MMIO) — breaking the "driver stays narrow / no physical memory"
+  guardrails. Dropped as an architecture mismatch.
+- **MSI Super-I/O RGB (NCT6795/6797) is DEFERRED as a security-sensitive driver change, not shipped
+  blind.** It writes the Nuvoton Super-I/O **config space over port I/O** (logical-device select 0x07,
+  RGB logdev 0x12, regs 0xE0–0xFF). The `0x07` selector is the danger surface — the *same* primitive
+  reaches the fan/voltage/temperature logical devices — so a safe kernel guard must police the *value*
+  written to 0x07 (restrict to {0x09, 0x12}), not just register indices. It is also NCT6795/6797-only
+  and the dev box (MS-7C92) isn't in its board table (it uses the HID path), so it cannot be HW-
+  validated here. The full register map + the required value-gating are captured for a future
+  deliberate, validated, re-signed driver change (mirrors the inert NCT6687 EC RGB placeholder).
+
+Still pending: Kingston Fury controller, MSI SIO-RGB driver bring-up, and the USB-HID peripheral maps.
+
+### Added — USB-HID peripherals (user-mode, gated by `AllowHidRgb` — now on by default)
+
+- **HID output-report transport** (`HidDevice.SetOutputReport` → `HidD_SetOutputReport`): like the
+  existing feature-report path it goes through an IOCTL, so it works on the zero-access handle the
+  OS-owned input collections force — no WriteFile/elevated access. This unlocks the large class of
+  peripherals that use output reports (`hid_write`) rather than feature reports (the prior Razer/MSI
+  paths). No new dependency.
+- **AMD Wraith Prism CPU cooler** (`amd.wraithprism`, VID 0x2516 / PID 0x0051, vendor collection on
+  interface 1): 17 LEDs (Logo, Fan, 15-LED ring), DIRECT per-LED mode (enable 0x41/0x80/0x03 + apply
+  0x51/0x28, then 0xC0 `{id,R,G,B}` packets). Board-independent (matched by USB id), reduced assurance
+  (user-mode, no kernel guard). New `RgbZoneKind.Cooler`. 3 selftest gates on the packet builders.
+
+- **Logitech G-series** (VID 0x046D): **G203 Lightsync** mouse (`logi.g203`, 3 LEDs, DIRECT writes) +
+  **G810 / G910 / G610 / G512 / G Pro keyboards** (`logi.g810`/`g910`/`gpro`/…, whole-keyboard SOLID
+  color via the firmware STATIC mode — no per-key table needed). 2 selftest gates.
+- **SteelSeries mice** (VID 0x1038): **Rival 3** (`ss.rival3`, cmd 0x05) + **Aerox 3 / Aerox 5**
+  (`ss.aerox3`/`ss.aerox5`, cmd 0x21, zone-based, software-mode enable 0x2D). 2 selftest gates.
+- **HID input-report read** (`HidDevice.GetInputReport` → `HidD_GetInputReport`): the request/response
+  read path some vendor collections need. Unlocked Corsair iCUE V2.
+- **Corsair iCUE V2** (VID 0x1B1C, iface 1, usage 0xFF42) — **14 fixed-LED-count devices**: 11 mice
+  (Dark Core SE/Pro SE, Harpoon, Ironclaw, Katar Pro/V2/XT, M55, M65 Ultra/Wireless, M75), 2 mousepads
+  (MM700, MM700 3XL), and the K55 keyboard. DIRECT streaming (render-mode SW → lighting-control →
+  Start/Stop-Transaction-bracketed BLK_W1/BLK_WN), with both color encodings (CTRL2 triplet default,
+  CTRL1 planar via a best-effort init probe). The **matrix keyboards (K60/K70/K95/K100) are excluded**
+  — their LED count is keyboard-layout-dependent (needs a runtime ANSI/ISO query). New
+  `RgbZoneKind.Mousepad`. 3 selftest gates (both buffer encodings + BLK framing).
+
+Full coverage rationale — what's in, what's out, and the change each exclusion would need — is in
+**`docs/RGB-DEVICE-COVERAGE.md`**. The large remaining HID set (per-key keyboards, the un-specced
+long tail) is catalogued there with reasons.
+
+### Added — more HID table-porting (zone-based, fixed geometry)
+
+- **SteelSeries** keyboards/mice: **Apex 3** 8-zone (`ss.apex3tkl`) + T-zone (`ss.apex3`); **Apex OG/350**
+  5-zone RGBA (`ss.apexog`); **Sensei / Rival 310** 2-zone (`ss.sensei`).
+- **NZXT Lift** mouse (`nzxt.lift`, 6 LEDs, output report, remapped slot order).
+- **Roccat** mice: **Kone Aimo** (`roccat.koneaimo`, 11 LEDs, feature report) + **Kone Pro**
+  (`roccat.konepro`, 2 LEDs, direct feature + control enable).
+
+Deferred (in the coverage doc): **SteelSeries Rival 600** (anomalous report-id framing — no 0x00
+prefix), **NZXT Hue 2** channel controllers (LED count discovered at runtime, not fixed), **Roccat
+Vulcan** keyboards (per-key, layout-dependent, brick-sensitive two-interface init), and the SteelSeries
+Apex per-key keyboards (key tables). 7 new selftest gates (now 65 RGB gates total, 0 failures).
+
+### Added — long-tail HID (clean, fixed-geometry)
+
+- **Redragon mice** (`redragon.mouse`, VID 0x04D9, 10 PIDs, 1 LED): register-write `0xF3`@0x0449 + apply
+  `0xF1`, flash-write de-duplicated.
+- **Cooler Master MP750** mousepad (`cm.mp750`, 1 LED, single static output packet).
+
+New deferrals catalogued in the coverage doc, each with its enabling change:
+- **HyperX** peripherals (Pulsefire mice, Alloy keyboards) + **Thermaltake Riing Quad** — require a
+  **keepalive refresh thread** (firmware reverts to its stored effect in 50 ms–3 s without a periodic
+  resend; the broker has no such mechanism). This is the single biggest class-wide unlock.
+- **Sinowealth / Glorious** (Model O/D, ZET, Genesis) — almost all do a **flash read-modify-write** per
+  color (wear), with **PID collisions** and an explicit upstream **brick warning** (PIDs 0x0016/0x0049
+  are reused by Redragon and bricked them). Against the no-brick posture without a stronger ID gate.
+- **Thermaltake Riing** (classic/Trio) — LED count per channel is **user-configured**, not fixed, and
+  the detector pins no interface/usage (needs `--hid-scan`).
+- **Cooler Master** mice/GPU/keyboards — intricate flow-control/apply sequences (several offsets
+  agent-flagged for re-confirmation) and per-model key tables.
+
+2 new selftest gates (now 67 RGB gates total, 0 failures).
+
+### Added — keepalive refresh loop (infrastructure) + the HyperX family
+
+- **Keepalive infrastructure.** `IRgbController` gained `KeepaliveIntervalMs` (default 0 = the device
+  holds its color) and `Refresh()` (default no-op) as **default interface methods** — zero churn on
+  existing controllers. The control service runs one background refresh loop (`RgbKeepaliveLoopAsync`)
+  that re-sends each keepalive device's last frame on its interval. Keepalive devices are always
+  volatile (no flash write), so refreshing is wear-free; `Refresh()` is serialized with `rgb.set`
+  inside each controller's lock. **Corsair K55** retrofitted (30 s interval).
+- **HyperX peripherals** (VID 0x0951 Kingston / 0x03F0 HP), all keepalive-driven:
+  - **Mice:** Pulsefire FPS Pro/Core (1 LED), Raid (2), Haste (1), Dart (2, holds — no keepalive),
+    Surge (33, planar strip + logo).
+  - **Keyboards:** Alloy FPS RGB (106, channel-scatter), Alloy Origins (107) / Origins 60 (71) /
+    Origins 65 (77) / Elite 2 (128) (4-byte-group streaming with skip-index blanks), Eve 1800 (10
+    zones) and Origins 2 65 (74) (report-id 0x44 path).
+  - **Deferred:** Alloy Elite (uncertain extended-LED scatter tables) and Alloy Origins Core (runtime
+    keyboard-layout query).
+
+8 new selftest gates (now **75 RGB gates total, 0 failures**).
+
+### Added — more long-tail HID (fixed geometry)
+
+- **SteelSeries Rival 100 / Rival 300** legacy mice (`ss.rival100` 1 zone / `ss.rival300` 2 zones,
+  DIRECT-effect latch + per-zone color). (Rival 600 stays excluded — anomalous report framing.)
+- **Cooler Master mice** MM530 (3 LEDs) / MM711 / MM720 / MM730 (2 LEDs) (`cm.mm5xx`/`cm.mm7xx`):
+  init (0x41/0x80) + DIRECT packet (seed 0x51/0xA8) with family-specific zone byte-offsets.
+
+### Decided — MSI Super-I/O RGB removed from scope
+
+Confirmed it is **not duplicative of, nor additive to, the USB-HID Mystic Light path** the dev box
+uses: older MSI boards wire RGB to the Nuvoton **Super-I/O** (NCT6795/6797) and have **no** Mystic
+Light HID controller; newer boards (incl. MS-7C92, which has an NCT6687D, not a 6795/6797) use the HID
+controller and don't wire RGB to the Super-I/O. The two are **mutually exclusive by board generation**,
+and the Super-I/O path is **less** capable (4-bit/channel, single whole-board color, no per-LED). It
+can't run or be validated on the dev hardware and benefits only third-party older-MSI boards, so it is
+**dropped from the project** by decision (it was never an architecture or feasibility blocker).
+
+2 new selftest gates (now **77 RGB gates total, 0 failures**).
+
+### Added — per-key keyboard unlock, ROG Ally, Lian Li hub
+
+- **Per-key keyboards (structural unlock).** `IRgbController` keyboards can now drive true per-key
+  color. Implemented for **Logitech G810 / G910 / G610 / G512 / G Pro** (upgraded from solid color):
+  the per-key (zone, HID-usage) table is generated per layout (117/117/94 LEDs); LEDs stream 14 per
+  report-0x12 frame, flushed on zone change, then a report-0x11 commit latches. The SteelSeries Apex
+  (112/111-key) and Asus TUF/Strix per-key tables are **extracted and queued** (mechanical follow-up).
+- **ASUS ROG Ally / Ally X** (`asus.rogally`, 4 LEDs, feature reports with the "ASUS Tech.Inc." init).
+- **Lian Li Uni Hub SL V2 / AL V2 / SL V2 v0.5** (`lianli.unihub.slv2`, VID 0x0CF2): per-channel
+  START/COLOR/COMMIT, R,B,G wire order, the R+B+G>460 power limiter. A hub's LED count is
+  **user-configured** (fans × 16), not device-read, so this drives a **1-fan-per-channel baseline**
+  (safe, never overruns); multi-fan + the AL/SL/SL-Infinity variants are queued (need a per-channel
+  fan-count config). 6 new selftest gates (now **81 RGB gates total, 0 failures**).
+
+### Verified — driver compiles clean (kernel changes)
+
+The kernel `.c` changes from the device-aware brick-guard work (`inc/SmbusBrokerProtocol.h`, `Smbus.c`,
+`Driver.c`) were **compile-checked under `/W4 /WX`** with the WDK (SDK 10.0.26100, KMDF 1.35) — clean,
+0 warnings. The full rebuild + test-sign + redeploy is an **elevated** operation (it must stop the
+link-locking `BrokerSmbus` service) and has not been run yet; the live `publish\` services are still
+the prior build until an elevated `Build-All.ps1 -Bridge -Driver` + `Install-SensorBrokerService.ps1`.
+
+### Decided — MSI Super-I/O RGB removed from scope
+
 ## [1.5.1] — 2026-06-20
 
 ### Changed — whole repository now targets .NET 10
@@ -222,7 +438,7 @@ is driven by the fan-PWM telemetry feature above.
 - **Board-independent registration.** Unlike the board-zone transports, Razer devices are not
   tied to the DMI board profile — `RgbRegistry.Build` enumerates them by vendor id and binds the
   90-byte command collection, identified by the **(USB interface number + HID usage)** tuple
-  OpenRazer/OpenRGB use (Naga = iface 0, Cynosa = iface 2; usage `0x01:0x02`, 91-byte feature
+  OpenRazer use (Naga = iface 0, Cynosa = iface 2; usage `0x01:0x02`, 91-byte feature
   report) — a device exposes several collections per interface, so the usage disambiguates the
   command one from the consumer/system collections. `HidDevice` now parses the interface number
   from the Windows device path, exposes the HID usage page/usage, and **opens with a zero-access

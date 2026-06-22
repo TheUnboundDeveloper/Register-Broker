@@ -216,7 +216,7 @@ RGB range and the NCT6687 EC RGB register region).
    transport and its address fields:
    - `SmbusEne` — `Bus`/`Address` (ENE/Aura DRAM; must fall in the kernel SMBus RGB window).
    - `SuperioEc` — `EcAddress` (NCT6687 12V header; inert until the EC RGB window is validated).
-   - `UsbHid` — `HidZoneIndex` + `HidProductId` (MSI Mystic Light; opt-in via `AllowHidRgb`).
+   - `UsbHid` — `HidZoneIndex` + `HidProductId` (MSI Mystic Light; gated by `AllowHidRgb`, on by default).
      Leave `HidProductId: 0` for first bring-up (matches by feature-report length and logs the
      candidate PIDs under VID `0x1462`), then **pin** it to the RGB controller's PID so the broker
      drives only that exact device and refuses any other MSI HID interface.

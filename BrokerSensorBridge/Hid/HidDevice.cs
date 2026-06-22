@@ -53,6 +53,24 @@ internal sealed class HidDevice : IDisposable
     public bool SetFeature(byte[] report) => HidD_SetFeature(_handle, report, (uint)report.Length);
 
     /// <summary>
+    /// Sends a HID OUTPUT report (HidD_SetOutputReport). The buffer's first byte is the report id
+    /// (0x00 for an unnumbered report). Like SetFeature this goes through an IOCTL, so it works on the
+    /// zero-access handle the input-owned collections force — no WriteFile / elevated access needed.
+    /// This is the transport for devices that use output reports (hid_write) rather than feature
+    /// reports (AMD Wraith Prism, Logitech, Corsair, most SteelSeries mice).
+    /// </summary>
+    public bool SetOutputReport(byte[] report) => HidD_SetOutputReport(_handle, report, (uint)report.Length);
+
+    /// <summary>
+    /// Reads a HID INPUT report (HidD_GetInputReport — a synchronous GET_REPORT control request, no
+    /// overlapped I/O). Seed <paramref name="report"/>[0] with the report id (0x00 for unnumbered).
+    /// This is the request/response read path some vendor collections need (e.g. Corsair iCUE V2's
+    /// init handshake reads the VID/PID and the lighting-control probe response). Best-effort: returns
+    /// false if the device does not service GET_REPORT on this collection.
+    /// </summary>
+    public bool GetInputReport(byte[] report) => HidD_GetInputReport(_handle, report, (uint)report.Length);
+
+    /// <summary>
     /// Reads the current HID feature report (HidD_GetFeature) into <paramref name="report"/>. The
     /// caller seeds <c>report[0]</c> with the report id to fetch. Used to capture the device's current
     /// per-zone state so a whole-device packet write can edit one zone without clobbering the others.
@@ -153,6 +171,8 @@ internal sealed class HidDevice : IDisposable
     [DllImport("hid.dll")] private static extern void HidD_GetHidGuid(out Guid hidGuid);
     [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] private static extern bool HidD_GetAttributes(SafeFileHandle h, ref HIDD_ATTRIBUTES attrs);
     [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] private static extern bool HidD_SetFeature(SafeFileHandle h, byte[] buffer, uint length);
+    [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] private static extern bool HidD_SetOutputReport(SafeFileHandle h, byte[] buffer, uint length);
+    [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] private static extern bool HidD_GetInputReport(SafeFileHandle h, byte[] buffer, uint length);
     [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] private static extern bool HidD_GetFeature(SafeFileHandle h, byte[] buffer, uint length);
     [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] private static extern bool HidD_GetPreparsedData(SafeFileHandle h, out IntPtr preparsed);
     [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] private static extern bool HidD_FreePreparsedData(IntPtr preparsed);

@@ -1,14 +1,14 @@
 # Gigabyte motherboard support (sensors + RGB)
 
 > Status: **REMOVED FROM THE BUILD (2026-06-11).** A contact who works on these
-> controllers directly reviewed this design and found its sources (OpenRGB's
+> controllers directly reviewed this design and found its sources (Open Source's
 > IT7236 controller, liquidctl issue threads) unreliable:
 >
 > - These controllers are **intermodal** (support several interfaces); which one a
 >   board actually wires up varies per board — only board/firmware-level reverse
 >   engineering settles it. Gigabyte's own tooling uses specific methods per board.
 > - SMBus **0x68 is valid only for the IT8295** on Gigabyte boards.
-> - **0x28 is a programming/debug port**, not a consumer control path. OpenRGB's
+> - **0x28 is a programming/debug port**, not a consumer control path. Open Source's
 >   IT7236 controller drives it anyway — workable on single-controller boards,
 >   likely broken on multi-controller ones. True device addresses are at **0x50+**.
 > - The **liquidctl issue threads are out of date / incorrect** — untrustworthy.
@@ -59,12 +59,12 @@ Gigabyte's hardware differs from the MSI dev box in exactly two places that matt
 | Board temps/fans/volts | Nuvoton **NCT6687D** (LPC) | ITE **IT87xx** (LPC) | Linux `drivers/hwmon/it87.c` |
 | CPU die temp | AMD SMU (SMN) | AMD SMU (SMN) — **same** | unchanged |
 | DRAM RGB | ENE/Aura SMBus | (board-dependent; not in v1) | — |
-| Board RGB | (n/a) | ITE **IT8297** USB-HID | OpenRGB `GigabyteRGBFusion2USB*` |
+| Board RGB | (n/a) | ITE **IT8297** USB-HID | Open Source `GigabyteRGBFusion2USB*` |
 
 Per the project guardrail, **no register encoding is invented**. The ITE sensor map is ported
 from the long-established Linux `it87` hwmon driver; the IT8297 RGB protocol is ported from
-OpenRGB's own `GigabyteRGBFusion2USBController` (vendored in this tree under
-`…/OpenRGB/Controllers/GigabyteRGBFusion2USBController/`).
+Open Source's own `GigabyteRGBFusion2USBController` (vendored in this tree under
+`…/Open Source/Controllers/GigabyteRGBFusion2USBController/`).
 
 ---
 
@@ -129,18 +129,18 @@ DIMM temps reuse the existing JC42 SMBus path (works on any board with TS DIMMs 
 ## 2. RGB — ITE IT8297 over USB-HID (read state + write)
 
 ### Why USB-HID, not SMBus
-Gigabyte "RGB Fusion 2" boards expose the IT8297 in two ways. OpenRGB's `…SMBus` path drives
+Gigabyte "RGB Fusion 2" boards expose the IT8297 in two ways. Open Source's `…SMBus` path drives
 it at SMBus `0x68` using **32-byte block writes** — which this project's kernel driver does
 **not** implement (its write IOCTL is byte/word only), and blind block-writes to a board
-controller carry brick risk. OpenRGB's `…USB` path drives the same chip as a **USB-HID
+controller carry brick risk. Open Source's `…USB` path drives the same chip as a **USB-HID
 feature-report device**, which is:
 
 - **user-mode** — no kernel driver, **cannot touch the SMBus / SPD / brick the bus**;
 - **no admin** — HID feature reports need no elevation;
-- the path OpenRGB uses for most modern Gigabyte boards (Z390+, X570, B550, Z690, …).
+- the path Open Source uses for most modern Gigabyte boards (Z390+, X570, B550, Z690, …).
 
 So the broker drives Gigabyte board RGB over USB-HID and **needs neither the kernel driver nor
-elevation for RGB**. (The SMBus-`0x68` variant — for the specific older boards in OpenRGB's
+elevation for RGB**. (The SMBus-`0x68` variant — for the specific older boards in Open Source's
 allowlist — is documented under "Deferred" below; it would require a brick-guarded block-write
 IOCTL and is intentionally out of v1.)
 
@@ -149,13 +149,13 @@ Self-contained HID P/Invoke (`hid.dll` + `setupapi.dll`) — **no new NuGet depe
 Detection enumerates HID devices for:
 
 - **VID `0x048D`**, **PID `0x8297` or `0x5702`** (the IT8297 / IT8297-style controllers),
-  matching OpenRGB's detector.
+  matching Open Source's detector.
 
-Each detected controller is initialized exactly as OpenRGB does: `report_id = 0xCC`, send
+Each detected controller is initialized exactly as Open Source does: `report_id = 0xCC`, send
 `0x60 0x00`, read the 64-byte `IT8297Report` feature report (product string, fw, chip id,
 LED-strip byte order), then `EnableBeat(false)` (`0x31 0x00`). This is the **read** side — the
 device descriptor/state we can read back (per-LED color readback is not supported by the
-hardware, same limitation OpenRGB documents).
+hardware, same limitation Open Source documents).
 
 ### Write protocol (ported from `GigabyteRGBFusion2USBController`)
 All packets are 64-byte HID feature reports (`HidD_SetFeature`). For a solid zone color the
@@ -234,5 +234,5 @@ remove the `unconfirmed` markers — the same path the NCT6687D map followed.
   is USB-less.
 - **Addressable `D_LED` strips** (per-LED `PktRGB`): scaffolded; v1 is solid-color zones.
 - **Intel-Gigabyte SMBus writes**: the kernel write path is wired/validated for AMD FCH only.
-- **Native product names / effects in OpenRGB**: same OpenRGB-core-fork question as the rest of
-  the project (shape A in `OPENRGB-INTEGRATION.md`).
+- **Native product names / effects in Open Source**: same Open Source-core-fork question as the rest of
+  the project (shape A in `Open Source-INTEGRATION.md`).

@@ -78,7 +78,7 @@ RGB zones come from the **DMI-matched board profile** (`RgbCatalog.cs`); this is
 |---|---|---|---|---|
 | `ram0` | dram / smbusene | bus 0, addr `0x39` | 5 | always on |
 | `ram1` | dram / smbusene | bus 0, addr `0x3A` | 5 | always on |
-| `mb.argb0` | mbargb / usbhid | MSI Mystic Light, USB PID `0x7C92`, packet offset 31 (JRAINBOW1) | 60 | **opt-in** (`AllowHidRgb`); listed only when enabled |
+| `mb.argb0` | mbargb / usbhid | MSI Mystic Light, USB PID `0x7C92`, packet offset 31 (JRAINBOW1) | 60 | `AllowHidRgb` (**on by default**); listed only when the device is present |
 | `mb.jrgb0` | mb12v / superioec | NCT6687 EC RGB window | 1 | **inert** until the EC RGB window is validated (`CAP_SUPERIO_RGB` off) — not listed |
 
 Ids are stable identifiers; new hardware adds new ids (clients discover them via `*.list`).
@@ -101,7 +101,7 @@ makes the broker **fail closed** (`RequireAuthorizedClient=true`) with a loud lo
 | `RateBurst` | double | `60.0` | per-session token-bucket capacity (control service floors this at 240) |
 | `MaxSessions` | int | `32` | bounded session table size |
 | `MaxSessionsPerIdentity` | int | `8` | max concurrent sessions per client identity |
-| `AllowHidRgb` | bool | `false` | enable the USB-HID (MSI Mystic Light) RGB transport for motherboard headers. Off = reduced-assurance transport not loaded, no `usbhid` zones. Read by the **control service** (not the client); `--allow-hid-rgb` forces it on. Restart the service after changing. |
+| `AllowHidRgb` | bool | `true` | enable the USB-HID RGB transport (MSI Mystic Light motherboard headers + board-independent peripherals: Logitech, SteelSeries, Corsair, HyperX, Razer, …). **On by default**; set `false` for the stricter posture (reduced-assurance transport not loaded, no `usbhid`/`usbhidrazer` zones). Read by the **control service** (not the client); `--allow-hid-rgb` forces it on. Restart the service after changing. |
 
 > Under LocalSystem, `%LOCALAPPDATA%` resolves to
 > `C:\Windows\System32\config\systemprofile\AppData\Local\…`, **not** your user profile.

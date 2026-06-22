@@ -34,4 +34,19 @@ internal interface IRgbController
     /// single color. Returns false on any transport error.
     /// </summary>
     bool SetLeds(IReadOnlyList<(byte R, byte G, byte B)> colors);
+
+    /// <summary>
+    /// Milliseconds between keepalive refreshes, or 0 (the default) when the device holds its color
+    /// with no refresh. Some firmware (HyperX, Thermaltake Quad, Corsair K55, …) reverts to its
+    /// stored effect unless a color frame is re-sent within this interval. Such devices are always
+    /// the VOLATILE ones (no flash write), so refreshing is wear-free.
+    /// </summary>
+    int KeepaliveIntervalMs => 0;
+
+    /// <summary>
+    /// Re-send the last color (keepalive). Default no-op for devices that hold their color. A
+    /// keepalive device caches its last frame in SetAll/SetLeds and re-sends it here; returns true
+    /// if nothing has been set yet. Returns false only on a transport error.
+    /// </summary>
+    bool Refresh() => true;
 }

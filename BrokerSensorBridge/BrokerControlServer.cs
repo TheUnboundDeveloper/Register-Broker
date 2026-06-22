@@ -119,6 +119,9 @@ internal sealed class BrokerControlServer
         PipeSecurity? security = TryBuildPipeSecurity();
         bool servedAny = false;
 
+        // Keepalive refresh loop for devices whose firmware reverts unless periodically re-sent.
+        Task keepalive = Task.Run(() => RgbKeepaliveLoopAsync(token), CancellationToken.None);
+
         while (!token.IsCancellationRequested)
         {
             NamedPipeServerStream server;
@@ -169,7 +172,39 @@ internal sealed class BrokerControlServer
         if (outstanding.Length > 0)
             await Task.WhenAny(Task.WhenAll(outstanding), Task.Delay(TimeSpan.FromSeconds(5)));
 
+        await Task.WhenAny(keepalive, Task.Delay(TimeSpan.FromSeconds(2)));
         _log("Control channel stopped.");
+    }
+
+    /// <summary>
+    /// Periodically re-sends the last color to RGB devices whose firmware reverts to its stored effect
+    /// unless refreshed (KeepaliveIntervalMs > 0). Each such device is volatile (no flash write), so a
+    /// refresh is wear-free; Refresh() is serialized with rgb.set inside the controller's own lock.
+    /// </summary>
+    private async Task RgbKeepaliveLoopAsync(CancellationToken token)
+    {
+        IRgbController[] devices = (_rgb?.Devices ?? Array.Empty<IRgbController>())
+            .Where(d => d.KeepaliveIntervalMs > 0).ToArray();
+        if (devices.Length == 0) return;
+
+        int tick = Math.Max(50, devices.Min(d => d.KeepaliveIntervalMs) / 2);
+        _log($"[rgb] keepalive: {devices.Length} device(s) [{string.Join(", ", devices.Select(d => d.Id))}], tick {tick} ms");
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var nextDue = new long[devices.Length];   // first tick fires a refresh for each
+        while (!token.IsCancellationRequested)
+        {
+            try { await Task.Delay(tick, token); }
+            catch (OperationCanceledException) { break; }
+
+            long now = sw.ElapsedMilliseconds;
+            for (int i = 0; i < devices.Length; i++)
+            {
+                if (now < nextDue[i]) continue;
+                try { devices[i].Refresh(); } catch { /* device unplugged / transport gone — keep looping */ }
+                nextDue[i] = now + devices[i].KeepaliveIntervalMs;
+            }
+        }
     }
 
     /*-----------------------------------------------------------------------*\

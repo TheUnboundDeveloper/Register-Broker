@@ -8,8 +8,11 @@
 > in `calibration.default.json`; the `--selftest` calibration cases prove the data path reproduces
 > the validated labels/scales, that legacy ids resolve via aliases, and gate the chipset families
 > (NCT6683/6686 light the EC channels, NCT6798 lights `nct6775.*`, the two Nuvoton families are
-> mutually exclusive, decode math checks). **Phase 3 (detector/backend registry) is the next open
-> phase**; phases 4–6 not yet built. Each phase is independently shippable and non-breaking.
+> mutually exclusive, decode math checks). **Phase 3 (detector/backend registry) is DONE &
+> live-verified** (2026-06-12): kernel `g_SmbusBackends`/`g_SuperioBackends` tables +
+> `IOCTL_BROKER_ENUM_BACKENDS`, broker `ChannelRegistry`/`DecoderRegistry`, 5 new selftest gates,
+> deployed and live-verified. Phases 4–6 not yet built. Each phase is independently shippable and
+> non-breaking.
 >
 > Implemented files: `Sensors/SensorDecode.cs`, `Sensors/RawChannel.cs` (raw channels),
 > `Sensors/Calibration.cs` (board DMI + loader + alias map), rewritten `SensorCatalog.cs`,
@@ -54,14 +57,16 @@ disallowed. This is what makes community data PRs safe to accept.
    as **family-stable persistence keys**: `nct6687d.*` covers the whole NCT668x EC family
    (NCT6683/6686/6687D) and `nct6775.*` the bank-select family (NCT6779…6798).
 
-2. **RGB breadth = adapt existing GPL controller code in a separate sidecar process.** Reuse
-   third-party GPL-2.0 RGB controller/detector tables for fast multi-vendor breadth, but keep
-   that GPL code in a **separate sidecar process** the broker talks to over IPC. The **broker +
-   driver stay license-clean** (preserving flexibility for manufacturer integration); the GPL
-   boundary is the IPC seam (the commonly-accepted "arm's-length" position — still worth a real
-   license review before shipping). Sensors are unaffected (no GPL there). (Chosen over
-   in-process adapt, which would make the broker binary GPL, and over full re-porting, which
-   doesn't scale past a few chips.)
+2. **RGB breadth = adapt existing GPL controller code in a separate sidecar process.**
+   **⚠️ SUPERSEDED (2026-06-22)** — see Phase 4 below. RGB breadth was instead delivered by porting
+   RGB controller behaviour as register/HID **facts** re-expressed in first-party signed code
+   (OpenRGB/OpenRazer as fact references only, never linked or copied), so the broker + driver stay
+   license-clean with **no** GPL code and no sidecar process. The original decision is retained for
+   the record: reuse third-party GPL-2.0 RGB controller/detector tables for fast multi-vendor
+   breadth, but keep that GPL code in a **separate sidecar process** the broker talks to over IPC,
+   with the GPL boundary at the IPC seam. (Chosen at the time over in-process adapt, which would
+   make the broker binary GPL, and over full re-porting, which was thought not to scale — the
+   fact-porting route ultimately did scale.)
 
 ---
 
@@ -115,22 +120,32 @@ Shipped as: identical behavior on the dev box, but now driven through the calibr
   `calibration.user.example.json`) — files are layered, last wins per channel, so a user can fix
   their board with no rebuild.
 
-## Phase 3 — Detector / backend registry (chips become add-one-file) — ⬜ OPEN (next)
+## Phase 3 — Detector / backend registry (chips become add-one-file) — ✅ DONE (2026-06-12, live-verified)
 
-- Replace the hand-wired detection (`SuperioNctDetect`-then-`SuperioNct6775Detect` in
-  [Driver.c](../BrokerSmbusDriver/Driver.c), the `SuperioReadDispatch` switch in
-  [SuperioNct.c](../BrokerSmbusDriver/SuperioNct.c), the AMD/Intel switch in
-  [SmbusDetect.c](../BrokerSmbusDriver/SmbusDetect.c), and the chip gates in
-  [Sensors/RawChannel.cs](../BrokerSensorBridge/Sensors/RawChannel.cs)) with a **table of
-  backends**, each registering `{ probe(), build()/enumerateChannels() }`. Detection iterates
-  the table; first match per category wins (one Super-I/O, one SMBus vendor, one SMU).
-- Kernel side: a small Super-I/O probe table (NCT668x EC, NCT6775 family, …). Broker side:
-  chipKind → raw-channel generator + decode. The IOCTL contract and the broker pipe protocol
-  **do not change**.
-- **Net effect:** adding a chip = one backend file + one registry line. Zero edits to dispatch,
-  protocol, or the security boundary.
+- **Done:** the hand-wired detection was replaced with **tables of backends**. Kernel:
+  `g_SmbusBackends` ([SmbusDetect.c](../BrokerSmbusDriver/SmbusDetect.c)) + `g_SuperioBackends`
+  ([SuperioNct.c](../BrokerSmbusDriver/SuperioNct.c), with `SuperioDetectAll` first-claim-wins)
+  drive all detection/dispatch; `IOCTL_BROKER_ENUM_BACKENDS` (0x805) reports compiled-in backends +
+  Active/Detail. Broker: per-backend channels live in `Sensors/ChannelRegistry.cs` (code table +
+  `ChipFamilies` + `Validate()`), `DecoderRegistry` (SensorDecode.cs) enforces decoder coverage,
+  and `EnumerateBackends()` mirrors the kernel enum (diagnostic only — CAP_* bits stay
+  authoritative). Detection iterates the tables; first match per category wins (one Super-I/O, one
+  SMBus vendor, one SMU). The IOCTL contract and the broker pipe protocol **did not change**.
+- **Net effect (delivered):** adding a chip = one backend file + one kernel descriptor row + one
+  `ChannelRegistry` entry + a decoder. Zero edits to dispatch, protocol, or the security boundary.
+  5 new selftest gates; deployed and live-verified (same sensor catalog, `Detected backends` startup
+  log line). Full walkthrough: [CONTRIBUTING-CHIPSET.md](CONTRIBUTING-CHIPSET.md).
 
-## Phase 4 — RGB breadth via a GPL sidecar (per decision #2)
+## Phase 4 — RGB breadth via a GPL sidecar (per decision #2) — ⚠️ SUPERSEDED by first-party fact-porting
+
+> **Status (2026-06-22):** RGB breadth was delivered **without** a GPL sidecar. Instead the project
+> ports RGB controller behaviour as register/HID **facts** re-expressed in our own first-party
+> signed code (OpenRazer used as fact references only, never linked or copied — see
+> `THIRD-PARTY-NOTICES.md`), so the broker + driver link **no** GPL code and need no separate
+> process. Coverage now spans SMBus DRAM families, motherboard SMBus (ASRock/EVGA), and a large
+> USB-HID peripheral set — catalogued in [RGB-DEVICE-COVERAGE.md](RGB-DEVICE-COVERAGE.md). The
+> sidecar design below is retained only as the historical alternative that was considered and not
+> taken.
 
 - Stand up a **separate RGB sidecar process** that hosts adapted third-party GPL-2.0 RGB
   controller/detector code (isolated here). It enumerates supported RGB controllers and exposes

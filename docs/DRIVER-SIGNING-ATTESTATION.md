@@ -66,7 +66,7 @@ Confirm the version landed in the binary:
 ```powershell
 (Get-Item .\BrokerSmbusDriver\x64\Release\BrokerSmbus.sys).VersionInfo |
     Format-List FileVersion, ProductVersion, FileDescription, LegalCopyright
-# FileVersion 1.5.0.0 / ProductVersion 1.5.0 / "Register Broker SMBus Driver ..."
+# FileVersion 1.6.0.0 / ProductVersion 1.6.0 / "Register Broker SMBus Driver ..."
 ```
 
 > Do **not** submit a `-p:DevProbes=true` build — that's broker-side, but treat "clean release

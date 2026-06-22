@@ -54,16 +54,20 @@ impact beyond what's described below and in `docs/ARCHITECTURE.md`:
   mode (a real posture reduction, documented loudly in `docs/TESTING.md`). Production
   signing (EV + attestation) is a tracked open item.
 - **PID-reuse TOCTOU** on peer-process identity is a documented, accepted residual.
-- **USB-HID RGB is a reduced-assurance transport, opt-in and off by default.** The MSI Mystic
-  Light path (motherboard ARGB headers) is user-mode: the broker talks to the controller
-  directly, so it does **not** pass the kernel brick-guard. Its boundaries are the broker's baked
-  report builder and a USB product-id pin (only the intended controller is driven). It is enabled
-  only by an explicit operator opt-in (`AllowHidRgb`). Its blast radius is the RGB controller
-  itself (no SPD/sensor bus); reports showing impact beyond confused LEDs are welcome.
+- **USB-HID RGB is a reduced-assurance transport, on by default.** The MSI Mystic Light path
+  (motherboard ARGB headers) and the board-independent USB-HID peripherals (Logitech, SteelSeries,
+  Corsair, HyperX, Razer, etc. — see `docs/RGB-DEVICE-COVERAGE.md`) are user-mode: the broker talks
+  to the controller directly, so they do **not** pass the kernel brick-guard. Their boundaries are
+  the broker's baked report builder and a per-device USB product-id / interface+usage pin (only the
+  intended controller is driven). As of 2026-06-22 this transport is **enabled by default**
+  (`AllowHidRgb` defaults to `true`) — a deliberate posture choice, since nearly every host running
+  RGB control wants it and the blast radius is bounded to the RGB controller itself (no SPD/sensor
+  bus). Operators who want the stricter posture set `AllowHidRgb: false` in the control service's
+  `appsettings.json`. Reports showing impact beyond confused LEDs are welcome.
 
 ## Supported versions
 
 | Version | Supported |
 |---|---|
-| latest release (1.4.x) | ✅ |
+| latest release (1.6.x) | ✅ |
 | anything older | ❌ — update first |

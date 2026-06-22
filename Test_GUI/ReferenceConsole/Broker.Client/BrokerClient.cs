@@ -94,7 +94,8 @@ public sealed class BrokerClient : IAsyncDisposable
           two interleaved request/response pairs would corrupt the stream. --*/
     public async Task<JsonElement> RequestAsync(object opFields, CancellationToken ct = default)
     {
-        if (_pipe is null || _token is null)
+        var pipe = _pipe;
+        if (pipe is null || _token is null)
             throw new BrokerException("Not connected. Call ConnectAsync first.");
 
         // Merge {token} with the caller's op fields into one object via a dictionary.
@@ -105,10 +106,31 @@ public sealed class BrokerClient : IAsyncDisposable
         await _io.WaitAsync(ct);
         try
         {
-            await WriteFrameAsync(_pipe, dict, ct);
-            return await ReadFrameAsync(_pipe, ct);
+            await WriteFrameAsync(pipe, dict, ct);
+            return await ReadFrameAsync(pipe, ct);
+        }
+        catch (Exception ex)
+        {
+            // The request was partly on the wire (write done, read aborted/failed) or
+            // the pipe died. Either way the byte stream is no longer in a known state --
+            // reusing it would desync the next caller ("read past the end of the stream"
+            // -> a permanent "pipe is broken" storm). Poison the session so it is cleanly
+            // dead and IsConnected reports false, and surface a typed failure.
+            Poison();
+            throw ex is BrokerException ? ex
+                : new BrokerException("Control connection lost: " + ex.Message, ex);
         }
         finally { _io.Release(); }
+    }
+
+    /*-- Tear the pipe down out-of-band after a request failed mid-flight. Best-effort
+          synchronous close so the next caller fails fast instead of desyncing. --*/
+    private void Poison()
+    {
+        var p = _pipe;
+        _pipe = null;
+        _token = null;
+        try { p?.Dispose(); } catch { /* already dying */ }
     }
 
     // ---- Typed convenience ops ---------------------------------------------

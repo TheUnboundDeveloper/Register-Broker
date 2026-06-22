@@ -20,6 +20,12 @@ internal sealed class SmbusDriverBackend : ISmbusBackend, IDisposable
     private const int  MAX_BLOCK = 32;
     private const string Win32DeviceName = @"\\.\BrokerSmbus";
 
+    /* BROKER_SMBUS_WRITE_REQUEST (packed): Version(4) Op(4) BusIndex(4) Address(4) Command(4)
+       Data(4) Length(4) Block[32] DeviceClass(4) = 64 bytes. DeviceClass is the appended
+       device-aware brick-guard selector (offset 60). */
+    private const int WRITE_REQ_SIZE         = 64;
+    private const int WRITE_DEVICE_CLASS_OFF = 60;
+
     /* JEDEC JC42.4 / TSE2004av DIMM thermal sensors live at SMBus 0x18 + slot, register 0x05.
        The TS for the DIMM whose SPD is at 0x50+i is at 0x18+i. Always bus 0 (the primary FCH
        segment the DIMMs sit on). Reads are non-destructive; the kernel allows reads ≤ 0x7F. */
@@ -376,18 +382,20 @@ internal sealed class SmbusDriverBackend : ISmbusBackend, IDisposable
     /// address range; SPD and everything else return Forbidden. The caller (broker/control
     /// service) supplies a baked address — clients never reach this directly.
     /// </summary>
-    public bool TryWrite(int bus, int address, int command, int data, bool word, out SmbusStatus status)
+    public bool TryWrite(int bus, int address, int command, int data, bool word, RgbWriteClass deviceClass, out SmbusStatus status)
     {
         status = SmbusStatus.Unavailable;
         if (_device is null || _device.IsInvalid) return false;
 
-        byte[] req = new byte[24];
+        // Full BROKER_SMBUS_WRITE_REQUEST incl. the appended DeviceClass (offset 60).
+        byte[] req = new byte[WRITE_REQ_SIZE];
         WriteU32(req, 0, PROTOCOL_VERSION);
         WriteU32(req, 4, word ? 4u : 3u);       // BrokerSmbusWriteWord=4 / WriteByte=3
         WriteU32(req, 8, (uint)bus);
         WriteU32(req, 12, (uint)address);
         WriteU32(req, 16, (uint)command);
         WriteU32(req, 20, (uint)data);
+        WriteU32(req, WRITE_DEVICE_CLASS_OFF, (uint)deviceClass);
 
         byte[] resp = new byte[4];
         if (!DeviceIoControl(_device, IOCTL_WRITE, req, (uint)req.Length, resp, (uint)resp.Length, out uint wrBytes, IntPtr.Zero)
@@ -407,13 +415,14 @@ internal sealed class SmbusDriverBackend : ISmbusBackend, IDisposable
     /// extended write request (the byte/word path keeps the legacy 24-byte prefix);
     /// the kernel re-validates Length and applies the same RGB-only brick-guard.
     /// </summary>
-    public bool TryWriteBlock(int bus, int address, int command, ReadOnlySpan<byte> data, out SmbusStatus status)
+    public bool TryWriteBlock(int bus, int address, int command, ReadOnlySpan<byte> data, RgbWriteClass deviceClass, out SmbusStatus status)
     {
         status = SmbusStatus.Unavailable;
         if (_device is null || _device.IsInvalid) return false;
         if (data.Length is < 1 or > MAX_BLOCK) { status = SmbusStatus.BadRequest; return false; }
 
-        byte[] req = new byte[28 + MAX_BLOCK];   // V1 prefix (24) + Length (4) + Block (32)
+        // Full request: V1 prefix (24) + Length (4) + Block (32) + DeviceClass (4).
+        byte[] req = new byte[WRITE_REQ_SIZE];
         WriteU32(req, 0, PROTOCOL_VERSION);
         WriteU32(req, 4, 5u);                    // BrokerSmbusWriteBlock
         WriteU32(req, 8, (uint)bus);
@@ -422,6 +431,7 @@ internal sealed class SmbusDriverBackend : ISmbusBackend, IDisposable
         WriteU32(req, 20, 0u);                   // Data: unused for block
         WriteU32(req, 24, (uint)data.Length);
         data.CopyTo(req.AsSpan(28));
+        WriteU32(req, WRITE_DEVICE_CLASS_OFF, (uint)deviceClass);
 
         byte[] resp = new byte[4];
         if (!DeviceIoControl(_device, IOCTL_WRITE, req, (uint)req.Length, resp, (uint)resp.Length, out uint wrBytes, IntPtr.Zero)

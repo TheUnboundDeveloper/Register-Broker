@@ -45,6 +45,8 @@ public sealed class EffectEngine
     public event Action<string, RgbColor[]>? FrameRendered;
     /// <summary>Raised on a push failure (deviceId, message). Loop thread.</summary>
     public event Action<string, string>? PushFailed;
+    /// <summary>Raised once when the control pipe dies; the loop stops itself. Loop thread — marshal to UI.</summary>
+    public event Action<string>? ConnectionLost;
 
     private CancellationTokenSource? _cts;
     private Task? _loop;
@@ -164,7 +166,19 @@ public sealed class EffectEngine
                     }
                 }
                 catch (OperationCanceledException) { break; }
-                catch (Exception ex) { PushFailed?.Invoke(s.DeviceId, ex.Message); }
+                catch (Exception ex)
+                {
+                    // A dead control pipe surfaces here as a typed/IO failure. Bail out of
+                    // the WHOLE loop and signal once -- never keep hammering every device
+                    // every frame (that is the "pipe is broken" log storm that crashed the
+                    // UI). Transient per-frame denials (ok == false above) do not land here.
+                    if (!_control.IsConnected)
+                    {
+                        ConnectionLost?.Invoke(ex.Message);
+                        return;
+                    }
+                    PushFailed?.Invoke(s.DeviceId, ex.Message);
+                }
             }
 
             int frameMs = Math.Max(5, 1000 / Math.Max(1, Fps));

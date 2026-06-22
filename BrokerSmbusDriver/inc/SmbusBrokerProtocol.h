@@ -96,6 +96,63 @@ typedef enum _BROKER_SMBUS_OP
 #define BROKER_SMBUS_DRAM_ADDR_MIN  0x39u   /* ENE DRAM on this AM4 board (0x39/0x3A) */
 #define BROKER_SMBUS_DRAM_ADDR_MAX  0x3Au
 
+/*---------------------------------------------------------------------------*\
+| DEVICE-AWARE brick-guard (SMBus RGB write classes).                          |
+|                                                                              |
+|   A bounded SMBus write names a DEVICE CLASS (BROKER_RGB_WRITE_CLASS). The    |
+|   kernel's g_RgbWriteProfiles table (Smbus.c) maps each class to ONLY its     |
+|   own address window(s); the guard refuses any Address outside the targeted   |
+|   class's window AND refuses an unknown class. This is strictly TIGHTER than  |
+|   a single shared window: a DRAM-RGB client can never reach a GPU's address   |
+|   and vice-versa. The per-device maps live in SIGNED KERNEL CODE (the table), |
+|   never in data — same rule as the sensor register maps.                      |
+|                                                                              |
+|   Class 0 (EneDram) = the legacy ENE/Aura DRAM windows above. A write request |
+|   that predates the DeviceClass field zero-fills to 0, so old callers keep    |
+|   exactly today's behaviour. Each class below is a published SMBus RGB        |
+|   controller address window, cross-checked against a second reference and     |
+|   added one HW-validated device at a time. Windows stay clear of SPD          |
+|   (0x50-0x57), the SPD page-select (0x36/0x37) and DIMM temps (0x18-0x1F).    |
+\*---------------------------------------------------------------------------*/
+
+/* Per-class SMBus address windows (facts; widen/move deliberately, one device at a time).
+   NONE of these include SPD (0x50-0x57), the SPD page-select (0x36/0x37) or the JC42 DIMM-temp
+   window (0x18-0x1F) — e.g. Corsair Vengeance is detectable at 0x18-0x1F too, but only its
+   0x58-0x5F window is permitted so RGB writes can never reach the JC42 thermal sensors. */
+#define BROKER_RGB_CORSAIR_DRAM_ADDR_MIN   0x58u   /* Corsair Vengeance RGB Pro/RT DRAM (newer)  */
+#define BROKER_RGB_CORSAIR_DRAM_ADDR_MAX   0x5Fu
+#define BROKER_RGB_CRUCIAL_A_MIN           0x20u   /* Crucial Ballistix: remap/probe band         */
+#define BROKER_RGB_CRUCIAL_A_MAX           0x27u
+#define BROKER_RGB_CRUCIAL_B_MIN           0x39u   /* Crucial Ballistix: relocated band           */
+#define BROKER_RGB_CRUCIAL_B_MAX           0x3Cu
+#define BROKER_RGB_HYPERX_ADDR             0x27u   /* HyperX Predator/Fury DDR4 controller        */
+#define BROKER_RGB_FURY_ADDR_MIN           0x58u   /* Kingston Fury DDR4 0x58-0x5F / DDR5 0x60-0x67 */
+#define BROKER_RGB_FURY_ADDR_MAX           0x67u
+#define BROKER_RGB_VIPER_ADDR              0x77u   /* Patriot Viper / Viper Steel controller      */
+#define BROKER_RGB_XTREEM_A_MIN            0x70u   /* T-Force Xtreem (ENE): relocate/config band  */
+#define BROKER_RGB_XTREEM_A_MAX            0x78u
+#define BROKER_RGB_XTREEM_B_MIN            0x39u   /* T-Force Xtreem: low relocate band           */
+#define BROKER_RGB_XTREEM_B_MAX            0x3Du
+#define BROKER_RGB_CORSAIR_VEN_MIN         0x58u   /* Corsair Vengeance (original): RGB window only */
+#define BROKER_RGB_CORSAIR_VEN_MAX         0x5Fu   /* (the 0x18-0x1F alias is REFUSED — JC42 range) */
+#define BROKER_RGB_ASROCK_ADDR             0x6Au   /* ASRock Polychrome / ASR RGB motherboard      */
+#define BROKER_RGB_EVGA_ADDR               0x28u   /* EVGA ACX30 motherboard RGB                    */
+
+typedef enum _BROKER_RGB_WRITE_CLASS
+{
+    BrokerRgbClassEneDram         = 0,   /* ENE/Aura DRAM: 0x70-0x77 + 0x39-0x3A (legacy default) */
+    BrokerRgbClassCorsairDram     = 1,   /* Corsair Vengeance RGB Pro/RT DRAM: 0x58-0x5F          */
+    BrokerRgbClassCrucialDram     = 2,   /* Crucial Ballistix: 0x20-0x27 + 0x39-0x3C             */
+    BrokerRgbClassHyperXDram      = 3,   /* HyperX Predator/Fury: 0x27                            */
+    BrokerRgbClassFuryDram        = 4,   /* Kingston Fury: 0x58-0x67                              */
+    BrokerRgbClassViperDram       = 5,   /* Patriot Viper / Viper Steel: 0x77                     */
+    BrokerRgbClassXtreemDram      = 6,   /* T-Force Xtreem (ENE): 0x70-0x78 + 0x39-0x3D          */
+    BrokerRgbClassCorsairVenDram  = 7,   /* Corsair Vengeance (original): 0x58-0x5F               */
+    BrokerRgbClassAsrockMb        = 8,   /* ASRock Polychrome / ASR RGB motherboard: 0x6A         */
+    BrokerRgbClassEvgaMb          = 9    /* EVGA ACX30 motherboard: 0x28                          */
+    /* Extend with new HW-validated device classes; each gets a g_RgbWriteProfiles row. */
+} BROKER_RGB_WRITE_CLASS;
+
 /* NCT6687 EC RGB write window — the ONLY EC addresses the kernel will WRITE (16-bit
    page:index EC addresses). This bounds the IOCTL_BROKER_SUPERIO_RGB_WRITE path the
    same way the SMBus window bounds SMBus writes. The window MUST stay clear of the
@@ -260,10 +317,18 @@ typedef struct _BROKER_SMBUS_WRITE_REQUEST
        1..BROKER_SMBUS_MAX_BLOCK (validated in-kernel). */
     UINT32 Length;         /* valid bytes in Block (WriteBlock only) */
     UINT8  Block[BROKER_SMBUS_MAX_BLOCK];
+    /* DEVICE CLASS (BROKER_RGB_WRITE_CLASS) selecting the kernel brick-guard window.
+       APPENDED after Block so the original layouts are unchanged: a request that omits
+       it zero-fills to 0 = BrokerRgbClassEneDram, preserving the legacy ENE/Aura windows
+       for any caller that predates device-aware guarding. */
+    UINT32 DeviceClass;
 } BROKER_SMBUS_WRITE_REQUEST;
 
 /* The prefix a byte/word write may legally truncate the request to. */
 #define BROKER_SMBUS_WRITE_REQUEST_V1_SIZE  24u
+/* The minimum length carrying the full block payload (Length + Block[]) but NOT the
+   appended DeviceClass — a block write may omit DeviceClass and default to class 0. */
+#define BROKER_SMBUS_WRITE_REQUEST_BLOCK_SIZE  FIELD_OFFSET(BROKER_SMBUS_WRITE_REQUEST, DeviceClass)
 
 typedef struct _BROKER_SMBUS_WRITE_RESPONSE
 {

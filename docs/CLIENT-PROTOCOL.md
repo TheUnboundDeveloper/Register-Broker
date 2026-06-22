@@ -185,15 +185,16 @@ the `transport` field so an operator knows what bounds a write:
 |---|---|---|---|
 | `smbusene` | ENE/Aura DRAM modules | **Kernel** SMBus brick-guard (`0x70–0x77` / `0x39–0x3A`) | validated |
 | `superioec` | NCT6687 12V header (JRGB) | **Kernel** EC RGB-register brick-guard | inert until the EC RGB window is hardware-validated (`CAP_SUPERIO_RGB` off) |
-| `usbhid` | MSI Mystic Light addressable headers (JRAINBOW) | **Broker only** — baked report builder, *no kernel guard* | opt-in (`AllowHidRgb`, default off); validated |
-| `usbhidrazer` | Razer Chroma peripherals (keyboards / mice) | **Broker only** — baked report builder, *no kernel guard* | opt-in (`AllowHidRgb`, default off); validated (Naga Trinity, Cynosa Chroma) |
+| `usbhid` | MSI Mystic Light headers + many USB-HID peripherals (Logitech, SteelSeries, Corsair iCUE V2, HyperX, Cooler Master, NZXT, Roccat, Redragon, ASUS, Lian Li, AMD Wraith Prism) | **Broker only** — baked report builder, *no kernel guard* | `AllowHidRgb` **on by default**; MSI Mystic Light validated, most peripherals HW-unvalidated |
+| `usbhidrazer` | Razer Chroma peripherals (keyboards / mice) | **Broker only** — baked report builder, *no kernel guard* | `AllowHidRgb` **on by default**; validated (Naga Trinity, Cynosa Chroma) |
 
-The `usbhid` / `usbhidrazer` paths are user-mode HID transports (reduced assurance): disabled by
-default, enabled deliberately (`AllowHidRgb` in `appsettings.json` or `--allow-hid-rgb`). Adding a
-new board's zones is a broker-only change — the kernel exposes only stable, class-wide windows, so
-no driver recompile is needed. Razer peripherals are **board-independent**: matched by USB
-vendor/product/interface+usage (not the DMI board profile), so they appear on any host with the
-device present and `AllowHidRgb` on.
+The `usbhid` / `usbhidrazer` paths are user-mode HID transports (reduced assurance). As of
+2026-06-22 they are **enabled by default** (`AllowHidRgb` defaults to `true`); set `AllowHidRgb:
+false` in `appsettings.json` to opt out (`--allow-hid-rgb` still forces it on). Adding a new board's
+zones is a broker-only change — the kernel exposes only stable, class-wide windows, so no driver
+recompile is needed. Peripherals (Razer, Logitech, SteelSeries, …) are **board-independent**:
+matched by USB vendor/product/interface+usage (not the DMI board profile), so they appear on any
+host with the device present and `AllowHidRgb` on.
 
 > **`rgb.set` is colors only — there are no effect ops.** Animation (breathing, rainbow,
 > music sync) is deliberately the consumer's job: render frames client-side and send

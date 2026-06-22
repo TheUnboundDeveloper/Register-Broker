@@ -127,17 +127,18 @@ foreach ($v in 0,64,128,192,255,192,128,64) {
 
 ---
 
-## 6. Enabling the motherboard-header zones
+## 6. The USB-HID and motherboard-header zones
 
-DRAM zones (`ram0`/`ram1`) work out of the box. The **motherboard headers** are gated:
+DRAM zones (`ram0`/`ram1`) work out of the box. The **USB-HID zones** (motherboard headers like
+`mb.argb0`, plus board-independent peripherals — keyboards, mice, coolers) are gated by
+`AllowHidRgb`:
 
-- **`mb.argb0` (USB-HID JRAINBOW)** is opt-in. It only appears in `rgb.list` when the **control
-  service** has `AllowHidRgb` enabled. Easiest: install with **`-WithHidRgb`**
-  (`.\scripts\Install-SensorBrokerService.ps1 -WithHidRgb`) — it writes the flag for you. Or set
-  `"AllowHidRgb": true` in `publish\BrokerSensorBridge\appsettings.json` and restart the service.
-  (The `--allow-hid-rgb` CLI flag affects only the *service* process, not a client invocation.)
-  Close OpenRGB / MSI Center before driving it. Full steps:
-  [`RGB-BOARD-BRINGUP.md`](RGB-BOARD-BRINGUP.md) §5 / §9.
+- **`AllowHidRgb` is on by default** (as of 2026-06-22), so USB-HID zones appear in `rgb.list`
+  whenever a supported device is present — no extra flag needed. For the stricter posture set
+  `"AllowHidRgb": false` in `publish\BrokerSensorBridge\appsettings.json` and restart the service.
+  (The `--allow-hid-rgb` CLI flag affects only the *service* process, not a client invocation, and
+  is now redundant with the default.) Close any other RGB app (e.g. MSI Center) driving the same
+  device. Full steps: [`RGB-BOARD-BRINGUP.md`](RGB-BOARD-BRINGUP.md) §5 / §9.
 - **`mb.jrgb0` (12V EC header)** stays inert until the NCT6687 EC RGB register window is validated and
   enabled in the driver — see the bring-up guide §6.
 
@@ -152,9 +153,9 @@ If a zone isn't in `rgb.list`, it isn't enabled — there's nothing to "set."
   (the control service allows 120 ops/s, burst 240, so frame updates aren't rate-limited). This keeps
   the privileged surface tiny.
 - **No per-LED from the CLI.** The bundled client sends one color per zone. The wire protocol *does*
-  support a per-LED `colors` array (see `CLIENT-PROTOCOL.md` §6) for custom apps — but note the
-  motherboard USB-HID zone currently collapses per-LED to the lead color (per-LED streaming for that
-  header is a future item). DRAM per-LED is fully supported on the wire.
+  support a per-LED `colors` array (see `CLIENT-PROTOCOL.md` §6) for custom apps — and per-LED is
+  fully supported on the wire for DRAM **and** the MSI Mystic Light ARGB header (`mb.argb0`, via the
+  `0x53` direct frame, shipped in v1.3.0) and Razer matrices.
 
 ---
 
@@ -163,8 +164,8 @@ If a zone isn't in `rgb.list`, it isn't enabled — there's nothing to "set."
 | Symptom | Cause | Fix |
 |---|---|---|
 | `rgb.set denied/failed: {"type":"deny"}` | unknown `--device` (not in `rgb.list`), bad `--color`, or no `rgb:write` | run `rgb.list` first; use an id it shows; check the color is 6 hex digits |
-| `mb.argb0` missing from `rgb.list` | `AllowHidRgb` off on the service, or `publish\` not rebuilt | enable `AllowHidRgb` (§6) and restart; redeploy the broker |
+| `mb.argb0` missing from `rgb.list` | `AllowHidRgb` set to `false`, device absent, or `publish\` not rebuilt | confirm `AllowHidRgb` is not disabled (§6), the device is present, restart; redeploy the broker |
 | `Connect failed (is the broker running?)` | control service stopped | start `BrokerControl` (the RGB control service) |
 | Output file is empty | WinExe + bare `>` redirect | use `cmd /c "... > file 2>&1"` (§1) |
-| Color set "OK" but LEDs don't change | another RGB app is overwriting frames | close OpenRGB / MSI Center / Dragon Center |
+| Color set "OK" but LEDs don't change | another RGB app is overwriting frames | close any other RGB control app (e.g. MSI Center / Dragon Center) |
 | `Authorization denied by the broker` | client-identity gate is on and this binary isn't authorized | run the shipped client, or authorize it (see `SECURITY` / installer flags) |

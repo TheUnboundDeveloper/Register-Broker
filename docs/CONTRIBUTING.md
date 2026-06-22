@@ -123,8 +123,9 @@ it up automatically via `sensor.list` — no client change needed.
 
 RGB is **board-aware**: zones live in a DMI-matched `RgbBoardProfile` in
 `BrokerSensorBridge/RgbCatalog.cs` as `RgbZone` records, each tagged with a transport
-(`SmbusEne` DRAM / `SuperioEc` 12V header / `UsbHid` Mystic Light). For a device on an
-**already-allowed** window, add a zone to the matching board profile:
+(`SmbusEne` DRAM / `SuperioEc` 12V header / `UsbHid` Mystic Light & board-independent peripherals /
+`UsbHidRazer` Razer Chroma). For a device on an **already-allowed** window, add a zone to the
+matching board profile:
 
 ```csharp
 new RgbZone("ram2", "DRAM RGB (DIMM 2)", RgbZoneKind.Dram, RgbTransport.SmbusEne, LedCount: 5, Bus: 0, Address: 0x3B),

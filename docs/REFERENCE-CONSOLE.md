@@ -65,8 +65,9 @@ Click **Connect**. The console opens two sessions: `SensorBroker` (scope `sensor
 so the unsigned console connects; if `RequireAuthorizedClient` is ever turned on, this exe's
 Authenticode signer would need to be pinned (see [SIGNING-AND-DEPLOYMENT.md](SIGNING-AND-DEPLOYMENT.md)).
 
-> **RGB note.** Motherboard headers and peripherals use the opt-in USB-HID transports, so RGB on
-> those devices requires `AllowHidRgb` set in the control service's `appsettings.json`
+> **RGB note.** Motherboard headers and peripherals use the USB-HID transports, gated by
+> `AllowHidRgb` — which is **on by default**, so those devices appear automatically when present.
+> Set `AllowHidRgb: false` in the control service's `appsettings.json` for the stricter posture
 > (see [RGB-BOARD-BRINGUP.md](RGB-BOARD-BRINGUP.md) §9). Close other lighting software before
 > driving the same hardware.
 

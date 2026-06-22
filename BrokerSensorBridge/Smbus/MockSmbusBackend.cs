@@ -82,13 +82,13 @@ internal sealed class MockSmbusBackend : ISmbusBackend
         return SuperioRgbAvailable;
     }
 
-    public bool TryWrite(int bus, int address, int command, int data, bool word, out SmbusStatus status)
+    public bool TryWrite(int bus, int address, int command, int data, bool word, RgbWriteClass deviceClass, out SmbusStatus status)
     {
         status = Available ? SmbusStatus.Ok : SmbusStatus.Unavailable;
         return Available;
     }
 
-    public bool TryWriteBlock(int bus, int address, int command, ReadOnlySpan<byte> data, out SmbusStatus status)
+    public bool TryWriteBlock(int bus, int address, int command, ReadOnlySpan<byte> data, RgbWriteClass deviceClass, out SmbusStatus status)
     {
         if (data.Length is < 1 or > 32) { status = SmbusStatus.BadRequest; return false; }
         status = Available ? SmbusStatus.Ok : SmbusStatus.Unavailable;

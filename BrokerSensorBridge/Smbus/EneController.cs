@@ -58,12 +58,12 @@ internal sealed class EneController
     private static int Swap(int reg) => ((reg << 8) & 0xFF00) | ((reg >> 8) & 0x00FF);
 
     /// <summary>Set the ENE register pointer (non-destructive — selects what the next read/write touches).</summary>
-    private bool SetPointer(int reg) => _drv.TryWrite(_bus, _addr, 0x00, Swap(reg), word: true, out _);
+    private bool SetPointer(int reg) => _drv.TryWrite(_bus, _addr, 0x00, Swap(reg), word: true, RgbWriteClass.EneDram, out _);
 
     private bool RegisterWriteLocked(int reg, byte value)
     {
         if (!SetPointer(reg)) return false;
-        return _drv.TryWrite(_bus, _addr, 0x01, value, word: false, out _);
+        return _drv.TryWrite(_bus, _addr, 0x01, value, word: false, RgbWriteClass.EneDram, out _);
     }
 
     /// <summary>
@@ -77,7 +77,7 @@ internal sealed class EneController
         if (!_blockUnsupported)
         {
             if (!SetPointer(reg)) return false;
-            if (_drv.TryWriteBlock(_bus, _addr, 0x03, data, out SmbusStatus status)) return true;
+            if (_drv.TryWriteBlock(_bus, _addr, 0x03, data, RgbWriteClass.EneDram, out SmbusStatus status)) return true;
             if (status != SmbusStatus.BadRequest) return false;
             _blockUnsupported = true;   // old driver: op unknown — use byte writes from now on
         }

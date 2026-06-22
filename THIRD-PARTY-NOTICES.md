@@ -67,8 +67,9 @@ C# (`BrokerSensorBridge/Rgb/MysticLightHidController.cs`,
 **OpenRazer** Linux kernel driver (`drivers/hid/razer/` family, GPL-2.0); only
 the register/command values are reproduced — no source code is copied or
 distributed. These USB-HID paths are user-mode and outside the kernel
-brick-guard, so they are opt-in (`AllowHidRgb`) and reduced-assurance; the
-broker's baked report builder is the only write boundary.
+brick-guard, so they are gated by `AllowHidRgb` (on by default as of 2026-06-22;
+set `false` to opt out) and reduced-assurance; the broker's baked report builder
+is the only write boundary.
 
 ## Build / runtime dependencies
 

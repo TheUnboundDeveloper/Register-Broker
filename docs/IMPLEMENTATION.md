@@ -145,8 +145,8 @@ register/`Command` within it — the broker's baked `RgbCatalog` bounds which re
 actually written.) The EC RGB path has a parallel guard (`SuperioRgbWriteAddressAllowed` in
 `SuperioNct.c`): only the NCT6687 RGB register window, never the EC sensor/fan/voltage banks,
 and disabled entirely until the window is hardware-validated. The **USB-HID** transport does not
-pass the kernel at all — it's user-mode in the broker (opt-in `AllowHidRgb`, bounded by the baked
-report builder + USB product-id pin).
+pass the kernel at all — it's user-mode in the broker (gated by `AllowHidRgb`, **on by default**;
+bounded by the baked report builder + a per-device USB product-id / interface+usage pin).
 
 The C# side (`SmbusDriverBackend`) validates `bytesReturned` against the expected struct size
 before trusting a response, so a truncated kernel reply is rejected rather than read as zeros.
@@ -200,8 +200,9 @@ When you add a sensor, the decode goes here next to these — see
 `RgbRegistry` (transport-agnostic, built at startup over the `IRgbController` seam) resolves the
 DMI-matched board profile from `RgbCatalog`, then registers each zone whose transport is present:
 ENE/Aura DRAM when the driver reports `CAP_WRITE`; the NCT6687 EC 12V header when it reports
-`CAP_SUPERIO_RGB` (off today, so inert); and MSI Mystic Light USB-HID zones when `AllowHidRgb` is
-set and the pinned controller is found. A zone whose baked address is outside the kernel write
+`CAP_SUPERIO_RGB` (off today, so inert); and the USB-HID zones (MSI Mystic Light headers + the
+board-independent peripherals) when `AllowHidRgb` is set (**on by default**) and the matching
+controller is found. A zone whose baked address is outside the kernel write
 window is refused at registration (`RgbCatalog.ZoneAddressFault`, mirroring the kernel guard).
 
 The **ENE/DRAM** write sequence (`Smbus/EneController.cs` — a publicly documented hardware
@@ -225,7 +226,8 @@ The **USB-HID (MSI Mystic Light)** transport (`Rgb/MysticLightHidController.cs`)
 zone only, and **seeds the packet from the device's current state via `HidD_GetFeature`** first so
 editing one zone doesn't reset the others to disabled. The device's max feature length is
 classified to the protocol variant (e.g. 725 → 185). Pinned to a USB product id so only the
-intended controller is driven. Reduced assurance: user-mode, no kernel guard, opt-in.
+intended controller is driven. Reduced assurance: user-mode, no kernel guard; gated by
+`AllowHidRgb`, **on by default**.
 
 ---
 
