@@ -3,189 +3,727 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:ReferenceConsole"
-        mc:Ignorable="d" d:DesignWidth="960" d:DesignHeight="640"
+        mc:Ignorable="d" d:DesignWidth="1360" d:DesignHeight="860"
         x:Class="ReferenceConsole.MainWindow"
-        Width="1080" Height="780" MinWidth="860" MinHeight="540"
+        Width="1360" Height="860" MinWidth="1120" MinHeight="700"
         Icon="/Assets/rc-logo.ico"
-        Title="Register Broker — Reference Console">
+        Background="{DynamicResource AppBg}"
+        WindowDecorations="None"
+        CanResize="True"
+        WindowStartupLocation="CenterScreen"
+        WindowState="Normal"
+        Title="Register Broker Console">
 
-  <Grid RowDefinitions="Auto,*,Auto" Margin="12">
+  <Window.Resources>
+    <!-- ============ Sensor row (inside a group) ============ -->
+    <DataTemplate x:Key="SensorRowTemplate" x:DataType="local:SensorRow">
+      <Grid ColumnDefinitions="*,Auto,90,46" Margin="2,3">
+        <TextBlock Grid.Column="0" Text="{Binding DisplayName}" Foreground="{DynamicResource TextPrimary}"
+                   VerticalAlignment="Center"/>
+        <TextBlock Grid.Column="1" Text="{Binding Id}" Classes="mono" FontSize="11" Margin="10,0,0,0"
+                   Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"
+                   IsVisible="{Binding ShowOrigin}"/>
+        <TextBlock Grid.Column="2" Text="{Binding ValueText}" HorizontalAlignment="Right"
+                   FontWeight="SemiBold" VerticalAlignment="Center"
+                   Foreground="{DynamicResource TextPrimary}"
+                   Classes.hot="{Binding IsHot}" Classes.active="{Binding IsActive}"/>
+        <TextBlock Grid.Column="3" Text="{Binding Unit}" Margin="8,0,0,0"
+                   Foreground="{DynamicResource TextMuted}" FontSize="11" VerticalAlignment="Center"/>
+      </Grid>
+    </DataTemplate>
 
-    <!-- ===== Top bar: connection state ===== -->
-    <Border Grid.Row="0" Background="#1E1E2E" CornerRadius="6" Padding="12,8" Margin="0,0,0,10">
-      <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
-        <Ellipse Grid.Column="0" Width="12" Height="12" VerticalAlignment="Center"
-                 x:Name="StatusDot" Fill="#888888"/>
-        <TextBlock Grid.Column="1" x:Name="StatusText" Margin="8,0,0,0"
-                   VerticalAlignment="Center" Text="Disconnected" FontWeight="SemiBold"/>
-        <TextBlock Grid.Column="2" x:Name="ScopesText" Margin="16,0" VerticalAlignment="Center"
-                   Foreground="#AAAAAA" Text=""/>
-        <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" Margin="0,0,12,0"
-                    VerticalAlignment="Center">
-          <TextBlock Text="Minimize to:" VerticalAlignment="Center" Foreground="#AAAAAA"/>
-          <ComboBox x:Name="MinimizeTargetCombo" Width="110" SelectionChanged="OnMinimizeTargetChanged">
-            <ComboBoxItem>Taskbar</ComboBoxItem>
-            <ComboBoxItem>Tray</ComboBoxItem>
-          </ComboBox>
+    <!-- ============ Sensor group ============ -->
+    <DataTemplate x:Key="SensorGroupTemplate" x:DataType="local:SensorGroup">
+      <StackPanel Margin="0,0,0,10">
+        <Border Background="{DynamicResource SurfaceInset}" CornerRadius="6" Padding="10,5" Margin="0,0,0,4">
+          <TextBlock Text="{Binding Name}" Classes="group"/>
+        </Border>
+        <ItemsControl ItemsSource="{Binding Rows}" ItemTemplate="{StaticResource SensorRowTemplate}"
+                      Margin="6,0,2,0"/>
+      </StackPanel>
+    </DataTemplate>
+
+    <!-- ============ Activity entry ============ -->
+    <DataTemplate x:Key="ActivityTemplate" x:DataType="local:ActivityEntry">
+      <Grid ColumnDefinitions="60,84,*,Auto" Margin="0,3">
+        <TextBlock Grid.Column="0" Text="{Binding Time}" Classes="mono" FontSize="11"
+                   Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+        <Border Grid.Column="1" Background="{Binding LevelBg}" CornerRadius="4" Padding="0,2"
+                Margin="2,0,10,0" Height="20" VerticalAlignment="Center">
+          <TextBlock Text="{Binding Level}" Foreground="{Binding LevelBrush}" FontSize="10"
+                     FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <TextBlock Grid.Column="2" Text="{Binding Message}" Foreground="{DynamicResource TextSecondary}"
+                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+        <Border Grid.Column="3" Background="{DynamicResource SurfaceAlt}" BorderBrush="{DynamicResource Border0}"
+                BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center"
+                IsVisible="{Binding HasTag}">
+          <TextBlock Text="{Binding Tag}" Classes="mono" FontSize="10" Foreground="{DynamicResource TextSecondary}"/>
+        </Border>
+      </Grid>
+    </DataTemplate>
+
+    <!-- ============ RGB device card (ListBox item) ============ -->
+    <DataTemplate x:Key="RgbDeviceTemplate" x:DataType="local:RgbRow">
+      <Grid ColumnDefinitions="Auto,*" Margin="2">
+        <Ellipse Grid.Column="0" Width="9" Height="9" VerticalAlignment="Top" Margin="2,6,10,0"
+                 Fill="{Binding StatusBrush}"/>
+        <StackPanel Grid.Column="1" Spacing="2">
+          <TextBlock Text="{Binding Label}" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"
+                     TextWrapping="Wrap"/>
+          <TextBlock Text="{Binding CardDetail}" Classes="muted" TextWrapping="Wrap"/>
         </StackPanel>
-        <Button Grid.Column="4" x:Name="ConnectButton" Content="Connect"
-                Click="OnConnectClick" Padding="16,4"/>
+      </Grid>
+    </DataTemplate>
+  </Window.Resources>
+
+  <Window.Styles>
+    <Style Selector="ListBox.devices">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+    </Style>
+    <Style Selector="ListBox.devices ListBoxItem">
+      <Setter Property="Padding" Value="10,8"/>
+      <Setter Property="Margin" Value="0,0,0,8"/>
+      <Setter Property="CornerRadius" Value="10"/>
+      <Setter Property="Background" Value="{DynamicResource SurfaceAlt}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource Border0}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+    </Style>
+    <Style Selector="ListBox.devices ListBoxItem:selected /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+    </Style>
+    <Style Selector="ListBox.devices ListBoxItem:selected">
+      <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+    </Style>
+
+    <!-- box drag bar -->
+    <Style Selector="Grid.dragbar">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Margin" Value="0,0,0,8"/>
+    </Style>
+    <Style Selector="Grid.dragbar:pointerover TextBlock.handle">
+      <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
+    </Style>
+  </Window.Styles>
+
+  <!-- Outer resize frame: 6px grips on every edge/corner drive BeginResizeDrag (borderless window). -->
+  <Grid ColumnDefinitions="6,*,6" RowDefinitions="6,*,6" Background="Transparent">
+    <Border Grid.Row="0" Grid.Column="0" Background="Transparent" Cursor="TopLeftCorner" PointerPressed="OnResizeNW"/>
+    <Border Grid.Row="0" Grid.Column="1" Background="Transparent" Cursor="TopSide" PointerPressed="OnResizeN"/>
+    <Border Grid.Row="0" Grid.Column="2" Background="Transparent" Cursor="TopRightCorner" PointerPressed="OnResizeNE"/>
+    <Border Grid.Row="1" Grid.Column="0" Background="Transparent" Cursor="LeftSide" PointerPressed="OnResizeW"/>
+    <Border Grid.Row="1" Grid.Column="2" Background="Transparent" Cursor="RightSide" PointerPressed="OnResizeE"/>
+    <Border Grid.Row="2" Grid.Column="0" Background="Transparent" Cursor="BottomLeftCorner" PointerPressed="OnResizeSW"/>
+    <Border Grid.Row="2" Grid.Column="1" Background="Transparent" Cursor="BottomSide" PointerPressed="OnResizeS"/>
+    <Border Grid.Row="2" Grid.Column="2" Background="Transparent" Cursor="BottomRightCorner" PointerPressed="OnResizeSE"/>
+
+  <Grid Grid.Row="1" Grid.Column="1" RowDefinitions="44,*,Auto">
+
+    <!-- ================= ROW 0: custom chrome ================= -->
+    <Border Grid.Row="0" Background="{DynamicResource ChromeBg}" PointerPressed="OnChromeDrag"
+            DoubleTapped="OnChromeMaximize">
+      <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,0">
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+          <Image Width="30" Height="30" Source="avares://ReferenceConsole/Assets/rc-logo.png"
+                 RenderOptions.BitmapInterpolationMode="HighQuality"/>
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="Register Broker Reference Console" FontWeight="SemiBold" FontSize="13"
+                       Foreground="{DynamicResource TextPrimary}"/>
+          </StackPanel>
+        </StackPanel>
+
+        <!-- Borderless window: these are our own window controls (no native caption). -->
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal" Spacing="0" VerticalAlignment="Center">
+            <TextBlock Text="☀" FontSize="13" Margin="0,0,9,0" Foreground="{DynamicResource TextSecondary}"
+                       VerticalAlignment="Center"/>
+            <ToggleSwitch x:Name="ThemeToggle" OnContent="" OffContent="" IsChecked="True"
+                          Width="44" MinWidth="0" Padding="0" Margin="0" Click="OnThemeToggle" VerticalAlignment="Center"/>
+            <TextBlock Text="☾" FontSize="12" Margin="9,0,0,0" Foreground="{DynamicResource TextSecondary}"
+                       VerticalAlignment="Center"/>
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" Margin="6,0,0,0">
+            <Button Classes="chrome" Content="—" Click="OnChromeMinimize" ToolTip.Tip="Minimize"/>
+            <Button Classes="chrome" Content="▢" Click="OnChromeMaximizeBtn" ToolTip.Tip="Maximize"/>
+            <Button Classes="chrome close" Content="✕" Click="OnChromeClose" ToolTip.Tip="Close"/>
+          </StackPanel>
+        </StackPanel>
       </Grid>
     </Border>
 
-    <!-- ===== Tabs ===== -->
-    <TabControl Grid.Row="1">
+    <!-- ================= ROW 1: sidebar + content ================= -->
+    <Grid Grid.Row="1" ColumnDefinitions="212,*">
 
-      <!-- Sensors tab -->
-      <TabItem Header="Sensors">
-        <Grid RowDefinitions="Auto,Auto,*" Margin="0,8,0,0">
-          <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10" Margin="0,0,0,8">
-            <Button x:Name="SensorReadOnce" Content="Read once" Click="OnSensorReadOnce"/>
-            <ToggleButton x:Name="SensorPollToggle" Content="Live poll" Click="OnSensorPollToggle"/>
-            <TextBlock Text="Interval (ms):" VerticalAlignment="Center"/>
-            <NumericUpDown x:Name="PollInterval" Minimum="250" Maximum="10000"
-                           Increment="250" Value="1000" Width="120"/>
-            <TextBlock x:Name="SensorCount" VerticalAlignment="Center" Foreground="#AAAAAA"/>
+      <!-- ===== sidebar ===== -->
+      <Border Grid.Column="0" Background="{DynamicResource ChromeBg}" BorderBrush="{DynamicResource Border0}"
+              BorderThickness="0,0,1,0">
+        <Grid RowDefinitions="*,Auto" Margin="12,14">
+          <StackPanel Grid.Row="0" Spacing="3">
+            <Button x:Name="NavDashboard" Classes="nav active" Click="OnNavDashboard" Content="◧   Dashboard"/>
+            <Button x:Name="NavSensors"   Classes="nav" Click="OnNavSensors"   Content="∿   Sensors"/>
+            <Button x:Name="NavRgb"       Classes="nav" Click="OnNavRgb"       Content="◉   RGB"/>
+            <Button x:Name="NavActivity"  Classes="nav" Click="OnNavActivity"  Content="≣   Activity"/>
+            <Button x:Name="NavSecurity"  Classes="nav" Click="OnNavSecurity"  Content="🛡   Security"/>
+            <Button x:Name="NavSettings"  Classes="nav" Click="OnNavSettings"  Content="⚙   Settings"/>
           </StackPanel>
 
-          <!-- Column headers (kept in lock-step with the row template below) -->
-          <Border Grid.Row="1" Background="#252535" BorderBrush="#333" BorderThickness="1,1,1,0"
-                  CornerRadius="4,4,0,0" Padding="0,6">
-            <Grid ColumnDefinitions="260,220,150,*" Margin="10,0">
-              <TextBlock Grid.Column="0" Text="Sensor Name"   FontWeight="Bold" Foreground="#CCCCCC"/>
-              <TextBlock Grid.Column="1" Text="Sensor Origin" FontWeight="Bold" Foreground="#CCCCCC"/>
-              <TextBlock Grid.Column="2" Text="Sensor Data"   FontWeight="Bold" Foreground="#CCCCCC"/>
+          <StackPanel Grid.Row="1" Spacing="8">
+            <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Content="⧉  GitHub" Click="OnOpenGitHub"/>
+            <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Content="ⓘ  About" Click="OnAbout"/>
+            <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Content="✉  Send feedback" Click="OnSendFeedback"/>
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <!-- ===== content host ===== -->
+      <Panel Grid.Column="1">
+
+        <!-- ============ DASHBOARD PAGE ============ -->
+        <!-- Fixed containment box: a toolbar row + a fill row that holds the card canvas. The fill
+             row sizes itself to the window (so it grows with the monitor/resolution), and cards are
+             clamped to that row so they can never cross its edges. -->
+        <Grid x:Name="PageDashboard" Margin="16" RowDefinitions="Auto,*">
+
+            <!-- layout toolbar -->
+            <Grid Grid.Row="0" ColumnDefinitions="Auto,*" Margin="0,0,0,12">
+              <TextBlock Grid.Column="0" Text="Dashboard" Classes="h1" VerticalAlignment="Center"/>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right"
+                          VerticalAlignment="Center">
+                <Button x:Name="GridModeBtn" Classes="seg on" Content="▦ Grid" Click="OnGridMode"
+                        ToolTip.Tip="Anchored grid: boxes auto-arrange and snap into rows"/>
+                <Button x:Name="FreeModeBtn" Classes="seg" Content="✥ Free" Click="OnFreeMode"
+                        ToolTip.Tip="Free placement: drag boxes anywhere on the canvas"/>
+                <Button x:Name="AddBoxButton" Classes="ghost" Content="＋ Add Card" Click="OnAddBox"/>
+                <Button Classes="ghost" Content="↺ Reset layout" Click="OnResetLayout"/>
+              </StackPanel>
+            </Grid>
+
+            <!-- containment area: cards live on the Canvas; ClipToBounds keeps them inside it. The
+                 WrapPanel is only the XAML authoring host — boxes are moved onto the Canvas at startup. -->
+            <Panel Grid.Row="1" ClipToBounds="True">
+              <Canvas x:Name="DashCanvas" IsVisible="False"/>
+              <WrapPanel x:Name="DashGrid" IsVisible="False">
+
+              <!-- ===== metric: CPU ===== -->
+              <Border Classes="card box" Tag="cpu" Width="200" Margin="0,0,14,14">
+                <DockPanel>
+                  <Grid Classes="dragbar" DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto"
+                        PointerPressed="OnBoxDragStart" PointerMoved="OnBoxDragMove" PointerReleased="OnBoxDragEnd">
+                    <TextBlock Grid.Column="0" Classes="handle" Text="⠿" Margin="0,0,8,0"
+                               Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="CPU Temperature" Classes="sub" VerticalAlignment="Center"/>
+                    <Button Grid.Column="2" Classes="iconbtn" Content="✕" Click="OnBoxRemove"/>
+                  </Grid>
+                  <StackPanel Spacing="6">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Border Width="26" Height="26" CornerRadius="7" Background="#2A2350">
+                        <TextBlock Text="CPU" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource Accent}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      </Border>
+                      <TextBlock x:Name="CpuVal" Text="—" FontSize="26" FontWeight="Bold"
+                                 Foreground="{DynamicResource TextPrimary}"/>
+                      <TextBlock Text="°C" Classes="sub" VerticalAlignment="Bottom" Margin="0,0,0,5"/>
+                    </StackPanel>
+                    <local:Sparkline x:Name="CpuSpark" Height="32" Stroke="{DynamicResource Accent}"/>
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+
+              <!-- ===== metric: GPU ===== -->
+              <Border Classes="card box" Tag="gpu" Width="200" Margin="0,0,14,14">
+                <DockPanel>
+                  <Grid Classes="dragbar" DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto"
+                        PointerPressed="OnBoxDragStart" PointerMoved="OnBoxDragMove" PointerReleased="OnBoxDragEnd">
+                    <TextBlock Grid.Column="0" Classes="handle" Text="⠿" Margin="0,0,8,0"
+                               Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="GPU Temperature" Classes="sub" VerticalAlignment="Center"/>
+                    <Button Grid.Column="2" Classes="iconbtn" Content="✕" Click="OnBoxRemove"/>
+                  </Grid>
+                  <StackPanel Spacing="6">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Border Width="26" Height="26" CornerRadius="7" Background="#16321F">
+                        <TextBlock Text="GPU" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource Green}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      </Border>
+                      <TextBlock x:Name="GpuVal" Text="—" FontSize="26" FontWeight="Bold"
+                                 Foreground="{DynamicResource TextPrimary}"/>
+                      <TextBlock Text="°C" Classes="sub" VerticalAlignment="Bottom" Margin="0,0,0,5"/>
+                    </StackPanel>
+                    <local:Sparkline x:Name="GpuSpark" Height="32" Stroke="{DynamicResource Green}"/>
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+
+              <!-- ===== metric: VRM ===== -->
+              <Border Classes="card box" Tag="vrm" Width="200" Margin="0,0,14,14">
+                <DockPanel>
+                  <Grid Classes="dragbar" DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto"
+                        PointerPressed="OnBoxDragStart" PointerMoved="OnBoxDragMove" PointerReleased="OnBoxDragEnd">
+                    <TextBlock Grid.Column="0" Classes="handle" Text="⠿" Margin="0,0,8,0"
+                               Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="VRM MOS" Classes="sub" VerticalAlignment="Center"/>
+                    <Button Grid.Column="2" Classes="iconbtn" Content="✕" Click="OnBoxRemove"/>
+                  </Grid>
+                  <StackPanel Spacing="6">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Border Width="26" Height="26" CornerRadius="7" Background="#2A2350">
+                        <TextBlock Text="VRM" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource Accent}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      </Border>
+                      <TextBlock x:Name="VrmVal" Text="—" FontSize="26" FontWeight="Bold"
+                                 Foreground="{DynamicResource TextPrimary}"/>
+                      <TextBlock Text="°C" Classes="sub" VerticalAlignment="Bottom" Margin="0,0,0,5"/>
+                    </StackPanel>
+                    <local:Sparkline x:Name="VrmSpark" Height="32" Stroke="{DynamicResource Accent}"/>
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+
+              <!-- ===== metric: System ===== -->
+              <Border Classes="card box" Tag="sys" Width="200" Margin="0,0,14,14">
+                <DockPanel>
+                  <Grid Classes="dragbar" DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto"
+                        PointerPressed="OnBoxDragStart" PointerMoved="OnBoxDragMove" PointerReleased="OnBoxDragEnd">
+                    <TextBlock Grid.Column="0" Classes="handle" Text="⠿" Margin="0,0,8,0"
+                               Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="System Temp" Classes="sub" VerticalAlignment="Center"/>
+                    <Button Grid.Column="2" Classes="iconbtn" Content="✕" Click="OnBoxRemove"/>
+                  </Grid>
+                  <StackPanel Spacing="6">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Border Width="26" Height="26" CornerRadius="7" Background="#16293F">
+                        <TextBlock Text="SYS" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource Blue}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      </Border>
+                      <TextBlock x:Name="SysVal" Text="—" FontSize="26" FontWeight="Bold"
+                                 Foreground="{DynamicResource TextPrimary}"/>
+                      <TextBlock Text="°C" Classes="sub" VerticalAlignment="Bottom" Margin="0,0,0,5"/>
+                    </StackPanel>
+                    <local:Sparkline x:Name="SysSpark" Height="32" Stroke="{DynamicResource Blue}"/>
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+
+              <!-- ===== metric: Latency ===== -->
+              <Border Classes="card box" Tag="lat" Width="200" Margin="0,0,14,14">
+                <DockPanel>
+                  <Grid Classes="dragbar" DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto"
+                        PointerPressed="OnBoxDragStart" PointerMoved="OnBoxDragMove" PointerReleased="OnBoxDragEnd">
+                    <TextBlock Grid.Column="0" Classes="handle" Text="⠿" Margin="0,0,8,0"
+                               Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="Broker Latency" Classes="sub" VerticalAlignment="Center"/>
+                    <Button Grid.Column="2" Classes="iconbtn" Content="✕" Click="OnBoxRemove"/>
+                  </Grid>
+                  <StackPanel Spacing="6">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Border Width="26" Height="26" CornerRadius="7" Background="#0F3038">
+                        <TextBlock Text="LAT" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource Cyan}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      </Border>
+                      <TextBlock x:Name="LatVal" Text="—" FontSize="26" FontWeight="Bold"
+                                 Foreground="{DynamicResource TextPrimary}"/>
+                      <TextBlock Text="ms" Classes="sub" VerticalAlignment="Bottom" Margin="0,0,0,5"/>
+                    </StackPanel>
+                    <local:Sparkline x:Name="LatSpark" Height="32" Stroke="{DynamicResource Cyan}"/>
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+
+              <!-- ===== Sensors panel ===== -->
+              <Border Classes="card box" Tag="sensors" Width="450" Height="470" Margin="0,0,14,14">
+                <DockPanel>
+                  <Grid Classes="dragbar" DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto"
+                        PointerPressed="OnBoxDragStart" PointerMoved="OnBoxDragMove" PointerReleased="OnBoxDragEnd">
+                    <TextBlock Grid.Column="0" Classes="handle" Text="⠿" Margin="0,0,8,0"
+                               Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="Sensors" Classes="h2" VerticalAlignment="Center"/>
+                    <Button Grid.Column="2" Classes="iconbtn" Content="✕" Click="OnBoxRemove"/>
+                  </Grid>
+                  <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl x:Name="SensorGroupsDash" ItemTemplate="{StaticResource SensorGroupTemplate}"/>
+                  </ScrollViewer>
+                </DockPanel>
+              </Border>
+
+              <!-- ===== RGB Devices (shell; hosts the shared device list — see MountRgbPanels) ===== -->
+              <Border Classes="card box" Tag="devices" Width="210" Height="470" Margin="0,0,14,14">
+                <DockPanel>
+                  <Grid Classes="dragbar" DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto"
+                        PointerPressed="OnBoxDragStart" PointerMoved="OnBoxDragMove" PointerReleased="OnBoxDragEnd">
+                    <TextBlock Grid.Column="0" Classes="handle" Text="⠿" Margin="0,0,8,0"
+                               Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="RGB Devices" Classes="h2" VerticalAlignment="Center"/>
+                    <Button Grid.Column="2" Classes="iconbtn" Content="✕" Click="OnBoxRemove"/>
+                  </Grid>
+                  <ContentControl x:Name="RgbCardDevicesHost"/>
+                </DockPanel>
+              </Border>
+
+              <!-- ===== RGB Control (shell; hosts the shared device-options editor) ===== -->
+              <Border Classes="card box" Tag="control" Width="430" Height="470" Margin="0,0,14,14">
+                <DockPanel>
+                  <Grid Classes="dragbar" DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto"
+                        PointerPressed="OnBoxDragStart" PointerMoved="OnBoxDragMove" PointerReleased="OnBoxDragEnd">
+                    <TextBlock Grid.Column="0" Classes="handle" Text="⠿" Margin="0,0,8,0"
+                               Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="RGB Control" Classes="h2" VerticalAlignment="Center"/>
+                    <Button Grid.Column="2" Classes="iconbtn" Content="✕" Click="OnBoxRemove"/>
+                  </Grid>
+                  <ContentControl x:Name="RgbCardControlHost"/>
+                </DockPanel>
+              </Border>
+
+              <!-- ===== Activity ===== -->
+              <Border Classes="card box" Tag="activity" Width="690" Height="280" Margin="0,0,14,14">
+                <DockPanel>
+                  <Grid Classes="dragbar" DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto,Auto"
+                        PointerPressed="OnBoxDragStart" PointerMoved="OnBoxDragMove" PointerReleased="OnBoxDragEnd">
+                    <TextBlock Grid.Column="0" Classes="handle" Text="⠿" Margin="0,0,8,0"
+                               Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="Activity" Classes="h2" VerticalAlignment="Center"/>
+                    <Button Grid.Column="2" Content="Clear" Classes="ghost" Click="OnClearActivity" Margin="0,0,6,0"/>
+                    <Button Grid.Column="3" Classes="iconbtn" Content="✕" Click="OnBoxRemove"/>
+                  </Grid>
+                  <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl x:Name="ActivityListDash" ItemTemplate="{StaticResource ActivityTemplate}"/>
+                  </ScrollViewer>
+                </DockPanel>
+              </Border>
+
+              <!-- ===== Security / Permissions ===== -->
+              <Border Classes="card box" Tag="security" Width="380" Height="280" Margin="0,0,14,14">
+                <DockPanel>
+                  <Grid Classes="dragbar" DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto,Auto"
+                        PointerPressed="OnBoxDragStart" PointerMoved="OnBoxDragMove" PointerReleased="OnBoxDragEnd">
+                    <TextBlock Grid.Column="0" Classes="handle" Text="⠿" Margin="0,0,8,0"
+                               Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="Security / Permissions" Classes="h2" VerticalAlignment="Center"/>
+                    <Button Grid.Column="2" Content="Details" Classes="ghost" Click="OnNavSecurity" Margin="0,0,6,0"/>
+                    <Button Grid.Column="3" Classes="iconbtn" Content="✕" Click="OnBoxRemove"/>
+                  </Grid>
+                  <StackPanel Spacing="6">
+                    <TextBlock Text="Granted scopes" Classes="muted"/>
+                    <WrapPanel x:Name="GrantedChips"/>
+                    <TextBlock Text="Denied scopes" Classes="muted" Margin="0,6,0,0"/>
+                    <WrapPanel>
+                      <Border Background="{DynamicResource RedSoft}" CornerRadius="5" Padding="8,2" Margin="0,0,6,6">
+                        <TextBlock Text="✕ driver:raw" Classes="mono" FontSize="11" Foreground="{DynamicResource Red}"/>
+                      </Border>
+                      <Border Background="{DynamicResource RedSoft}" CornerRadius="5" Padding="8,2" Margin="0,0,6,6">
+                        <TextBlock Text="✕ admin" Classes="mono" FontSize="11" Foreground="{DynamicResource Red}"/>
+                      </Border>
+                      <Border Background="{DynamicResource RedSoft}" CornerRadius="5" Padding="8,2" Margin="0,0,6,6">
+                        <TextBlock Text="✕ kernel-memory" Classes="mono" FontSize="11" Foreground="{DynamicResource Red}"/>
+                      </Border>
+                    </WrapPanel>
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+
+              </WrapPanel>
+            </Panel>
+        </Grid>
+
+        <!-- ============ SENSORS PAGE ============ -->
+        <Grid x:Name="PageSensors" IsVisible="False" Margin="16">
+          <Border Classes="card">
+            <Grid RowDefinitions="Auto,*">
+              <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,12">
+                <TextBlock Grid.Column="0" Text="Sensors" Classes="h1" VerticalAlignment="Center"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="16,0"
+                            VerticalAlignment="Center">
+                  <ToggleButton x:Name="SensorPollToggle" Content="Live poll" Classes="ghost"
+                                Click="OnSensorPollToggle" Padding="9,4"/>
+                  <NumericUpDown x:Name="PollInterval" Minimum="250" Maximum="10000" Increment="250"
+                                 Value="1000" Width="124"/>
+                  <Button Content="Read once" Classes="ghost" Click="OnSensorReadOnce"/>
+                  <TextBlock x:Name="SensorCount" Classes="muted" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                  <TextBlock Text="Show origins" Classes="muted" VerticalAlignment="Center"/>
+                  <ToggleSwitch x:Name="OriginsTogglePage" OnContent="" OffContent="" MinWidth="0"
+                                Click="OnToggleOrigins"/>
+                </StackPanel>
+              </Grid>
+              <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl x:Name="SensorGroupsPage" ItemTemplate="{StaticResource SensorGroupTemplate}"/>
+              </ScrollViewer>
+            </Grid>
+          </Border>
+        </Grid>
+
+        <!-- ============ RGB PAGE ============ -->
+        <!-- Dedicated RGB view. The device list + options editor are SHARED single controls
+             (RgbDevicesBody / RgbControlBody) reparented between here and the dashboard cards by
+             MountRgbPanels, so both places use one set of controls (no duplicate logic). -->
+        <Grid x:Name="PageRgb" IsVisible="False" Margin="16" ColumnDefinitions="280,*">
+
+          <!-- devices -->
+          <Border Grid.Column="0" Classes="card" Margin="0,0,14,0">
+            <Grid RowDefinitions="Auto,*">
+              <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
+                <TextBlock Grid.Column="0" Text="RGB Devices" Classes="h1" VerticalAlignment="Center"/>
+                <Button Grid.Column="1" Content="Refresh" Classes="ghost" Click="OnRgbRefresh"/>
+              </Grid>
+              <ContentControl Grid.Row="1" x:Name="RgbPageDevicesHost">
+                <ScrollViewer x:Name="RgbDevicesBody" HorizontalScrollBarVisibility="Disabled">
+                  <ListBox x:Name="RgbDeviceList" Classes="devices" SelectionChanged="OnRgbDeviceSelected"
+                           ItemTemplate="{StaticResource RgbDeviceTemplate}"/>
+                </ScrollViewer>
+              </ContentControl>
             </Grid>
           </Border>
 
-          <Border Grid.Row="2" BorderBrush="#333" BorderThickness="1,0,1,1" CornerRadius="0,0,4,4">
-            <ScrollViewer>
-              <ItemsControl x:Name="SensorList">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="local:SensorRow">
-                    <Grid ColumnDefinitions="260,220,90,60,*" Margin="10,5">
-                      <TextBlock Grid.Column="0" Text="{Binding DisplayName}" FontWeight="SemiBold"/>
-                      <TextBlock Grid.Column="1" Text="{Binding Id}" Foreground="#888888" FontFamily="Cascadia Code,Consolas,monospace"/>
-                      <TextBlock Grid.Column="2" Text="{Binding ValueText}" HorizontalAlignment="Right" FontWeight="SemiBold"/>
-                      <TextBlock Grid.Column="3" Text="{Binding Unit}" Margin="8,0,0,0" Foreground="#AAAAAA"/>
-                    </Grid>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-            </ScrollViewer>
-          </Border>
-        </Grid>
-      </TabItem>
-
-      <!-- RGB tab -->
-      <TabItem Header="RGB">
-        <Grid ColumnDefinitions="300,*" Margin="0,8,0,0">
-
-          <!-- Device list + global controls -->
-          <Grid Grid.Column="0" RowDefinitions="Auto,Auto,*">
-            <StackPanel Grid.Row="0" Spacing="6" Margin="0,0,0,8">
-              <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button x:Name="RgbRefresh" Content="Refresh" Click="OnRgbRefresh"/>
-                <Button x:Name="StopAllButton" Content="Stop all" Click="OnStopAll"/>
-              </StackPanel>
-              <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" >
-                <TextBlock Grid.Row="0" Grid.Column="0" Text="FPS" VerticalAlignment="Center" Margin="0,0,8,4"/>
-                <NumericUpDown Grid.Row="0" Grid.Column="1" x:Name="FpsBox" Minimum="1" Maximum="60" Increment="1"
-                               Value="20" FormatString="0" Margin="0,0,0,4" ValueChanged="OnFpsChanged"/>
-                <TextBlock Grid.Row="1" Grid.Column="0" Text="Sensor ms" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <NumericUpDown Grid.Row="1" Grid.Column="1" x:Name="RefreshMsBox" Minimum="100" Maximum="10000"
-                               Increment="50" Value="750" FormatString="0" ValueChanged="OnRefreshMsChanged"/>
-              </Grid>
-            </StackPanel>
-            <TextBlock Grid.Row="1" x:Name="EngineStatus" Foreground="#888" FontSize="11" Margin="0,0,0,6"
-                       Text="Connect to drive devices."/>
-            <Border Grid.Row="2" BorderBrush="#333" BorderThickness="1" CornerRadius="4">
-              <ListBox x:Name="RgbDeviceList" SelectionChanged="OnRgbDeviceSelected"
-                       ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                <ListBox.ItemTemplate>
-                  <DataTemplate x:DataType="local:RgbRow">
-                    <Grid ColumnDefinitions="Auto,*">
-                      <Ellipse Grid.Column="0" Width="9" Height="9"
-                               VerticalAlignment="Top" Margin="0,5,8,0" Fill="{Binding StatusBrush}"/>
-                      <StackPanel Grid.Column="1" Margin="0,2">
-                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                        <TextBlock Text="{Binding Summary}" Foreground="#999" FontSize="11" TextWrapping="Wrap"/>
+          <!-- control -->
+          <Border Grid.Column="1" Classes="card">
+            <ContentControl x:Name="RgbPageControlHost">
+              <DockPanel x:Name="RgbControlBody">
+                <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+                  <StackPanel Grid.Column="0">
+                    <TextBlock x:Name="RgbSelected" Text="No device selected" Classes="h2"/>
+                    <TextBlock x:Name="RgbSelectedSub" Text="Select a device from the list" Classes="muted"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <TextBlock Text="Live control" Classes="sub" VerticalAlignment="Center"/>
+                    <ToggleSwitch x:Name="DriveCheck" OnContent="" OffContent="" MinWidth="0" Click="OnDriveToggled"/>
+                  </StackPanel>
+                </Grid>
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                  <StackPanel x:Name="EditorPanel" Spacing="12" IsVisible="False">
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10" RowDefinitions="Auto,Auto" RowSpacing="8">
+                      <TextBlock Grid.Row="0" Grid.Column="0" Text="Effect" Classes="sub" VerticalAlignment="Center"/>
+                      <ComboBox Grid.Row="0" Grid.Column="1" x:Name="EffectCombo" HorizontalAlignment="Stretch"
+                                SelectionChanged="OnEffectChanged"/>
+                      <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                        <Button x:Name="ApplyOnce" Content="Apply to selected" Classes="primary" Click="OnApplyOnce"/>
+                        <Button Content="Apply to all" Classes="ghost" Click="OnDriveAll"/>
                       </StackPanel>
                     </Grid>
-                  </DataTemplate>
-                </ListBox.ItemTemplate>
-              </ListBox>
-            </Border>
-          </Grid>
 
-          <!-- Effect editor for the selected device (right padding clears the scrollbar) -->
-          <ScrollViewer Grid.Column="1" Margin="16,0,0,0" Padding="0,0,18,0"
-                        HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-            <StackPanel x:Name="EditorPanel" Spacing="12" IsVisible="False">
-              <TextBlock x:Name="RgbSelected" FontSize="16" FontWeight="SemiBold"/>
+                    <TextBlock Text="Live preview" Classes="muted"/>
+                    <Border Background="{DynamicResource SurfaceInset}" BorderBrush="{DynamicResource Border0}"
+                            BorderThickness="1" CornerRadius="8" Padding="8" MinHeight="40">
+                      <ItemsControl x:Name="LedPreview">
+                        <ItemsControl.ItemsPanel>
+                          <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="local:LedCell">
+                            <Border Width="15" Height="15" Margin="2" CornerRadius="3"
+                                    Background="{Binding Brush}" BorderBrush="#10000000" BorderThickness="1"
+                                    Tag="{Binding Index}" PointerPressed="OnLedPainted"/>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </Border>
 
-              <StackPanel Orientation="Horizontal" Spacing="12">
-                <TextBlock Text="Effect:" VerticalAlignment="Center"/>
-                <ComboBox x:Name="EffectCombo" Width="190" SelectionChanged="OnEffectChanged"/>
-                <CheckBox x:Name="DriveCheck" Content="Drive this device" Click="OnDriveToggled"/>
-                <Button x:Name="ApplyOnce" Content="Apply once" Click="OnApplyOnce"/>
-                <Button x:Name="DriveAllButton" Content="Apply to all devices" Click="OnDriveAll"/>
-              </StackPanel>
+                    <StackPanel x:Name="ManualTools" Orientation="Horizontal" Spacing="10" IsVisible="False">
+                      <Button Content="Fill with brush" Classes="ghost" Click="OnManualFill"/>
+                      <Button Content="Clear" Classes="ghost" Click="OnManualClear"/>
+                      <TextBlock Text="click LEDs above to paint" Classes="muted" VerticalAlignment="Center"/>
+                    </StackPanel>
 
-              <TextBlock Text="Live preview" Foreground="#AAA" FontSize="11"/>
-              <Border BorderBrush="#333" BorderThickness="1" CornerRadius="4" Padding="6" MinHeight="36">
-                <ItemsControl x:Name="LedPreview">
-                  <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
-                  </ItemsControl.ItemsPanel>
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="local:LedCell">
-                      <Border Width="16" Height="16" Margin="2" CornerRadius="2"
-                              Background="{Binding Brush}" BorderBrush="#222" BorderThickness="1"
-                              Tag="{Binding Index}" PointerPressed="OnLedPainted"/>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-              </Border>
-
-              <StackPanel x:Name="ManualTools" Orientation="Horizontal" Spacing="10" IsVisible="False">
-                <Button Content="Fill with brush" Click="OnManualFill"/>
-                <Button Content="Clear" Click="OnManualClear"/>
-                <TextBlock Text="click LEDs above to paint" Foreground="#888" VerticalAlignment="Center"/>
-              </StackPanel>
-
-              <TextBlock Text="Parameters" Foreground="#AAA" FontSize="11"/>
-              <StackPanel x:Name="ParamPanel" Spacing="8"/>
-            </StackPanel>
-          </ScrollViewer>
-        </Grid>
-      </TabItem>
-
-      <!-- Diagnostics tab -->
-      <TabItem Header="Diagnostics">
-        <Grid RowDefinitions="Auto,*" Margin="0,8,0,0">
-          <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10" Margin="0,0,0,8">
-            <Button x:Name="PingButton" Content="Ping broker" Click="OnPing"/>
-            <Button x:Name="ClearLog" Content="Clear log" Click="OnClearLog"/>
-          </StackPanel>
-          <Border Grid.Row="1" BorderBrush="#333" BorderThickness="1" CornerRadius="4">
-            <ScrollViewer>
-              <SelectableTextBlock x:Name="LogBox" Margin="10" FontFamily="Cascadia Code,Consolas,monospace"
-                                   FontSize="12" Text=""/>
-            </ScrollViewer>
+                    <TextBlock Text="Parameters" Classes="muted"/>
+                    <StackPanel x:Name="ParamPanel" Spacing="10"/>
+                  </StackPanel>
+                </ScrollViewer>
+              </DockPanel>
+            </ContentControl>
           </Border>
         </Grid>
-      </TabItem>
-    </TabControl>
 
-    <!-- ===== Footer ===== -->
-    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,8,0,0">
-      <TextBlock Grid.Column="0" x:Name="Footer" Margin="2,0,0,0" Foreground="#888" FontSize="11"
-                 VerticalAlignment="Center"
-                 Text="Register Broker reference console — non-admin client over the broker pipes."/>
-      <TextBlock Grid.Column="1" x:Name="FooterNote" Margin="16,0,2,0" Foreground="#888" FontSize="11"
-                 VerticalAlignment="Center" HorizontalAlignment="Right" TextAlignment="Right"
-                 Text="This is a test GUI interface. The core project is the framework providing the data used here."/>
+        <!-- ============ ACTIVITY PAGE ============ -->
+        <Grid x:Name="PageActivity" IsVisible="False" Margin="16">
+          <Border Classes="card">
+            <Grid RowDefinitions="Auto,*,Auto">
+              <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
+                <TextBlock Grid.Column="0" Text="Activity Feed" Classes="h1" VerticalAlignment="Center"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                  <Button Content="Ping broker" Classes="ghost" Click="OnPing"/>
+                  <Button Content="Clear" Classes="ghost" Click="OnClearActivity"/>
+                </StackPanel>
+              </Grid>
+              <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl x:Name="ActivityListPage" ItemTemplate="{StaticResource ActivityTemplate}"/>
+              </ScrollViewer>
+              <Expander Grid.Row="2" Header="Raw diagnostics log" Margin="0,8,0,0">
+                <ScrollViewer MaxHeight="160">
+                  <SelectableTextBlock x:Name="LogBox" Classes="mono" FontSize="12" Margin="4"
+                                       Foreground="{DynamicResource TextSecondary}"/>
+                </ScrollViewer>
+              </Expander>
+            </Grid>
+          </Border>
+        </Grid>
+
+        <!-- ============ SECURITY PAGE ============ -->
+        <ScrollViewer x:Name="PageSecurity" IsVisible="False" Padding="16" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel Spacing="14">
+            <TextBlock Text="Security &amp; Permissions" Classes="h1"/>
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="14">
+
+              <Border Grid.Column="0" Classes="card">
+                <StackPanel Spacing="10">
+                  <TextBlock Text="Scopes" Classes="h2"/>
+                  <TextBlock Text="The broker grants only the scopes this client requested and is authorized for. Everything else is refused in-kernel." Classes="sub" TextWrapping="Wrap"/>
+                  <TextBlock Text="Granted" Classes="muted" Margin="0,6,0,0"/>
+                  <WrapPanel x:Name="GrantedChipsPage"/>
+                  <TextBlock Text="Denied" Classes="muted" Margin="0,6,0,0"/>
+                  <WrapPanel>
+                    <Border Background="{DynamicResource RedSoft}" CornerRadius="6" Padding="10,4" Margin="0,0,8,8">
+                      <TextBlock Text="✕ driver:raw" Classes="mono" FontSize="12" Foreground="{DynamicResource Red}"/>
+                    </Border>
+                    <Border Background="{DynamicResource RedSoft}" CornerRadius="6" Padding="10,4" Margin="0,0,8,8">
+                      <TextBlock Text="✕ admin" Classes="mono" FontSize="12" Foreground="{DynamicResource Red}"/>
+                    </Border>
+                    <Border Background="{DynamicResource RedSoft}" CornerRadius="6" Padding="10,4" Margin="0,0,8,8">
+                      <TextBlock Text="✕ kernel-memory" Classes="mono" FontSize="12" Foreground="{DynamicResource Red}"/>
+                    </Border>
+                    <Border Background="{DynamicResource RedSoft}" CornerRadius="6" Padding="10,4" Margin="0,0,8,8">
+                      <TextBlock Text="✕ physical-memory" Classes="mono" FontSize="12" Foreground="{DynamicResource Red}"/>
+                    </Border>
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
+
+              <Border Grid.Column="1" Classes="card">
+                <StackPanel Spacing="10">
+                  <TextBlock Text="Client Identity" Classes="h2"/>
+                  <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Client" Classes="sub"/>
+                    <TextBlock Grid.Row="0" Grid.Column="1" Text="Register Broker Reference Console" Foreground="{DynamicResource TextPrimary}"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="User" Classes="sub"/>
+                    <TextBlock Grid.Row="1" Grid.Column="1" x:Name="SecUser" Text="—" Foreground="{DynamicResource TextPrimary}"/>
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Integrity" Classes="sub"/>
+                    <TextBlock Grid.Row="2" Grid.Column="1" x:Name="SecIntegrity" Text="—" Foreground="{DynamicResource TextPrimary}"/>
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Signed" Classes="sub"/>
+                    <TextBlock Grid.Row="3" Grid.Column="1" x:Name="SecSigned" Text="—" Foreground="{DynamicResource TextPrimary}"/>
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Session" Classes="sub"/>
+                    <TextBlock Grid.Row="4" Grid.Column="1" x:Name="SecSession" Text="Non-admin" Foreground="{DynamicResource TextPrimary}"/>
+                  </Grid>
+                  <Border Background="{DynamicResource GreenSoft}" BorderBrush="{DynamicResource Green}"
+                          BorderThickness="1" CornerRadius="10" Padding="12" Margin="0,6,0,0">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                      <TextBlock Text="🛡" FontSize="22" Foreground="{DynamicResource Green}" VerticalAlignment="Center"/>
+                      <TextBlock Text="Hardware access is brokered, scoped, and audited — no admin or kernel rights are granted to this client." Classes="sub" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                    </StackPanel>
+                  </Border>
+                </StackPanel>
+              </Border>
+            </Grid>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- ============ SETTINGS PAGE ============ -->
+        <ScrollViewer x:Name="PageSettings" IsVisible="False" Padding="16" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel Spacing="14" MaxWidth="640" HorizontalAlignment="Left">
+            <TextBlock Text="Settings" Classes="h1"/>
+
+            <Border Classes="card">
+              <StackPanel Spacing="12">
+                <TextBlock Text="Connection" Classes="h2"/>
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                  <Button x:Name="ConnectButton" Content="Connect" Classes="primary" Click="OnConnectClick"/>
+                  <Button Content="Ping broker" Classes="ghost" Click="OnPing"/>
+                  <TextBlock x:Name="EngineStatus" Text="Connect to drive devices." Classes="sub"
+                             VerticalAlignment="Center"/>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
+            <Border Classes="card">
+              <StackPanel Spacing="12">
+                <TextBlock Text="Render &amp; polling" Classes="h2"/>
+                <Grid ColumnDefinitions="180,160" RowDefinitions="Auto,Auto,Auto" RowSpacing="10">
+                  <TextBlock Grid.Row="0" Grid.Column="0" Text="RGB frame rate (FPS)" Classes="sub" VerticalAlignment="Center"/>
+                  <NumericUpDown Grid.Row="0" Grid.Column="1" x:Name="FpsBox" Minimum="1" Maximum="60" Increment="1"
+                                 Value="20" FormatString="0" ValueChanged="OnFpsChanged"/>
+                  <TextBlock Grid.Row="1" Grid.Column="0" Text="Sensor refresh (ms)" Classes="sub" VerticalAlignment="Center"/>
+                  <NumericUpDown Grid.Row="1" Grid.Column="1" x:Name="RefreshMsBox" Minimum="100" Maximum="10000"
+                                 Increment="50" Value="750" FormatString="0" ValueChanged="OnRefreshMsChanged"/>
+                  <TextBlock Grid.Row="2" Grid.Column="0" Text="Minimize to" Classes="sub" VerticalAlignment="Center"/>
+                  <ComboBox Grid.Row="2" Grid.Column="1" x:Name="MinimizeTargetCombo" HorizontalAlignment="Stretch"
+                            SelectionChanged="OnMinimizeTargetChanged">
+                    <ComboBoxItem>Taskbar</ComboBoxItem>
+                    <ComboBoxItem>Tray</ComboBoxItem>
+                  </ComboBox>
+                </Grid>
+              </StackPanel>
+            </Border>
+
+            <Border Classes="card">
+              <StackPanel Spacing="8">
+                <TextBlock Text="RGB engine" Classes="h2"/>
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                  <Button Content="Refresh devices" Classes="ghost" Click="OnRgbRefresh"/>
+                  <Button Content="Stop all devices" Classes="ghost" Click="OnStopAll"/>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
+            <Border Classes="card">
+              <StackPanel Spacing="8">
+                <TextBlock Text="Dashboard layout" Classes="h2"/>
+                <TextBlock Text="Drag a box by its title bar to reorder it. Use the ✕ on a box to remove it, and “Add box” on the Dashboard to bring it back." Classes="sub" TextWrapping="Wrap"/>
+                <Button Content="Reset dashboard layout" Classes="ghost" Click="OnResetLayout" HorizontalAlignment="Left"/>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </Panel>
     </Grid>
+
+    <!-- ================= ROW 3: footer ================= -->
+    <!-- ================= ROW 2: consolidated status bar (was the top bar + footer, merged) ========= -->
+    <Border Grid.Row="2" Background="{DynamicResource ChromeBg}" BorderBrush="{DynamicResource Border0}"
+            BorderThickness="0,1,0,0" Padding="16,6">
+      <StackPanel Orientation="Horizontal" Spacing="0" VerticalAlignment="Center">
+        <Ellipse x:Name="ConnDot" Width="9" Height="9" Fill="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+        <TextBlock x:Name="ConnText" Text="Disconnected" Margin="8,0,16,0" FontWeight="SemiBold"
+                   Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"/>
+
+        <Border x:Name="ChipSensors" Background="{DynamicResource SurfaceAlt}" BorderBrush="{DynamicResource Border0}"
+                BorderThickness="1" CornerRadius="5" Padding="8,2" Margin="0,0,6,0" Opacity="0.4">
+          <TextBlock Text="sensors:read" Classes="mono" FontSize="11" Foreground="{DynamicResource TextSecondary}"/>
+        </Border>
+        <Border x:Name="ChipRgb" Background="{DynamicResource SurfaceAlt}" BorderBrush="{DynamicResource Border0}"
+                BorderThickness="1" CornerRadius="5" Padding="8,2" Margin="0,0,16,0" Opacity="0.4">
+          <TextBlock Text="rgb:write" Classes="mono" FontSize="11" Foreground="{DynamicResource TextSecondary}"/>
+        </Border>
+
+        <TextBlock Text="Session:" Classes="muted" VerticalAlignment="Center"/>
+        <TextBlock x:Name="SessionText" Text="—" Margin="5,0,16,0" FontSize="12"
+                   Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center"/>
+
+        <TextBlock Text="Broker:" Classes="muted" VerticalAlignment="Center"/>
+        <TextBlock x:Name="BrokerText" Text="Offline" Margin="5,0,16,0" FontSize="12" FontWeight="Medium"
+                   Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"/>
+
+        <TextBlock Text="Latency:" Classes="muted" VerticalAlignment="Center"/>
+        <TextBlock x:Name="LatencyText" Text="— ms" Margin="5,0,16,0" FontSize="12"
+                   Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center"/>
+
+        <TextBlock Text="Poll:" Classes="muted" VerticalAlignment="Center"/>
+        <TextBlock x:Name="PollText" Text="— ms" Margin="5,0,16,0" FontSize="12"
+                   Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center"/>
+
+        <TextBlock Text="Devices:" Classes="muted" VerticalAlignment="Center"/>
+        <TextBlock x:Name="DevicesText" Text="0" Margin="5,0,16,0" FontSize="12"
+                   Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center"/>
+
+        <TextBlock Text="Sensors:" Classes="muted" VerticalAlignment="Center"/>
+        <TextBlock x:Name="SensorsCountText" Text="0" Margin="5,0,16,0" FontSize="12"
+                   Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center"/>
+
+        <TextBlock x:Name="FootThroughput" Text="Throughput: idle" Classes="muted" Margin="0,0,16,0"
+                   VerticalAlignment="Center"/>
+        <TextBlock x:Name="FootUptime" Text="Uptime: 00:00:00" Classes="muted" VerticalAlignment="Center"/>
+      </StackPanel>
+    </Border>
+  </Grid>
   </Grid>
 </Window>

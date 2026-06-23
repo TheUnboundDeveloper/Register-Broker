@@ -6,7 +6,4 @@ driving the framework as a non-admin client over the broker pipes.
 
 | File | Shows |
 |---|---|
-| `reference-console-rgb-aurora.png` | RGB tab — a sensor-reactive (Temperature) effect on the MSI ARGB header, with DRAM and two Razer devices in the fleet |
-| `reference-console-rgb-effects.png` | RGB tab — effect picker (Static → Audio Spectrum, incl. Twinkle + Aurora) |
-| `reference-console-sensors.png` | Sensors tab — live `sensor.readall` (43 sensors), read non-admin |
-| `reference-console-diagnostics.png` | Diagnostics tab — granted scopes + raw protocol log |
+| `reference-console-dashboard.png` | Dashboard — live `sensor.readall` (43 sensors) alongside the RGB fleet (DRAM, MSI ARGB header, two Razer devices), driven non-admin over the broker pipes |

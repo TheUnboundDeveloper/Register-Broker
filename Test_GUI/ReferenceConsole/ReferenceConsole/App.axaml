@@ -1,10 +1,266 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="ReferenceConsole.App"
-             RequestedThemeVariant="Default">
-             <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
+             RequestedThemeVariant="Dark">
 
-    <Application.Styles>
-        <FluentTheme />
-    </Application.Styles>
+  <Application.Resources>
+    <ResourceDictionary>
+
+      <!-- Make every Fluent accent (sliders, toggles, combo, selection) our purple
+           instead of the machine's system accent (which was rendering red). -->
+      <Color x:Key="SystemAccentColor">#7C5CFF</Color>
+      <Color x:Key="SystemAccentColorDark1">#6E4FE6</Color>
+      <Color x:Key="SystemAccentColorDark2">#5E42C9</Color>
+      <Color x:Key="SystemAccentColorDark3">#4E36A8</Color>
+      <Color x:Key="SystemAccentColorLight1">#8E72FF</Color>
+      <Color x:Key="SystemAccentColorLight2">#A78BFF</Color>
+      <Color x:Key="SystemAccentColorLight3">#C0ABFF</Color>
+
+      <ResourceDictionary.ThemeDictionaries>
+
+        <!-- ===================== DARK ===================== -->
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="AppBg"        Color="#080A12"/>
+          <SolidColorBrush x:Key="ChromeBg"     Color="#0C0E1A"/>
+          <SolidColorBrush x:Key="Surface"      Color="#121424"/>
+          <SolidColorBrush x:Key="SurfaceAlt"   Color="#171A2C"/>
+          <SolidColorBrush x:Key="SurfaceInset" Color="#0E1020"/>
+          <SolidColorBrush x:Key="Border0"      Color="#262B45"/>
+          <SolidColorBrush x:Key="Border1"      Color="#323858"/>
+          <SolidColorBrush x:Key="TextPrimary"   Color="#E8EBF7"/>
+          <SolidColorBrush x:Key="TextSecondary" Color="#9CA4C4"/>
+          <SolidColorBrush x:Key="TextMuted"     Color="#646C8C"/>
+          <SolidColorBrush x:Key="Accent"      Color="#7C5CFF"/>
+          <SolidColorBrush x:Key="AccentSoft"  Color="#2A2350"/>
+          <SolidColorBrush x:Key="Cyan"        Color="#22D3EE"/>
+          <SolidColorBrush x:Key="Green"       Color="#34D399"/>
+          <SolidColorBrush x:Key="GreenSoft"   Color="#16321F"/>
+          <SolidColorBrush x:Key="Orange"      Color="#F0883E"/>
+          <SolidColorBrush x:Key="Red"         Color="#F05252"/>
+          <SolidColorBrush x:Key="RedSoft"     Color="#33161A"/>
+          <SolidColorBrush x:Key="Blue"        Color="#5B8DEF"/>
+        </ResourceDictionary>
+
+        <!-- ===================== LIGHT ===================== -->
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="AppBg"        Color="#EEF1F8"/>
+          <SolidColorBrush x:Key="ChromeBg"     Color="#FFFFFF"/>
+          <SolidColorBrush x:Key="Surface"      Color="#FFFFFF"/>
+          <SolidColorBrush x:Key="SurfaceAlt"   Color="#F1F3FA"/>
+          <SolidColorBrush x:Key="SurfaceInset" Color="#EAEDF6"/>
+          <SolidColorBrush x:Key="Border0"      Color="#DCE1EE"/>
+          <SolidColorBrush x:Key="Border1"      Color="#C4CBE0"/>
+          <SolidColorBrush x:Key="TextPrimary"   Color="#1A2030"/>
+          <SolidColorBrush x:Key="TextSecondary" Color="#4C5673"/>
+          <SolidColorBrush x:Key="TextMuted"     Color="#8990A8"/>
+          <SolidColorBrush x:Key="Accent"      Color="#7C5CFF"/>
+          <SolidColorBrush x:Key="AccentSoft"  Color="#ECE7FF"/>
+          <SolidColorBrush x:Key="Cyan"        Color="#0E96B0"/>
+          <SolidColorBrush x:Key="Green"       Color="#1E9D5C"/>
+          <SolidColorBrush x:Key="GreenSoft"   Color="#DDF4E6"/>
+          <SolidColorBrush x:Key="Orange"      Color="#D9702A"/>
+          <SolidColorBrush x:Key="Red"         Color="#D8434A"/>
+          <SolidColorBrush x:Key="RedSoft"     Color="#FAE2E3"/>
+          <SolidColorBrush x:Key="Blue"        Color="#3A6FD8"/>
+        </ResourceDictionary>
+
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme />
+
+    <!-- ===== Typography helpers ===== -->
+    <Style Selector="TextBlock.h1">
+      <Setter Property="FontSize" Value="16"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+    </Style>
+    <Style Selector="TextBlock.h2">
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+    </Style>
+    <Style Selector="TextBlock.sub">
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+    </Style>
+    <Style Selector="TextBlock.muted">
+      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
+    </Style>
+    <Style Selector="TextBlock.mono">
+      <Setter Property="FontFamily" Value="Cascadia Code,Consolas,monospace"/>
+    </Style>
+
+    <!-- ===== Card / tile ===== -->
+    <Style Selector="Border.card">
+      <Setter Property="Background" Value="{DynamicResource Surface}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource Border0}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="12"/>
+      <Setter Property="Padding" Value="16"/>
+      <Setter Property="BoxShadow" Value="0 6 20 0 #33000000"/>
+    </Style>
+    <Style Selector="Border.tile">
+      <Setter Property="Background" Value="{DynamicResource SurfaceAlt}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource Border0}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="10"/>
+      <Setter Property="Padding" Value="14"/>
+    </Style>
+
+    <!-- selected (via marquee multi-select) -->
+    <Style Selector="Border.box.selected">
+      <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+      <Setter Property="BorderThickness" Value="2"/>
+    </Style>
+
+    <!-- box tools (drag handle + remove) reveal on hover -->
+    <Style Selector="Border.box StackPanel.boxtools">
+      <Setter Property="Opacity" Value="0"/>
+    </Style>
+    <Style Selector="Border.box:pointerover StackPanel.boxtools">
+      <Setter Property="Opacity" Value="1"/>
+    </Style>
+
+    <!-- ===== Nav buttons ===== -->
+    <Style Selector="Button.nav">
+      <Setter Property="HorizontalAlignment" Value="Stretch"/>
+      <Setter Property="HorizontalContentAlignment" Value="Left"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="CornerRadius" Value="9"/>
+      <Setter Property="Padding" Value="12,9"/>
+      <Setter Property="FontSize" Value="17"/>
+      <Setter Property="FontWeight" Value="Medium"/>
+    </Style>
+    <Style Selector="Button.nav:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource SurfaceAlt}"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+    </Style>
+    <Style Selector="Button.nav.active">
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+    </Style>
+    <Style Selector="Button.nav.active /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+    </Style>
+
+    <!-- ===== Chrome / window buttons ===== -->
+    <Style Selector="Button.chrome">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="CornerRadius" Value="6"/>
+      <Setter Property="Width" Value="40"/>
+      <Setter Property="Height" Value="30"/>
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="HorizontalContentAlignment" Value="Center"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="FontSize" Value="14"/>
+    </Style>
+    <Style Selector="Button.chrome:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource SurfaceAlt}"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+    </Style>
+    <Style Selector="Button.close:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Red}"/>
+      <Setter Property="Foreground" Value="White"/>
+    </Style>
+
+    <!-- ===== Primary / ghost buttons ===== -->
+    <Style Selector="Button.primary">
+      <Setter Property="Background" Value="{DynamicResource Accent}"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="14,7"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#8E72FF"/>
+    </Style>
+    <Style Selector="Button.ghost">
+      <Setter Property="Background" Value="{DynamicResource SurfaceAlt}"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource Border0}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="12,6"/>
+    </Style>
+    <Style Selector="Button.ghost:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Border0}"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+    </Style>
+
+    <!-- small icon button used for box remove -->
+    <Style Selector="Button.iconbtn">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="CornerRadius" Value="5"/>
+      <Setter Property="Width" Value="22"/>
+      <Setter Property="Height" Value="22"/>
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="HorizontalContentAlignment" Value="Center"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style Selector="Button.iconbtn:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Red}"/>
+      <Setter Property="Foreground" Value="White"/>
+    </Style>
+
+    <!-- ===== Sliders accented ===== -->
+    <Style Selector="Slider">
+      <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
+      <Setter Property="MinHeight" Value="20"/>
+    </Style>
+
+    <!-- ===== Group header inside the sensor panel ===== -->
+    <Style Selector="TextBlock.group">
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="{DynamicResource Cyan}"/>
+    </Style>
+
+    <!-- sensor value state colours (legible default; accent for hot/active) -->
+    <Style Selector="TextBlock.hot">
+      <Setter Property="Foreground" Value="{DynamicResource Orange}"/>
+    </Style>
+    <Style Selector="TextBlock.active">
+      <Setter Property="Foreground" Value="{DynamicResource Green}"/>
+    </Style>
+
+    <!-- box resize grip -->
+    <Style Selector="Border.resizegrip">
+      <Setter Property="Width" Value="22"/>
+      <Setter Property="Height" Value="22"/>
+      <Setter Property="HorizontalAlignment" Value="Right"/>
+      <Setter Property="VerticalAlignment" Value="Bottom"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Cursor" Value="BottomRightCorner"/>
+    </Style>
+    <Style Selector="Border.resizegrip:pointerover">
+      <Setter Property="Background" Value="#22FFFFFF"/>
+    </Style>
+
+    <!-- segmented layout-mode toggle -->
+    <Style Selector="Button.seg">
+      <Setter Property="Background" Value="{DynamicResource SurfaceAlt}"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource Border0}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="12,6"/>
+    </Style>
+    <Style Selector="Button.seg.on">
+      <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+    </Style>
+  </Application.Styles>
 </Application>

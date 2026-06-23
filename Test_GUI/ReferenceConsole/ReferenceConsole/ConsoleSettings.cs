@@ -32,6 +32,18 @@ public sealed class ConsoleSettings
     /// <summary>When true, minimizing hides the window to a system-tray icon instead of the taskbar.</summary>
     public bool MinimizeToTray { get; set; }
 
+    /// <summary>Dashboard box order (by box id) and the ids the user has removed from the dashboard.</summary>
+    public List<string>? DashOrder { get; set; }
+    public List<string>? DashHidden { get; set; }
+
+    /// <summary>Sensor ids the user has added as standalone metric cards ("Add box" → a sensor).</summary>
+    public List<string> DashSensorBoxes { get; set; } = new();
+
+    /// <summary>Per-box size [w,h] (-1 = auto), free-placement positions [x,y], and the layout mode.</summary>
+    public Dictionary<string, double[]>? DashSizes { get; set; }
+    public Dictionary<string, double[]>? DashFree { get; set; }
+    public string? DashLayoutMode { get; set; }
+
     /// <summary>Per-device effect configuration, keyed by the broker's device id.</summary>
     public Dictionary<string, DeviceSettings> Devices { get; set; } = new();
 

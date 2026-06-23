@@ -10,12 +10,12 @@ over a local pipe. Clients name a *logical register* (`smu.cpu.temp`, `ram0`) �
 **never an address** — and cannot scan, probe, or write outside the broker's baked,
 kernel-enforced map.
 
-![Register Broker Reference Console — a sensor-reactive effect driving DRAM, an MSI ARGB header, and two Razer devices at once, as a non-admin client](docs/images/reference-console-rgb-aurora.png)
+![Register Broker Reference Console — a non-admin dashboard reading 43 live sensors and driving DRAM, an MSI ARGB header, and two Razer devices at once through the broker](docs/images/reference-console-dashboard.png)
 
 > The first-party **[Reference Console](docs/REFERENCE-CONSOLE.md)** above is an ordinary,
-> non-admin desktop app — no elevation, no kernel driver of its own — driving RAM, a
-> motherboard ARGB header, and Razer peripherals together through the broker. That's the whole
-> thesis in one window.
+> non-admin desktop app — no elevation, no kernel driver of its own — reading the full 43-sensor
+> catalog live while driving RAM, a motherboard ARGB header, and Razer peripherals together
+> through the broker. That's the whole thesis in one window.
 
 ```
  non-admin clients (any app speaking the pipe protocol)
@@ -123,10 +123,6 @@ what any third-party consumer could do.
   or driver change** — proving the broker stays a pure, auditable transport while consumers
   do the rich work.
 - **Diagnostics tab** — granted scopes, ping/latency, raw protocol log.
-
-| Sensors | Effects | Diagnostics |
-|---|---|---|
-| ![Sensors tab — 43 sensors read live, non-admin](docs/images/reference-console-sensors.png) | ![RGB tab — the client-side effect picker](docs/images/reference-console-rgb-effects.png) | ![Diagnostics tab — scopes and protocol log](docs/images/reference-console-diagnostics.png) |
 
 Stack: **.NET 10 + Avalonia 12** (the console is a separate build). Full walkthrough,
 requirements, and build/run steps:
