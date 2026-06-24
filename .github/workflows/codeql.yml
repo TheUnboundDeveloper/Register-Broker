@@ -49,3 +49,29 @@ jobs:
         uses: github/codeql-action/analyze@v4
         with:
           category: /language:csharp
+
+  # Scan the GitHub Actions workflow files themselves (the `actions` language). This is what
+  # catches things like missing GITHUB_TOKEN permissions. It needs no build — CodeQL reads the
+  # YAML directly — so it runs on a cheap Linux runner. Without this, workflow-YAML alerts have
+  # no analysis re-evaluating them (the C# job above only covers `csharp`).
+  analyze-actions:
+    name: Analyze Actions workflows
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: actions
+          queries: security-extended
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:actions
