@@ -248,7 +248,7 @@ internal sealed class HyperXOriginsController : HyperXDevice
     public override int KeepaliveIntervalMs => _m.Keepalive;
 
     public static byte[] BuildInit(byte init9)
-    { var p = new byte[Len]; p[1] = 0x04; p[2] = 0xF2; if (init9 != 0) p[9] = init9; return p; }
+    { var p = new byte[Len]; p[1] = 0x04; p[2] = 0xF2; if (init9 != 0) { p[9] = init9; } return p; }
 
     /// <summary>Builds the full packet list: blanks inserted at skip indices, 16 groups/packet, padded to packetCount.</summary>
     public static List<byte[]> BuildColorPackets(IReadOnlyList<(byte R, byte G, byte B)> c, int[] skip, int packets)

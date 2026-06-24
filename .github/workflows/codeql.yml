@@ -36,7 +36,11 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: csharp
-          queries: security-and-quality
+          # security-extended (not security-and-quality): this is a low-level hardware framework —
+          # the quality/style suite only produced by-design noise (P/Invoke, service-resilience
+          # catches, best-effort logging) and zero security findings. security-extended keeps full
+          # security coverage without the noise. See the CodeQL review note in the repo history.
+          queries: security-extended
 
       - name: Build broker
         run: dotnet build BrokerSensorBridge/BrokerSensorBridge.csproj -c Release

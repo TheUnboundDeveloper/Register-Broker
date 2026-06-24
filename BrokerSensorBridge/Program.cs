@@ -1079,14 +1079,14 @@ internal static class Program
             }
             Check("nct6687 pwm decode (128 -> ~50 %, 0 -> 0 %)",
                   Math.Abs(SensorDecode.NctPwmPercent(0x80) - (128.0 / 255.0 * 100.0)) < 1e-9 &&
-                  SensorDecode.NctPwmPercent(0) == 0.0);
+                  Math.Abs(SensorDecode.NctPwmPercent(0)) < 1e-9);
 
             /* AMD SVI2 voltage decode (zenpower plane_to_vcc): V = 1.550 − 0.00625·((raw>>16)&0xFF),
                clamped at 0. code 0x50 (80) -> 1.050 V; code 0xFF -> negative -> clamped to 0. */
             Check("smu SVI voltage decode (0x00500000 -> 1.050 V)",
                   Math.Abs(SensorDecode.AmdSviVoltageV(0x00500000) - 1.050) < 1e-9);
             Check("smu SVI voltage clamp (0x00FF0000 -> 0 V)",
-                  SensorDecode.AmdSviVoltageV(0x00FF0000) == 0.0);
+                  Math.Abs(SensorDecode.AmdSviVoltageV(0x00FF0000)) < 1e-9);
         }
         catch (Exception ex)
         {
