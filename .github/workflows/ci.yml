@@ -16,6 +16,12 @@
 
 name: CI
 
+# Least-privilege GITHUB_TOKEN. Both jobs only READ the repo — a hardware-free publish+selftest
+# and a PowerShell parse check; actions/upload-artifact@v7 needs no contents:write. This top-level
+# block applies to every job and closes the CodeQL actions/missing-workflow-permissions findings.
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
