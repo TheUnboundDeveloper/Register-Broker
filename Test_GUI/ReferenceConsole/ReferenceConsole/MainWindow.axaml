@@ -17,7 +17,13 @@
   <Window.Resources>
     <!-- ============ Sensor row (inside a group) ============ -->
     <DataTemplate x:Key="SensorRowTemplate" x:DataType="local:SensorRow">
-      <Grid ColumnDefinitions="*,Auto,90,46" Margin="2,3">
+      <Grid ColumnDefinitions="*,Auto,90,46" Margin="2,3" Background="Transparent">
+        <Grid.ContextMenu>
+          <ContextMenu>
+            <MenuItem Header="Rename…" Click="OnSensorRename"/>
+            <MenuItem Header="Reset name" Click="OnSensorResetName"/>
+          </ContextMenu>
+        </Grid.ContextMenu>
         <TextBlock Grid.Column="0" Text="{Binding DisplayName}" Foreground="{DynamicResource TextPrimary}"
                    VerticalAlignment="Center"/>
         <TextBlock Grid.Column="1" Text="{Binding Id}" Classes="mono" FontSize="11" Margin="10,0,0,0"
@@ -65,7 +71,13 @@
 
     <!-- ============ RGB device card (ListBox item) ============ -->
     <DataTemplate x:Key="RgbDeviceTemplate" x:DataType="local:RgbRow">
-      <Grid ColumnDefinitions="Auto,*" Margin="2">
+      <Grid ColumnDefinitions="Auto,*" Margin="2" Background="Transparent">
+        <Grid.ContextMenu>
+          <ContextMenu>
+            <MenuItem Header="Rename…" Click="OnRgbRename"/>
+            <MenuItem Header="Reset name" Click="OnRgbResetName"/>
+          </ContextMenu>
+        </Grid.ContextMenu>
         <Ellipse Grid.Column="0" Width="9" Height="9" VerticalAlignment="Top" Margin="2,6,10,0"
                  Fill="{Binding StatusBrush}"/>
         <StackPanel Grid.Column="1" Spacing="2">

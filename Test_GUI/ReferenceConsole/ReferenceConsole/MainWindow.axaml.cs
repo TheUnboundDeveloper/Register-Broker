@@ -10,6 +10,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
+using Avalonia.LogicalTree;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Styling;
@@ -137,6 +138,7 @@ public partial class MainWindow : Window
         SecSession.Text = HostInfo.SessionLabel;
 
         _settings = ConsoleSettings.Load();
+        LocalNames.Use(_settings.CustomNames);   // local-only display-name overrides (never sent to the broker)
         SetupTrayIcon();
         PropertyChanged += OnWindowPropertyChanged;
         ApplyGlobalSettings();
@@ -305,6 +307,109 @@ public partial class MainWindow : Window
     private Border? BoxById(string id) => _allBoxes.FirstOrDefault(b => (b.Tag as string) == id);
     private static string IdOf(Border b) => b.Tag as string ?? "";
 
+    // ===================================================================
+    //  Local display-name overrides (cards / sensors / RGB devices)
+    //
+    //  Pure UI convenience: rename what the console shows, persisted to the
+    //  settings file. Never sent to the broker, never touches a driver name.
+    // ===================================================================
+
+    /// <summary>Store (or clear) a local name for <paramref name="id"/> and persist it. A blank
+    /// name, or one equal to the broker fallback, removes the override.</summary>
+    private void SetCustomName(string id, string? name, string fallback)
+    {
+        name = name?.Trim();
+        if (string.IsNullOrEmpty(name) || string.Equals(name, fallback, StringComparison.Ordinal))
+            _settings.CustomNames.Remove(id);
+        else
+            _settings.CustomNames[id] = name;
+        try { _settings.Save(); } catch (Exception ex) { Log("Name save failed: " + ex.Message); }
+    }
+
+    private void ClearCustomName(string id)
+    {
+        if (!_settings.CustomNames.Remove(id)) return;
+        try { _settings.Save(); } catch (Exception ex) { Log("Name save failed: " + ex.Message); }
+    }
+
+    // ---- dashboard cards ----------------------------------------------------
+    private string DefaultBoxTitle(string id) => BoxTitles.TryGetValue(id, out var t) ? t : id;
+
+    // The title TextBlock lives in the card's drag bar at grid column 1 (column 0 = handle,
+    // column 2 = the ✕). Resolve it through the logical tree so it works before realization.
+    private static TextBlock? FindBoxTitle(Border box)
+    {
+        foreach (var grid in box.GetLogicalDescendants().OfType<Grid>())
+            if (grid.Classes.Contains("dragbar"))
+                return grid.Children.OfType<TextBlock>().FirstOrDefault(t => Grid.GetColumn(t) == 1);
+        return null;
+    }
+
+    private void ApplyBoxTitle(Border box)
+    {
+        var id = IdOf(box);
+        if (FindBoxTitle(box) is { } tb) tb.Text = LocalNames.Resolve(id, DefaultBoxTitle(id));
+    }
+
+    // Right-click any card for Rename / Reset; built-in cards get this in SetupDashboardBoxes,
+    // runtime sensor cards in BuildSensorBox.
+    private void AttachCardMenu(Border box)
+    {
+        var rename = new MenuItem { Header = "Rename…" };
+        rename.Click += async (_, _) => await BeginRenameCard(box);
+        var reset = new MenuItem { Header = "Reset name" };
+        reset.Click += (_, _) => { ClearCustomName(IdOf(box)); ApplyBoxTitle(box); };
+        var menu = new ContextMenu();
+        menu.Items.Add(rename);
+        menu.Items.Add(reset);
+        box.ContextMenu = menu;
+    }
+
+    private async Task BeginRenameCard(Border box)
+    {
+        var id = IdOf(box);
+        if (id.Length == 0) return;
+        var current = LocalNames.Resolve(id, DefaultBoxTitle(id));
+        var name = await RenameDialog.Show(this, "Rename card", current);
+        if (name is null) return;   // cancelled
+        SetCustomName(id, name, DefaultBoxTitle(id));
+        ApplyBoxTitle(box);
+    }
+
+    // ---- sensor rows --------------------------------------------------------
+    private async void OnSensorRename(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is not SensorRow row) return;
+        var name = await RenameDialog.Show(this, "Rename sensor", row.DisplayName);
+        if (name is null) return;
+        SetCustomName(row.Id, name, row.BrokerName);
+        row.RaiseName();
+    }
+
+    private void OnSensorResetName(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is not SensorRow row) return;
+        ClearCustomName(row.Id);
+        row.RaiseName();
+    }
+
+    // ---- RGB devices --------------------------------------------------------
+    private async void OnRgbRename(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is not RgbRow row) return;
+        var name = await RenameDialog.Show(this, "Rename RGB device", row.Label);
+        if (name is null) return;
+        SetCustomName(row.Id, name, row.BrokerName);
+        row.RaiseName();
+    }
+
+    private void OnRgbResetName(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is not RgbRow row) return;
+        ClearCustomName(row.Id);
+        row.RaiseName();
+    }
+
     private void SetupDashboardBoxes()
     {
         _allBoxes.AddRange(DashGrid.Children.OfType<Border>());
@@ -312,6 +417,8 @@ public partial class MainWindow : Window
         {
             if (b.Tag is string id) _defaultBoxOrder.Add(id);
             InjectResizeGrip(b);
+            AttachCardMenu(b);     // right-click → Rename / Reset
+            ApplyBoxTitle(b);      // restore any saved local card name
         }
 
         // Everything lives on the absolute-positioned canvas now; the WrapPanel was only the XAML
@@ -595,7 +702,7 @@ public partial class MainWindow : Window
         {
             var box = b;
             var id = IdOf(box);
-            var mi = new MenuItem { Header = "＋  " + (BoxTitles.TryGetValue(id, out var t) ? t : id) };
+            var mi = new MenuItem { Header = "＋  " + LocalNames.Resolve(id, DefaultBoxTitle(id)) };
             mi.Click += (_, _) => { box.IsVisible = true; PersistDashLayout(); };
             flyout.Items.Add(mi);
         }
@@ -670,6 +777,7 @@ public partial class MainWindow : Window
         _sensorBoxViews.Remove(sensorId);
         _settings.DashSensorBoxes.Remove(sensorId);
         BoxTitles.Remove(id);
+        _settings.CustomNames.Remove(id);   // drop any local card name; full removal starts fresh
         _allBoxes.Remove(box);
         if (ReferenceEquals(box.Parent, DashGrid)) DashGrid.Children.Remove(box);
         else if (ReferenceEquals(box.Parent, DashCanvas)) DashCanvas.Children.Remove(box);
@@ -718,7 +826,7 @@ public partial class MainWindow : Window
             Foreground = Res("TextMuted"), VerticalAlignment = VerticalAlignment.Center };
         handle.Classes.Add("handle");
         Grid.SetColumn(handle, 0);
-        var title = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center,
+        var title = new TextBlock { Text = LocalNames.Resolve(id, label), VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis };
         title.Classes.Add("sub");
         Grid.SetColumn(title, 1);
@@ -754,6 +862,7 @@ public partial class MainWindow : Window
             Margin = new Avalonia.Thickness(0, 0, 14, 14), Child = dock };
 
         _sensorBoxViews[sensorId] = (val, spark);
+        AttachCardMenu(box);     // right-click → Rename / Reset
         return box;
     }
 
@@ -2059,7 +2168,12 @@ public sealed class SensorRow : System.ComponentModel.INotifyPropertyChanged
     public string Id { get; }
     public string Label { get; private set; }
     public string Unit { get; private set; }
-    public string DisplayName => string.IsNullOrWhiteSpace(Label) ? Id : Label;
+
+    /// <summary>The broker-supplied name (label, or the id when unlabelled) — the rename fallback.</summary>
+    public string BrokerName => string.IsNullOrWhiteSpace(Label) ? Id : Label;
+
+    /// <summary>What the UI shows: the local override if one is set, else the broker name.</summary>
+    public string DisplayName => LocalNames.Resolve(Id, BrokerName);
 
     private string _valueText = "—";
     public string ValueText { get => _valueText; private set { _valueText = value; Raise(nameof(ValueText)); } }
@@ -2089,6 +2203,9 @@ public sealed class SensorRow : System.ComponentModel.INotifyPropertyChanged
         Raise(nameof(Label)); Raise(nameof(DisplayName)); Raise(nameof(Unit));
     }
 
+    /// <summary>Re-evaluate the display name after a local rename/reset.</summary>
+    public void RaiseName() => Raise(nameof(DisplayName));
+
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
     private void Raise(string n) => PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(n));
 }
@@ -2099,7 +2216,13 @@ public sealed class RgbRow : System.ComponentModel.INotifyPropertyChanged
     private static readonly IBrush Off = new SolidColorBrush(Color.Parse("#555B7A"));
 
     public string Id { get; }
-    public string Label { get; }
+
+    /// <summary>The broker-supplied name (label, or the id when unlabelled) — the rename fallback.</summary>
+    public string BrokerName { get; }
+
+    /// <summary>What the UI shows: the local override if one is set, else the broker name.</summary>
+    public string Label => LocalNames.Resolve(Id, BrokerName);
+
     public string Detail { get; }
     public string CardDetail { get; }
     public int LedCount { get; }
@@ -2109,7 +2232,7 @@ public sealed class RgbRow : System.ComponentModel.INotifyPropertyChanged
 
     public RgbRow(RgbDevice d)
     {
-        Id = d.Id; Label = string.IsNullOrEmpty(d.Label) ? d.Id : d.Label; LedCount = d.Leds;
+        Id = d.Id; BrokerName = string.IsNullOrEmpty(d.Label) ? d.Id : d.Label; LedCount = d.Leds;
         var bits = new List<string> { $"{d.Leds} LED" + (d.Leds == 1 ? "" : "s") };
         if (!string.IsNullOrEmpty(d.Kind)) bits.Add(d.Kind!);
         if (!string.IsNullOrEmpty(d.Transport)) bits.Add(d.Transport!);
@@ -2122,6 +2245,9 @@ public sealed class RgbRow : System.ComponentModel.INotifyPropertyChanged
 
     public void SetEffect(string n) { _effect = n; Raise(nameof(Summary)); }
     public void SetEnabled(bool e) { _enabled = e; Raise(nameof(StatusBrush)); }
+
+    /// <summary>Re-evaluate the display name after a local rename/reset.</summary>
+    public void RaiseName() => Raise(nameof(Label));
 
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
     private void Raise(string n) => PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(n));

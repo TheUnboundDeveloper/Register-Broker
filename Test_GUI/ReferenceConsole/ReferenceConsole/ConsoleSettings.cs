@@ -47,6 +47,14 @@ public sealed class ConsoleSettings
     /// <summary>Per-device effect configuration, keyed by the broker's device id.</summary>
     public Dictionary<string, DeviceSettings> Devices { get; set; } = new();
 
+    /// <summary>
+    /// Local-only display-name overrides, keyed by id (a sensor id, an RGB device id, or a
+    /// dashboard box id). These rename what the console SHOWS; they are never sent to the
+    /// broker and never change a driver/hardware name. An absent or empty entry means the
+    /// broker-supplied name stands.
+    /// </summary>
+    public Dictionary<string, string> CustomNames { get; set; } = new();
+
     // ------------------------------------------------------------------------
     //  Load / save
     // ------------------------------------------------------------------------
@@ -173,4 +181,29 @@ public sealed class StopState
 {
     public double Temp { get; set; }
     public string Color { get; set; } = "000000";
+}
+
+/*---------------------------------------------------------------------------*\
+| LocalNames                                                                 |
+|                                                                            |
+|   The console's local-only naming layer. Bindable row models (SensorRow,  |
+|   RgbRow) and the dashboard cards all resolve their display name through   |
+|   here, so a single override dictionary -- loaded from / saved to the      |
+|   settings file -- renames a sensor, RGB device, or card everywhere it     |
+|   shows. This is presentation only: nothing here ever reaches the broker   |
+|   or a hardware/driver name.                                                |
+\*---------------------------------------------------------------------------*/
+public static class LocalNames
+{
+    private static Dictionary<string, string> _map = new();
+
+    /// <summary>Point the resolver at the loaded settings' dictionary (called once at startup).</summary>
+    public static void Use(Dictionary<string, string> map) => _map = map;
+
+    /// <summary>The local override for <paramref name="id"/>, or null if the broker name should stand.</summary>
+    public static string? Get(string id)
+        => _map.TryGetValue(id, out var v) && !string.IsNullOrWhiteSpace(v) ? v : null;
+
+    /// <summary>Resolve a display name: the local override if set, else the broker-supplied fallback.</summary>
+    public static string Resolve(string id, string fallback) => Get(id) ?? fallback;
 }

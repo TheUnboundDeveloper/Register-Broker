@@ -95,6 +95,16 @@ Authenticode signer would need to be pinned (see [SIGNING-AND-DEPLOYMENT.md](SIG
 - **RGB** — the client-side effect engine (below).
 - **Diagnostics** — ping / latency, granted scopes, raw log.
 
+### Renaming things locally
+
+Right-click any **dashboard card**, **sensor row**, or **RGB device** for **Rename… / Reset
+name**. The name you give is a **local display name only**: it's saved in the console's
+`settings.json` (`CustomNames`, keyed by id) and resolved through `LocalNames`, so it shows
+everywhere that id appears and persists across restarts. It is **never sent to the broker** and
+**never changes a driver/hardware name** — "Reset name" (or clearing the box) restores the
+broker-supplied name. Dashboard cards and the sensors/devices they mirror are keyed separately
+(the card id is `sensor:<id>`), so each can carry its own name.
+
 ## The effect engine (RGB tab)
 
 The broker already serves **per-LED** frames: `rgb.set` accepts a `colors:[RRGGBB,…]` array routed

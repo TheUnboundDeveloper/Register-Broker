@@ -11,6 +11,16 @@ and additive ops do not bump the protocol version.
 
 ## [Unreleased]
 
+### Added — Reference Console local card/sensor/device renaming (console-only)
+
+- **Right-click → "Rename…" / "Reset name"** on any dashboard card, sensor row, or RGB device
+  in the Reference Console assigns a **local display name**. Names are stored in the console's
+  `settings.json` (`CustomNames`, keyed by id) and resolved through a shared `LocalNames` layer,
+  so a rename shows everywhere that id appears and survives restarts. This is **presentation
+  only** — nothing is sent to the broker and no driver/hardware name is changed. Clearing the
+  box (or "Reset name") restores the broker-supplied name. Console-only change: broker, driver,
+  protocol, and binaries are unchanged.
+
 ### Fixed — 0-warning build
 
 - **`AsrockMbController.LatchModeStatic`: hoisted a `stackalloc` out of the per-zone loop**
