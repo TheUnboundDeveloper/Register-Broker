@@ -273,6 +273,13 @@ new RgbBoardProfile(
     }),
 ```
 
+> **Driving the zone *before* you've pinned the PID (bring-up only).** A `UsbHid` zone left
+> **unpinned** (`HidProductId: 0`) would bind the first VID-matched device, so the broker refuses to
+> drive it by default — a user must never write to a device that wasn't positively PID-matched. To
+> test during bring-up, start the service with **`--rgb-allow-unpinned-hid`** (it binds the first
+> match and logs the PID it chose); then put that PID in `HidProductId` and drop the flag. Shipping
+> profiles must always pin the PID.
+
 Rules the build enforces for you:
 - **Window assertion** — every `SmbusEne` `Address` must be in `0x39–0x3A`/`0x70–0x77`; every
   `SuperioEc` `EcAddress` in the NCT6687 window. Out-of-window zones are refused at load (and fail

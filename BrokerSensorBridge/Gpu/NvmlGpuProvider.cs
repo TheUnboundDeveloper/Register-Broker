@@ -173,11 +173,11 @@ internal sealed class NvmlInterop : IDisposable
 
     private static bool TryLoadNvml(out IntPtr lib)
     {
-        if (NativeLibrary.TryLoad("nvml.dll", out lib)) return true;
-        /* Older drivers place it under Program Files\NVIDIA Corporation\NVSMI. */
+        /* System32 first (hijack-safe absolute path); older drivers place it under
+           Program Files\NVIDIA Corporation\NVSMI (also an absolute path, not search-order). */
         string pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
         string alt = System.IO.Path.Combine(pf, "NVIDIA Corporation", "NVSMI", "nvml.dll");
-        return NativeLibrary.TryLoad(alt, out lib);
+        return NativeLib.TryLoadSystem("nvml.dll", out lib, alt);
     }
 
     private static bool TryGet<T>(IntPtr lib, string name, out T? fn) where T : Delegate

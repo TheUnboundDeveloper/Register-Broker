@@ -63,16 +63,24 @@ impact beyond what's described below and in `docs/ARCHITECTURE.md`:
   (`AllowHidRgb` defaults to `true`) — a deliberate posture choice, since nearly every host running
   RGB control wants it and the blast radius is bounded to the RGB controller itself (no SPD/sensor
   bus). Operators who want the stricter posture set `AllowHidRgb: false` in the control service's
-  `appsettings.json`. Reports showing impact beyond confused LEDs are welcome.
+  `appsettings.json`. Reports showing impact beyond confused LEDs are welcome. A USB-HID RGB zone is
+  only ever *written* after a positive **VID + PID + interface + usage** match — there is no
+  write-to-probe. The legacy "unpinned" fallback (drive the first VID match when no PID is pinned) is
+  a **board-bring-up-only** path, off by default and gated behind `--rgb-allow-unpinned-hid`, so a
+  tester/user never writes to a device that wasn't positively identified; shipping profiles pin the PID.
 - **GPU sensors are a reduced-assurance, READ-ONLY source, off by default.** A discrete GPU's
   thermals are not an SMBus device, so `gpu.*` is served by a user-mode vendor-API backend in the
   broker (AMD **ADL** today), not the kernel driver — it does **not** pass the brick-guard because
   there is no driver involved. Unlike the HID RGB path it is **strictly read-only**: no GPU write
   op exists anywhere (only sensor getters are resolved), so the only residual is the vendor-library
   dependency (`atiadlxx.dll`, loaded at runtime, never redistributed) running in the broker
-  process. It is **opt-in** (`AllowGpuSensors` defaults to `false`; enable in the sensor service's
-  `appsettings.json`, via `--allow-gpu-sensors`, or `Install-SensorBrokerService.ps1
-  -WithGpuSensors`). Design + provenance: `docs/GPU-SENSOR-SUPPORT.md`.
+  process. The vendor DLLs (`atiadlxx.dll` / `nvml.dll` / `ze_loader.dll`) are loaded by **absolute
+  System32 path** (`NativeLib.TryLoadSystem`), not bare name, so a same-named DLL planted in the app
+  directory / CWD / PATH cannot be loaded into the LocalSystem service. It is **opt-in**
+  (`AllowGpuSensors` defaults to `false`; enable in the sensor service's `appsettings.json`, via
+  `--allow-gpu-sensors`, or `Install-SensorBrokerService.ps1 -WithGpuSensors`). Design + provenance:
+  `docs/GPU-SENSOR-SUPPORT.md`. The opt-in read-only **Aquacomputer `aqua.*`** sensors (USB-HID,
+  `AllowAquaSensors`, default off) share this posture: positively VID+PID-matched, read-only.
 
 ## Supported versions
 

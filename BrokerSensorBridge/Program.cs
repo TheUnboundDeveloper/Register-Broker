@@ -793,7 +793,7 @@ internal static class Program
         if (Config.AllowHidRgb)
             Log("RGB: USB-HID (Mystic Light) transport ENABLED (AllowHidRgb) — reduced assurance, no kernel brick-guard.");
 
-        using var rgb = RgbRegistry.Build(smbus, board, calib, Config.AllowHidRgb, Log);
+        using var rgb = RgbRegistry.Build(smbus, board, calib, Config.AllowHidRgb, Config.AllowUnpinnedHidRgb, Log);
         if (!rgb.Any)
         {
             Log("Control service: no RGB devices found (no write transport available). Nothing to serve.");
@@ -1603,7 +1603,7 @@ internal static class Program
 
             /* DRAM write path only (no EC RGB, no HID): just the two DRAM zones appear. */
             var smbusOnly = new MockSmbusBackend(available: true, superioAvailable: true, superioChipId: 0xD592);
-            using (RgbRegistry r = RgbRegistry.Build(smbusOnly, msi, CalibrationStore.Builtin, allowHidRgb: false, _ => { }))
+            using (RgbRegistry r = RgbRegistry.Build(smbusOnly, msi, CalibrationStore.Builtin, allowHidRgb: false, allowUnpinnedHid: false, _ => { }))
             {
                 Check("DRAM-only host -> 2 zones (ram0, ram1)",
                       r.Devices.Count == 2 && r.Find("ram0") != null && r.Find("ram1") != null);
@@ -1615,7 +1615,7 @@ internal static class Program
             var ecOn = new MockSmbusBackend(available: true, superioAvailable: true, superioChipId: 0xD592) { SuperioRgbAvailable = true };
             string defaultCalib = Path.Combine(AppContext.BaseDirectory, "calibration.default.json");
             CalibrationStore calib = CalibrationStore.Load(msi, _ => { }, defaultCalib);
-            using (RgbRegistry r = RgbRegistry.Build(ecOn, msi, calib, allowHidRgb: false, _ => { }))
+            using (RgbRegistry r = RgbRegistry.Build(ecOn, msi, calib, allowHidRgb: false, allowUnpinnedHid: false, _ => { }))
             {
                 IRgbController? jrgb = r.Find("mb.jrgb0");
                 Check("EC RGB advertised -> mb.jrgb0 present (Mb12V/SuperioEc)",
@@ -1970,6 +1970,17 @@ internal sealed class BridgeConfig
     public bool AllowHidRgb { get; set; } = true;
 
     /*-----------------------------------------------------------*\
+    | Board BRING-UP only: allow driving an UNPINNED USB-HID RGB   |
+    | zone (HidProductId == 0), which binds the first VID-matched  |
+    | device. OFF by default so a tester/user never writes to a    |
+    | device that was not positively PID-matched — shipping        |
+    | profiles must pin HidProductId. Turn on with                 |
+    | --rgb-allow-unpinned-hid during bring-up (find the PID with  |
+    | --hid-scan, then pin it). See docs/RGB-BOARD-BRINGUP.md.     |
+    \*-----------------------------------------------------------*/
+    public bool AllowUnpinnedHidRgb { get; set; } = false;
+
+    /*-----------------------------------------------------------*\
     | GPU sensors (read-only) via the vendor user-mode API         |
     | (AMD ADL today). OFF by default: a discrete GPU's thermals   |
     | are not an SMBus device, so this loads a vendor library in   |
@@ -2020,6 +2031,10 @@ internal sealed class BridgeConfig
         /* CLI override (handy for bring-up): --allow-hid-rgb forces the USB-HID RGB transport on. */
         if (args.Any(a => a.Equals("--allow-hid-rgb", StringComparison.OrdinalIgnoreCase)))
             cfg.AllowHidRgb = true;
+
+        /* CLI override: --rgb-allow-unpinned-hid permits driving an UNPINNED HID RGB zone (bring-up). */
+        if (args.Any(a => a.Equals("--rgb-allow-unpinned-hid", StringComparison.OrdinalIgnoreCase)))
+            cfg.AllowUnpinnedHidRgb = true;
 
         /* CLI override: --allow-gpu-sensors forces the read-only GPU sensor source on. */
         if (args.Any(a => a.Equals("--allow-gpu-sensors", StringComparison.OrdinalIgnoreCase)))

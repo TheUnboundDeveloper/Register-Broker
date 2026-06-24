@@ -11,6 +11,24 @@ and additive ops do not bump the protocol version.
 
 ## [Unreleased]
 
+### Hardened — no speculative hardware access (gating)
+
+- **Unpinned USB-HID RGB zones are no longer driven in a normal build.** A Mystic Light zone
+  with no pinned `HidProductId` previously bound the *first* VID-matched HID device, which on a
+  board with several MSI HID interfaces could write to the wrong one. That match-by-first is now a
+  **board-bring-up-only** action gated behind `AllowUnpinnedHidRgb` / `--rgb-allow-unpinned-hid`
+  (default off): a tester/user never writes to a device that wasn't positively PID-matched.
+  Shipping profiles pin the PID (the only shipped HID zone, MSI JRAINBOW, is pinned to `0x7C92`),
+  so there is no behavior change for users — only the latent bring-up path is closed.
+- **Vendor GPU DLLs are loaded hijack-safe.** `atiadlxx.dll` / `nvml.dll` / `ze_loader.dll` were
+  loaded by bare name (OS search order includes the app dir / CWD / PATH). They are now loaded by
+  **absolute System32 path** (with the NVIDIA `…/NVSMI` absolute fallback) via `NativeLib.TryLoadSystem`,
+  so a DLL of the same name planted on the search path can't be loaded into the LocalSystem service.
+- Context: a full read-only audit confirmed the access model is otherwise tight — every user-mode
+  path is behind an opt-in flag checked *before* any device is opened, USB-HID is read-only until a
+  full VID+PID+interface+usage match (no write-to-probe), SMBus reads only named addresses (no range
+  scanning), and the kernel brick-guard remains a hard second boundary on writes.
+
 ### Added — read-only Aquacomputer sensors (`aqua.*`; USB-HID, user-mode, opt-in, removable)
 
 - **Aquacomputer Quadro telemetry is now served as `aqua.*` sensors** over the normal

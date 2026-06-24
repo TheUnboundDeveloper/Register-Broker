@@ -39,7 +39,7 @@ internal sealed class RgbRegistry : IDisposable
         _devices.FirstOrDefault(d => string.Equals(d.Id, id, StringComparison.OrdinalIgnoreCase));
 
     public static RgbRegistry Build(ISmbusBackend smbus, BoardIdentity board, CalibrationStore calib,
-                                    bool allowHidRgb, Action<string> log)
+                                    bool allowHidRgb, bool allowUnpinnedHid, Action<string> log)
     {
         RgbBoardProfile profile = RgbCatalog.Resolve(board);
         log($"[rgb] board profile: {(profile.IsGeneric ? "(generic fallback)" : $"{profile.Manufacturer} / {profile.Product}")}, {profile.Zones.Count} zone(s)");
@@ -83,8 +83,20 @@ internal sealed class RgbRegistry : IDisposable
                     int sel = SelectHidIndex(hids.Select(h => h.ProductId).ToList(), zone.HidProductId);
                     if (sel >= 0)
                     {
+                        /* An UNPINNED zone (HidProductId == 0) binds the FIRST VID-matched device, which
+                           on a board with several MSI HID interfaces could be the WRONG one — a write to
+                           a non-positively-matched device. That is a board-BRING-UP convenience only: in
+                           a normal build refuse to drive it, so a tester/user never writes to a device we
+                           did not positively identify. --rgb-allow-unpinned-hid re-enables it for bring-up
+                           (use --hid-scan to find the PID, then pin HidProductId in the profile). */
+                        if (zone.HidProductId == 0 && !allowUnpinnedHid)
+                        {
+                            log($"[rgb] zone '{zone.Id}': UNPINNED Mystic Light HID not driven (bring-up only; "
+                              + "set --rgb-allow-unpinned-hid to bind, then pin HidProductId). skipped");
+                            break;
+                        }
                         log($"[rgb] zone '{zone.Id}' -> HID PID 0x{hids[sel].ProductId:X4}"
-                          + (zone.HidProductId != 0 ? " (pinned)" : " (unpinned — pin HidProductId in the profile)"));
+                          + (zone.HidProductId != 0 ? " (pinned)" : " (UNPINNED — bring-up only; pin HidProductId)"));
                         list.Add(new MysticLightHidController(hids[sel], zone));
                         usedHid.Add(hids[sel]);
                     }

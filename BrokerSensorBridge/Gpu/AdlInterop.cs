@@ -60,7 +60,7 @@ internal sealed class AdlInterop : IDisposable
     /// </summary>
     public static AdlInterop? TryCreate(Action<string> log)
     {
-        if (!NativeLibrary.TryLoad("atiadlxx.dll", out IntPtr lib))
+        if (!NativeLib.TryLoadSystem("atiadlxx.dll", out IntPtr lib))   // System32 only — hijack-safe
         {
             log("[gpu] atiadlxx.dll not present (no AMD Radeon driver installed) — AMD GPU sensors unavailable.");
             return null;

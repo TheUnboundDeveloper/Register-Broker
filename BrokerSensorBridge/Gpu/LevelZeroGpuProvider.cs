@@ -81,7 +81,7 @@ internal sealed class LevelZeroInterop : IDisposable
         /* Sysman must be enabled BEFORE zeInit. We are the only Level Zero user in this process. */
         Environment.SetEnvironmentVariable("ZES_ENABLE_SYSMAN", "1");
 
-        if (!NativeLibrary.TryLoad("ze_loader.dll", out IntPtr lib))
+        if (!NativeLib.TryLoadSystem("ze_loader.dll", out IntPtr lib))   // System32 only — hijack-safe
         {
             log("[gpu] ze_loader.dll not present (no Intel GPU / oneAPI runtime) — Intel GPU sensors unavailable.");
             return null;
