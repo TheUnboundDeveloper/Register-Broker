@@ -32,6 +32,15 @@ public sealed class ConsoleSettings
     /// <summary>When true, minimizing hides the window to a system-tray icon instead of the taskbar.</summary>
     public bool MinimizeToTray { get; set; }
 
+    /// <summary>
+    /// The window's last Normal-state placement [x, y, w, h] (screen pixels for x/y, DIPs for w/h),
+    /// so the console reopens at the size/spot you left it. Null until the window has been shown once.
+    /// </summary>
+    public double[]? WindowBounds { get; set; }
+
+    /// <summary>True if the window was maximized when last closed — restored on next launch.</summary>
+    public bool WindowMaximized { get; set; }
+
     /// <summary>Dashboard box order (by box id) and the ids the user has removed from the dashboard.</summary>
     public List<string>? DashOrder { get; set; }
     public List<string>? DashHidden { get; set; }
@@ -88,7 +97,15 @@ public sealed class ConsoleSettings
     {
         var dir = Path.GetDirectoryName(FilePath);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        File.WriteAllText(FilePath, JsonSerializer.Serialize(this, JsonOptions));
+        var json = JsonSerializer.Serialize(this, JsonOptions);
+
+        // Write to a sibling temp file, then atomically swap it in. A crash or power loss mid-write
+        // leaves the previous good settings.json intact instead of a half-written (corrupt) file that
+        // Load() would reject -> silently discarding every saved layout/name/effect.
+        var tmp = FilePath + ".tmp";
+        File.WriteAllText(tmp, json);
+        if (File.Exists(FilePath)) File.Replace(tmp, FilePath, null);
+        else File.Move(tmp, FilePath);
     }
 }
 

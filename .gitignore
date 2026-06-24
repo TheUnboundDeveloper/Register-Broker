@@ -43,6 +43,9 @@ out.txt
 *.log
 SHA256SUMS.local.txt
 
+# Repo-local temp dir for build / selftest / verification outputs (replaces using %TEMP%).
+/.localbuild/
+
 # --- OS noise ---
 Thumbs.db
 desktop.ini

@@ -37,7 +37,7 @@ namespace ReferenceConsole;
 public partial class MainWindow : Window
 {
     private static readonly string[] EffectNames =
-        { "(none)", "Static", "Temperature", "Rainbow", "Breathing", "Comet", "Twinkle", "Aurora", "Manual per-LED", "Audio Spectrum" };
+        { "(none)", "Static", "Temperature", "Rainbow", "Breathing", "Comet", "Twinkle", "Aurora", "Fire", "Ripple", "Manual per-LED", "Audio Spectrum" };
 
     private static readonly string[] Palette =
         { "FF0000", "00FF00", "0000FF", "FFFFFF", "FF6A00", "00FFFF", "FF00FF", "000000" };
@@ -75,6 +75,8 @@ public partial class MainWindow : Window
     private DateTime _lastPreview = DateTime.MinValue;
 
     private readonly ConsoleSettings _settings;
+    private DispatcherTimer? _deviceSaveTimer;   // debounced flush of per-device effect/param state
+    private (PixelPoint Pos, double W, double H)? _normalBounds;   // last Normal-state window placement
     private TrayIcon? _trayIcon;
     private Button[] _navButtons = Array.Empty<Button>();
     private bool _shellInitialized;   // guards one-time seed + auto-connect (Opened can re-fire on tray restore)
@@ -150,16 +152,25 @@ public partial class MainWindow : Window
         _uptimeTimer.Tick += (_, _) => UpdateUptime();
         _uptimeTimer.Start();
 
+        // Debounced flush of the per-device effect/parameter state. Edits (sliders, colours, drive
+        // toggles…) call ScheduleDeviceSave() instead of SaveSettings(); this coalesces a burst of
+        // changes into one disk write ~0.8 s after the last edit, so per-animation settings survive
+        // even a non-clean exit (kill / crash / shutdown) — they no longer wait for the Closing event.
+        _deviceSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
+        _deviceSaveTimer.Tick += (_, _) => { _deviceSaveTimer!.Stop(); PersistDeviceSettings(); };
+
+        // Remember the window's Normal placement so it can be restored next launch.
+        PositionChanged += (_, _) => CaptureNormalBounds();
+
         Opened += async (_, _) =>
         {
-            // Borderless windows can come up maximized on Win32 — pin to the authored size.
-            if (WindowState == WindowState.Maximized) WindowState = WindowState.Normal;
             // Restoring from the tray toggles ShowInTaskbar + Show(), which re-creates the native
             // window and RE-RAISES Opened. Only seed/auto-connect once, or we'd open a second set of
             // broker pipes and a second effect engine (LED blinking + session-cap "denied" crashes).
             if (_shellInitialized) return;
             _shellInitialized = true;
-            SeedCanvasLayout();   // assign canvas positions now the window/canvas is sized
+            RestoreWindowGeometry();   // size/position/maximized from last session (also clears any spurious startup-maximize)
+            SeedCanvasLayout();        // assign canvas positions now the window/canvas is sized
             await TryAutoConnect();
         };
         Closing += (_, _) => { SaveSettings(); Cleanup(); _trayIcon?.Dispose(); _trayIcon = null; };
@@ -1151,18 +1162,45 @@ public partial class MainWindow : Window
         _settings.PollIntervalMs = (int)(PollInterval.Value ?? 1000);
         _settings.MinimizeToTray = MinimizeTargetCombo.SelectedIndex == 1;
 
-        if (_engine is not null)
-        {
-            foreach (var row in _rgbRows)
-            {
-                var eff = _engine.GetEffect(row.Id);
-                if (eff is null) { _settings.Devices.Remove(row.Id); continue; }
-                _settings.Devices[row.Id] = DeviceSettings.Capture(eff, _engine.IsEnabled(row.Id), row.LedCount);
-            }
-        }
+        CaptureNormalBounds();
+        if (_normalBounds is { } nb)
+            _settings.WindowBounds = new[] { (double)nb.Pos.X, (double)nb.Pos.Y, nb.W, nb.H };
+        _settings.WindowMaximized = WindowState == WindowState.Maximized;
+
+        CaptureDeviceSettings();
 
         try { _settings.Save(); }
         catch (Exception ex) { Log("Settings save failed: " + ex.Message); }
+    }
+
+    // Snapshot every connected device's current effect + tunables into the settings (no disk write).
+    private void CaptureDeviceSettings()
+    {
+        if (_engine is null) return;
+        foreach (var row in _rgbRows)
+        {
+            var eff = _engine.GetEffect(row.Id);
+            if (eff is null) { _settings.Devices.Remove(row.Id); continue; }
+            _settings.Devices[row.Id] = DeviceSettings.Capture(eff, _engine.IsEnabled(row.Id), row.LedCount);
+        }
+    }
+
+    // Capture + write the per-device effect/parameter state immediately. Used by the debounced
+    // ScheduleDeviceSave so per-animation edits persist without waiting for the window to close.
+    private void PersistDeviceSettings()
+    {
+        if (_engine is null) return;
+        CaptureDeviceSettings();
+        try { _settings.Save(); }
+        catch (Exception ex) { Log("Effect save failed: " + ex.Message); }
+    }
+
+    // Coalesce a burst of parameter edits into a single delayed save (see _deviceSaveTimer).
+    private void ScheduleDeviceSave()
+    {
+        if (_engine is null || _deviceSaveTimer is null) return;
+        _deviceSaveTimer.Stop();
+        _deviceSaveTimer.Start();
     }
 
     private void RestoreDeviceSettings()
@@ -1226,6 +1264,60 @@ public partial class MainWindow : Window
     {
         if (e.Property == WindowStateProperty && WindowState == WindowState.Minimized)
             HideToTrayIfRequested();
+        if (e.Property == BoundsProperty || e.Property == WindowStateProperty)
+            CaptureNormalBounds();
+    }
+
+    // ===================================================================
+    //  Window geometry persistence (size / position / maximized)
+    // ===================================================================
+
+    // Track the window's placement only while Normal — that's the size/spot to return to. (When
+    // maximized, Bounds is the full-screen size, which we don't want to save as the restore target.)
+    private void CaptureNormalBounds()
+    {
+        if (WindowState != WindowState.Normal) return;
+        double w = Bounds.Width, h = Bounds.Height;
+        if (w > 1 && h > 1) _normalBounds = (Position, w, h);
+    }
+
+    // Reopen at the last session's size/position/maximized state. Also subsumes the old
+    // "borderless windows can start spuriously maximized on Win32" guard: with nothing saved we
+    // explicitly pin to Normal.
+    private void RestoreWindowGeometry()
+    {
+        if (_settings.WindowBounds is { Length: 4 } b)
+        {
+            Width = Math.Max(MinWidth, b[2]);
+            Height = Math.Max(MinHeight, b[3]);
+            var pos = new PixelPoint((int)b[0], (int)b[1]);
+            // Only honour the saved position if it still falls on a connected monitor — otherwise a
+            // changed display setup (undocked, monitor removed) would reopen the window off-screen.
+            if (IsOnAScreen(pos))
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual;
+                Position = pos;
+            }
+            _normalBounds = (Position, Width, Height);
+        }
+        WindowState = _settings.WindowMaximized ? WindowState.Maximized : WindowState.Normal;
+    }
+
+    // True if the given top-left lands inside any connected monitor's bounds (with a small margin so
+    // a window pushed slightly off the top/left still counts). Falls back to true if screens are
+    // unavailable, so the saved position is honoured rather than discarded.
+    private bool IsOnAScreen(PixelPoint p)
+    {
+        var all = Screens?.All;
+        if (all is null || all.Count == 0) return true;
+        foreach (var s in all)
+        {
+            var r = s.Bounds;
+            if (p.X >= r.X - 64 && p.X <= r.X + r.Width - 64 &&
+                p.Y >= r.Y - 8 && p.Y <= r.Y + r.Height - 8)
+                return true;
+        }
+        return false;
     }
 
     private void HideToTrayIfRequested()
@@ -1698,6 +1790,7 @@ public partial class MainWindow : Window
         BuildParamPanel(eff);
 
         if (eff is TemperatureEffect) EnsureSensorPoll();
+        ScheduleDeviceSave();
     }
 
     private void OnDriveAll(object? sender, RoutedEventArgs e)
@@ -1721,6 +1814,7 @@ public partial class MainWindow : Window
         DriveCheck.IsChecked = true;
         if (src is TemperatureEffect) EnsureSensorPoll();
         LogEvent("APPLY", $"{src.Name} applied to {_rgbRows.Count} device(s)", "RGB");
+        ScheduleDeviceSave();
     }
 
     private void OnStopAll(object? sender, RoutedEventArgs e)
@@ -1729,6 +1823,7 @@ public partial class MainWindow : Window
         foreach (var r in _rgbRows) { _engine.SetEnabled(r.Id, false); r.SetEnabled(false); }
         DriveCheck.IsChecked = false;
         LogEvent("INFO", "Stopped driving all devices", null);
+        ScheduleDeviceSave();
     }
 
     private IEffect? CloneEffect(IEffect src)
@@ -1768,6 +1863,7 @@ public partial class MainWindow : Window
         _engine.SetEnabled(row.Id, on);
         row.SetEnabled(on);
         LogEvent(on ? "APPLY" : "INFO", $"[{row.Id}] live control {(on ? "ON" : "off")}", on ? "RGB" : null);
+        ScheduleDeviceSave();
     }
 
     private async void OnApplyOnce(object? sender, RoutedEventArgs e)
@@ -1797,6 +1893,7 @@ public partial class MainWindow : Window
         m.SetLed(index, m.Brush);
         if (index >= 0 && index < _ledCells.Count) _ledCells[index].Brush = ToBrush(m.Brush);
         if (!_engine.IsEnabled(row.Id)) await _engine.RenderOnceAsync(row.Id);
+        ScheduleDeviceSave();
     }
 
     private async void OnManualFill(object? sender, RoutedEventArgs e)
@@ -1807,6 +1904,7 @@ public partial class MainWindow : Window
         var b = ToBrush(m.Brush);
         foreach (var cell in _ledCells) cell.Brush = b;
         await _engine.RenderOnceAsync(row.Id);
+        ScheduleDeviceSave();
     }
 
     private async void OnManualClear(object? sender, RoutedEventArgs e)
@@ -1817,6 +1915,7 @@ public partial class MainWindow : Window
         var b = ToBrush(RgbColor.Black);
         foreach (var cell in _ledCells) cell.Brush = b;
         await _engine.RenderOnceAsync(row.Id);
+        ScheduleDeviceSave();
     }
 
     private void OnEngineConnectionLost(string reason)
@@ -1867,7 +1966,7 @@ public partial class MainWindow : Window
         PopulateStops(host, g);
         root.Children.Add(host);
         var add = new Button { Content = "Add colour stop", Classes = { "ghost" } };
-        add.Click += (_, _) => { g.AddStop(); PopulateStops(host, g); };
+        add.Click += (_, _) => { g.AddStop(); PopulateStops(host, g); ScheduleDeviceSave(); };
         root.Children.Add(add);
         return root;
     }
@@ -1880,7 +1979,7 @@ public partial class MainWindow : Window
             var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
             var temp = new NumericUpDown { Minimum = 0, Maximum = 120, Increment = 1,
                 Value = (decimal)stop.Temp, FormatString = "0", Width = 104 };
-            temp.ValueChanged += (_, _) => stop.Temp = (double)(temp.Value ?? 0m);
+            temp.ValueChanged += (_, _) => { stop.Temp = (double)(temp.Value ?? 0m); ScheduleDeviceSave(); };
 
             var swatch = new Border { Width = 24, Height = 22, CornerRadius = new Avalonia.CornerRadius(3),
                 BorderBrush = Res("Border1"), BorderThickness = new Avalonia.Thickness(1), Background = ToBrush(stop.Color) };
@@ -1889,10 +1988,10 @@ public partial class MainWindow : Window
             hex.PropertyChanged += (_, ev) =>
             {
                 if (ev.Property == TextBox.TextProperty && RgbColor.TryParseHex(hex.Text, out var c))
-                { stop.Color = c; swatch.Background = ToBrush(c); }
+                { stop.Color = c; swatch.Background = ToBrush(c); ScheduleDeviceSave(); }
             };
             var remove = new Button { Content = "✕", IsEnabled = g.Stops.Count > 1, Classes = { "ghost" } };
-            remove.Click += (_, _) => { g.RemoveStop(stop); PopulateStops(host, g); };
+            remove.Click += (_, _) => { g.RemoveStop(stop); PopulateStops(host, g); ScheduleDeviceSave(); };
 
             row.Children.Add(new TextBlock { Text = "at", VerticalAlignment = VerticalAlignment.Center, Foreground = Res("TextSecondary") });
             row.Children.Add(temp);
@@ -1931,7 +2030,7 @@ public partial class MainWindow : Window
                 var slider = new Slider { Minimum = p.Min, Maximum = p.Max, Value = p.Num, SmallChange = p.Step };
                 slider.PropertyChanged += (_, ev) =>
                 {
-                    if (ev.Property == Slider.ValueProperty) { p.Num = slider.Value; value.Text = FormatNum(p); }
+                    if (ev.Property == Slider.ValueProperty) { p.Num = slider.Value; value.Text = FormatNum(p); ScheduleDeviceSave(); }
                 };
                 root.Children.Add(head);
                 root.Children.Add(slider);
@@ -1949,7 +2048,7 @@ public partial class MainWindow : Window
                 hex.PropertyChanged += (_, ev) =>
                 {
                     if (ev.Property == TextBox.TextProperty && RgbColor.TryParseHex(hex.Text, out var c))
-                    { p.Color_ = c; swatch.Background = ToBrush(c); }
+                    { p.Color_ = c; swatch.Background = ToBrush(c); ScheduleDeviceSave(); }
                 };
                 line.Children.Add(swatch);
                 line.Children.Add(new TextBlock { Text = "#", VerticalAlignment = VerticalAlignment.Center, Foreground = Res("TextSecondary") });
@@ -1971,7 +2070,7 @@ public partial class MainWindow : Window
             case ParamKind.Toggle:
             {
                 var cb = new CheckBox { Content = p.Label, IsChecked = p.Flag, Foreground = Res("TextSecondary") };
-                cb.IsCheckedChanged += (_, _) => p.Flag = cb.IsChecked == true;
+                cb.IsCheckedChanged += (_, _) => { p.Flag = cb.IsChecked == true; ScheduleDeviceSave(); };
                 root.Children.Add(cb);
                 break;
             }
@@ -1979,7 +2078,7 @@ public partial class MainWindow : Window
             {
                 root.Children.Add(new TextBlock { Text = p.Label, Foreground = Res("TextSecondary") });
                 var combo = new ComboBox { Width = 220, ItemsSource = p.Choices, SelectedIndex = p.ChoiceIndex };
-                combo.SelectionChanged += (_, _) => { if (combo.SelectedIndex >= 0) p.ChoiceIndex = combo.SelectedIndex; };
+                combo.SelectionChanged += (_, _) => { if (combo.SelectedIndex >= 0) { p.ChoiceIndex = combo.SelectedIndex; ScheduleDeviceSave(); } };
                 root.Children.Add(combo);
                 break;
             }
@@ -2023,6 +2122,8 @@ public partial class MainWindow : Window
         "Comet" => new CometEffect(),
         "Twinkle" => new TwinkleEffect(),
         "Aurora" => new AuroraEffect(),
+        "Fire" => new FireEffect(),
+        "Ripple" => new RippleEffect(),
         "Manual per-LED" => new ManualEffect(),
         "Audio Spectrum" => new AudioSpectrumEffect(),
         _ => null,

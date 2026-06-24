@@ -307,6 +307,170 @@ public sealed class AuroraEffect : IEffect
 }
 
 /// <summary>
+/// Fire — an upward-climbing flame simulation. A per-LED heat field cools a little each tick,
+/// drifts toward the far end of the strip, and is re-seeded by random sparks at the base; the heat
+/// is then mapped through a red→orange→yellow→white-hot ramp. Runs on a fixed 60 Hz sim tick so it
+/// looks identical regardless of the engine FPS. The Hue knob rotates the whole flame (0° = classic
+/// orange, ~210° = blue fire) while the white-hot tip is preserved by desaturating the hottest cells.
+/// </summary>
+public sealed class FireEffect : IEffect
+{
+    private readonly EffectParam _cooling = EffectParam.Slider("cooling", "Cooling", 0.2, 3, 1.0, 0.05);
+    private readonly EffectParam _sparking = EffectParam.Slider("sparking", "Sparking", 0, 1, 0.55, 0.01);
+    private readonly EffectParam _speed = EffectParam.Slider("speed", "Speed", 0.2, 3, 1.0, 0.05);
+    private readonly EffectParam _hue = EffectParam.Slider("hue", "Hue shift (°)", 0, 360, 0, 1);
+    private readonly EffectParam _bright = EffectParam.Slider("bright", "Brightness", 0, 1, 1, 0.01);
+
+    private float[] _heat = Array.Empty<float>();
+    private double _acc;
+    private readonly Random _rng = new();
+
+    public string Name => "Fire";
+    public bool IsAnimated => true;
+    public IReadOnlyList<EffectParam> Parameters => new[] { _cooling, _sparking, _speed, _hue, _bright };
+
+    public void Render(in RenderContext ctx, RgbColor[] leds)
+    {
+        int n = leds.Length;
+        if (n == 0) return;
+        if (_heat.Length != n) { _heat = new float[n]; _acc = 0; }
+
+        // Advance the simulation in fixed 1/60 s ticks (capped) so the flame is frame-rate independent.
+        const double stepDt = 1.0 / 60.0;
+        _acc += Math.Clamp(ctx.Dt, 0, 0.1) * _speed.Num;
+        for (int guard = 0; _acc >= stepDt && guard < 4; guard++) { Step(n); _acc -= stepDt; }
+
+        for (int i = 0; i < n; i++)
+        {
+            double t = Math.Clamp(_heat[i], 0, 1);
+            double hue = (_hue.Num + t * 45.0) % 360;            // base is red (0°), climbing toward yellow
+            double sat = 1 - SmoothStep(0.82, 1.0, t) * 0.85;    // hottest cells whiten
+            double val = Math.Min(1.0, t * 1.5) * _bright.Num;   // low heat stays dark
+            leds[i] = RgbColor.FromHsv(hue, sat, val);
+        }
+    }
+
+    private void Step(int n)
+    {
+        // 1) every cell loses a little heat
+        double cool = _cooling.Num;
+        for (int i = 0; i < n; i++)
+            _heat[i] = (float)Math.Max(0, _heat[i] - _rng.NextDouble() * (cool * 0.02 + 0.01));
+
+        // 2) heat drifts up the strip (each cell pulls from the two cooler cells below it)
+        for (int k = n - 1; k >= 2; k--)
+            _heat[k] = (_heat[k - 1] + _heat[k - 2] + _heat[k - 2]) / 3f;
+
+        // 3) ignite sparks near the base
+        double spark = _sparking.Num;
+        int baseSpan = Math.Max(1, n / 10);
+        int attempts = Math.Max(1, baseSpan / 2);
+        for (int s = 0; s < attempts; s++)
+            if (_rng.NextDouble() < spark * 0.3)
+            {
+                int y = _rng.Next(baseSpan);
+                _heat[y] = (float)Math.Min(1.0, _heat[y] + 0.5 + _rng.NextDouble() * 0.5);
+            }
+    }
+
+    private static double SmoothStep(double a, double b, double x)
+    {
+        if (x <= a) return 0;
+        if (x >= b) return 1;
+        double t = (x - a) / (b - a);
+        return t * t * (3 - 2 * t);
+    }
+}
+
+/// <summary>
+/// Ripple — raindrops on a pond. Drops land at random LEDs at a chosen rate; each emits a ring of
+/// light that expands outward along the strip and fades with age. Rings blend additively over a
+/// background, so overlapping ripples interfere into soft, water-like motion. Colours can be random
+/// per drop or a fixed hue.
+/// </summary>
+public sealed class RippleEffect : IEffect
+{
+    private readonly EffectParam _rate = EffectParam.Slider("rate", "Drops / s", 0, 12, 2.5, 0.1);
+    private readonly EffectParam _wave = EffectParam.Slider("wave", "Wave speed (LED/s)", 2, 120, 28, 1);
+    private readonly EffectParam _width = EffectParam.Slider("width", "Ring width", 0.5, 12, 3, 0.1);
+    private readonly EffectParam _life = EffectParam.Slider("life", "Fade (s)", 0.3, 6, 2.2, 0.1);
+    private readonly EffectParam _rainbow = EffectParam.Toggle("rainbow", "Random colours", true);
+    private readonly EffectParam _color = EffectParam.Color("color", "Drop colour", "00C8FF");
+    private readonly EffectParam _bg = EffectParam.Color("bg", "Background", "000008");
+    private readonly EffectParam _bright = EffectParam.Slider("bright", "Brightness", 0, 1, 1, 0.01);
+
+    private struct Drop { public double Origin; public double Age; public RgbColor Col; public bool Active; }
+    private readonly Drop[] _drops = new Drop[24];
+    private double _spawnAcc;
+    private readonly Random _rng = new();
+
+    public string Name => "Ripple";
+    public bool IsAnimated => true;
+    public IReadOnlyList<EffectParam> Parameters => new[] { _rate, _wave, _width, _life, _rainbow, _color, _bg, _bright };
+
+    public void Render(in RenderContext ctx, RgbColor[] leds)
+    {
+        int n = leds.Length;
+        if (n == 0) return;
+        double dt = Math.Clamp(ctx.Dt, 0, 0.1);
+        double life = _life.Num;
+
+        // age + retire drops
+        for (int d = 0; d < _drops.Length; d++)
+            if (_drops[d].Active)
+            {
+                _drops[d].Age += dt;
+                if (_drops[d].Age >= life) _drops[d].Active = false;
+            }
+
+        // spawn at the configured rate (accumulator keeps it FPS-independent)
+        _spawnAcc += dt * _rate.Num;
+        while (_spawnAcc >= 1.0) { _spawnAcc -= 1.0; Spawn(n); }
+
+        double width = _width.Num;
+        double wave = _wave.Num;
+        double bf = _bright.Num;
+        var bg = _bg.Color_;
+
+        for (int i = 0; i < n; i++)
+        {
+            double r = 0, g = 0, b = 0;
+            for (int d = 0; d < _drops.Length; d++)
+            {
+                ref readonly var dr = ref _drops[d];
+                if (!dr.Active) continue;
+                double radius = dr.Age * wave;                  // ring grows outward from the drop
+                double offset = Math.Abs(i - dr.Origin) - radius;
+                if (Math.Abs(offset) >= width) continue;
+                double env = 0.5 * (1 + Math.Cos(Math.PI * offset / width));   // cosine bump on the ring
+                double decay = 1 - dr.Age / life;
+                double amp = env * decay * decay;               // whole ripple fades as it ages
+                r += dr.Col.R * amp;
+                g += dr.Col.G * amp;
+                b += dr.Col.B * amp;
+            }
+            leds[i] = new RgbColor(
+                (byte)Math.Clamp(bg.R + r * bf, 0, 255),
+                (byte)Math.Clamp(bg.G + g * bf, 0, 255),
+                (byte)Math.Clamp(bg.B + b * bf, 0, 255));
+        }
+    }
+
+    private void Spawn(int n)
+    {
+        // reuse a free slot, else recycle the oldest drop
+        int slot = 0; double oldest = -1;
+        for (int d = 0; d < _drops.Length; d++)
+        {
+            if (!_drops[d].Active) { slot = d; oldest = -1; break; }
+            if (_drops[d].Age > oldest) { oldest = _drops[d].Age; slot = d; }
+        }
+        var col = _rainbow.Flag ? RgbColor.FromHsv(_rng.NextDouble() * 360, 1, 1) : _color.Color_;
+        _drops[slot] = new Drop { Origin = _rng.Next(n), Age = 0, Col = col, Active = true };
+    }
+}
+
+/// <summary>
 /// Audio-reactive spectrum. Loopback band energy → per-LED colour/brightness.
 /// "Reactive factor" (gain) and "Smoothing" are live params — exactly the knobs
 /// you tweaked last night, now first-class and adjustable while it runs.

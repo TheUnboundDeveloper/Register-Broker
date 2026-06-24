@@ -51,7 +51,8 @@
 
     <!-- ============ Activity entry ============ -->
     <DataTemplate x:Key="ActivityTemplate" x:DataType="local:ActivityEntry">
-      <Grid ColumnDefinitions="60,84,*,Auto" Margin="0,3">
+      <!-- Right margin keeps the right-aligned Tag badge clear of the list's vertical scrollbar. -->
+      <Grid ColumnDefinitions="60,84,*,Auto" Margin="0,3,14,3">
         <TextBlock Grid.Column="0" Text="{Binding Time}" Classes="mono" FontSize="11"
                    Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
         <Border Grid.Column="1" Background="{Binding LevelBg}" CornerRadius="4" Padding="0,2"
