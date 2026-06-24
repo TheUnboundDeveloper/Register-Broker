@@ -74,6 +74,11 @@ One installer registers everything as auto-starting Windows services:
 
 # …or also install the write-only RGB control service:
 .\scripts\Install-SensorBrokerService.ps1 -WithRgbControl
+
+# …optional opt-in sensor sources (off by default):
+#   -WithGpuSensors    read-only GPU temps/fan/power/clocks/usage/voltage (gpu.*)
+#   -WithAquaSensors   read-only Aquacomputer temps/flow/fans (aqua.*, removable)
+.\scripts\Install-SensorBrokerService.ps1 -WithRgbControl -WithGpuSensors -WithAquaSensors
 ```
 
 This creates:
@@ -124,6 +129,21 @@ catalog sensor in one operation (what a polling consumer should use). `--calibra
 offline, no-admin inspector that prints your board's DMI identity and the resolved catalog
 (labels/scales come from `calibration.default.json` plus an optional
 `C:\ProgramData\SensorBroker\calibration.user.json`).
+
+**Optional sensor sources (off by default).** Two extra, read-only, user-mode backends are
+served only when enabled at install (or via their CLI flag on the SENSOR service):
+
+- **GPU** (`gpu.*` — temp / hotspot / mem temp, fan RPM + %, power, core/mem clock, usage,
+  voltage) via the GPU vendor API (AMD ADL, NVIDIA NVML, Intel Level Zero). Enable with
+  `-WithGpuSensors` (or `--allow-gpu-sensors`). HW-validated on an AMD RX 7900 XTX.
+- **Aquacomputer** (`aqua.*` — `aqua.temp.0`–`.3`, `aqua.flow.0`, `aqua.fan.0`–`.3`) over
+  USB-HID. Enable with `-WithAquaSensors` (or `--allow-aqua-sensors`). HW-validated on a Quadro.
+
+Both are **reduced assurance** (user-mode, no kernel driver / brick-guard) and strictly
+read-only. `aqua.*` sources are **removable** — the controller can be unplugged at runtime, so
+those entries carry a `removable: true` flag in `sensor.list`; a consumer should render an absent
+removable sensor as "not connected", not an error. A disconnected temperature probe is gated out
+rather than reported as a bogus reading.
 
 ---
 

@@ -22,7 +22,10 @@ detects + drives it, and the packet math passes the `--selftest` gates — but i
 confirmed on physical hardware** (the dev box owns none of it). The protocols are reproduced as facts
 and the write paths are bounded (kernel brick-guard for SMBus; `AllowHidRgb` gate — **on by default**
 as of 2026-06-22 — plus a per-device USB match for USB-HID), so the risk is "wrong/no color," not
-hardware damage — but treat any Included
+hardware damage. Note that an **unpinned** USB-HID RGB zone (a profile with `HidProductId: 0`) is no
+longer driven by default — it's bring-up-only behind `AllowUnpinnedHidRgb` / `--rgb-allow-unpinned-hid`;
+shipping profiles **pin** the PID, so a tester binds a new board's controller by setting that flag,
+finding the PID with `--hid-scan`, then pinning `HidProductId` — but treat any Included
 device as *should work*, not *known-good*, until validated.
 
 **To report a device as validated**, open a GitHub issue (use the **Validation report** form) or note

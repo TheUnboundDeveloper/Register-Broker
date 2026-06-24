@@ -31,6 +31,7 @@ Per-vendor metric coverage (a metric a vendor/library does not expose is gated o
 | `gpu.clock.core` | ✅ | ✅ | ✅ |
 | `gpu.clock.mem` | ✅ | ✅ | ✅ |
 | `gpu.usage` | ✅ | ✅ | — (activity-counter delta, deferred) |
+| `gpu.voltage` | ✅ | — | — |
 
 ---
 
@@ -79,6 +80,7 @@ and no re-sign — exactly like adding a board RGB profile.
 | `gpu.clock.core` | MHz | `CLK_GFXCLK` |
 | `gpu.clock.mem` | MHz | `CLK_MEMCLK` |
 | `gpu.usage` | % | `INFO_ACTIVITY_GFX` |
+| `gpu.voltage` | V | `GFX_VOLTAGE` (sensor-type index 21; reported in mV, converted to V) |
 
 A channel only appears when the GPU/driver actually reports it (PMLog `supported` flag). The
 `gpu.temp` channel populates the Reference Console's **GPU Temperature** card automatically
@@ -89,7 +91,8 @@ A channel only appears when the GPU/driver actually reports it (PMLog `supported
 **Dev box — AMD Radeon RX 7900 XTX (RDNA3), Adrenalin 32.0.31021:** detected by name, 25 PMLog
 sensors reported. Idle read via `--once --allow-gpu-sensors`: edge **27 °C** < hotspot **40 °C** <
 mem **48 °C** (correct ordering), fan **0 RPM** (zero-fan idle) at **23 %** duty target, core
-**~200 MHz**, mem **2686 MHz**, usage **~5 %**. The PMLog index numbering was anchored to ground
+**~200 MHz**, mem **2686 MHz**, usage **~5 %**, core voltage **~0.727 V** (`gpu.voltage`, `GFX_VOLTAGE`
+index 21, reported in mV → V). The PMLog index numbering was anchored to ground
 truth on this card by `BUS_LANES = 16` (PCIe x16). `gpu.power` (`ASIC_POWER`) is **not populated**
 by the current RDNA3 driver's PMLog set, so it reports not-available rather than a guessed value —
 the channel will light up on a driver/ASIC that does report it.
@@ -102,7 +105,9 @@ above was an interactive run). The HID path needed that check; if ADL refuses he
 
 All three are **published, first-party vendor interfaces**, used as documented facts; the vendor
 DLLs ship with their respective drivers and are **loaded at runtime via P/Invoke, never
-redistributed**. No GPL code is used. Recorded in `THIRD-PARTY-NOTICES.md`.
+redistributed**. They are loaded by **absolute `System32` path** (not by bare name), so the
+provider cannot be hijacked by a same-named DLL on the search path. No GPL code is used. Recorded
+in `THIRD-PARTY-NOTICES.md`.
 
 - **AMD ADL** — entry-point names, struct layouts, and `ADL_PMLOG_*` indices are AMD ADL SDK facts
   (`adl_sdk.h` / `adl_structures.h`), cross-checked against LibreHardwareMonitor's `ADLSensorType`.
@@ -117,8 +122,9 @@ redistributed**. No GPL code is used. Recorded in `THIRD-PARTY-NOTICES.md`.
 Both are wired exactly like AMD and selected automatically by `TryCreate`; they need a machine with
 that GPU to validate. When testing:
 
-- **NVIDIA:** confirm `nvml.dll` loads (System32 on modern drivers; the provider also falls back to
-  `…\NVIDIA Corporation\NVSMI\`). Expect `gpu.temp`, `gpu.fan.pct`, `gpu.power`, `gpu.clock.core/.mem`,
+- **NVIDIA:** confirm `nvml.dll` loads (absolute `System32` path on modern drivers; the provider also
+  falls back to the absolute `…\NVIDIA Corporation\NVSMI\` path — both hijack-safe, never search-order).
+  Expect `gpu.temp`, `gpu.fan.pct`, `gpu.power`, `gpu.clock.core/.mem`,
   `gpu.usage`. Hot-spot / memory-temp / fan-RPM aren't in NVML's base getter API → not listed.
 - **Intel:** the provider sets `ZES_ENABLE_SYSMAN=1` before `zeInit`. Verify the `zes_structure_type_t`
   tag constants in `LevelZeroGpuProvider.cs` against the installed `zes_api.h` first — they gate the

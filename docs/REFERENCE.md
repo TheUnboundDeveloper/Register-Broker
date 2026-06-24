@@ -40,7 +40,7 @@ Full request/response shapes are in [`CLIENT-PROTOCOL.md`](CLIENT-PROTOCOL.md). 
 | Op | Args | Returns | Scope |
 |---|---|---|---|
 | `ping` | — | `pong` | any |
-| `sensor.list` | — | `{sensors:[{id,label,unit}]}` | `sensors:read` |
+| `sensor.list` | — | `{sensors:[{id,label,unit, removable?}]}` (`removable:true` is optional — set on hot-pluggable sources, e.g. `aqua.*`; additive, protocol stays 2) | `sensors:read` |
 | `sensor.read` | `id` | `{value,unit}` / `error` / `deny` | `sensors:read` |
 | `sensor.readall` | — | every catalog sensor's value, **one rate-limited op** | `sensors:read` |
 | `rgb.list` | — | `{devices:[{id,label,leds,kind,transport}]}` | `rgb:write` |
@@ -53,6 +53,8 @@ id/device, or rate-limited — indistinguishable).
 
 Public ids are the **stable raw channel ids** (the persistence keys); labels come from board
 calibration data. Each group is auto-detect-gated — it appears only when its chip is present.
+On this dev box the live catalog is **~61 ids** (43 base + 9 `gpu.*` + 9 `aqua.*` with both
+opt-in groups enabled).
 
 | Sensor id (raw) | Source | Unit |
 |---|---|---|
@@ -63,6 +65,8 @@ calibration data. Each group is auto-detect-gated — it appears only when its c
 | `nct6687d.volt.0` … `nct6687d.volt.14` | NCT668x EC Super-I/O | V |
 | `nct6775.temp.0-5`, `nct6775.fan.0-6`, `nct6775.volt.0-15` | NCT6775-family Super-I/O (hardware-unvalidated) | °C / RPM / V |
 | `dimm.0` … `dimm.7` | SMBus JC42.4 / TSE2004av (`0x18+slot`) | °C — *listed only when a DIMM thermal sensor is detected at that slot* |
+| `gpu.temp`, `.temp.hotspot`, `.temp.mem`, `gpu.fan`, `.fan.pct`, `gpu.power`, `gpu.clock.core`, `.clock.mem`, `gpu.usage`, `gpu.voltage` | GPU (user-mode AMD ADL / NVIDIA NVML / Intel L0 — opt-in `AllowGpuSensors`) | °C / RPM / % / W / MHz / V — *per-metric gated; listed only when the vendor API reports it* |
+| `aqua.temp.0` … `.3`, `aqua.flow.0`, `aqua.fan.0` … `.3` | Aquacomputer Quadro USB-HID (user-mode, opt-in `AllowAquaSensors`) | °C / L/h / RPM — **`removable`** (hot-pluggable; listed only while the controller is present) |
 
 Legacy semantic ids resolve via a **built-in alias map** (so saved consumer selections keep
 working): `cpu.temp` → `smu.cpu.temp`, `cpu.ccd{n}.temp` → `smu.ccd.{n}`,
@@ -102,6 +106,9 @@ makes the broker **fail closed** (`RequireAuthorizedClient=true`) with a loud lo
 | `MaxSessions` | int | `32` | bounded session table size |
 | `MaxSessionsPerIdentity` | int | `8` | max concurrent sessions per client identity |
 | `AllowHidRgb` | bool | `true` | enable the USB-HID RGB transport (MSI Mystic Light motherboard headers + board-independent peripherals: Logitech, SteelSeries, Corsair, HyperX, Razer, …). **On by default**; set `false` for the stricter posture (reduced-assurance transport not loaded, no `usbhid`/`usbhidrazer` zones). Read by the **control service** (not the client); `--allow-hid-rgb` forces it on. Restart the service after changing. |
+| `AllowUnpinnedHidRgb` | bool | `false` | **bring-up only.** Allow driving a USB-HID RGB zone that is *unpinned* (matched only by feature-report length, not a USB product id). Off by default so a shipped profile never drives an unintended device; `--rgb-allow-unpinned-hid` forces it on. Control service. |
+| `AllowGpuSensors` | bool | `false` | enable the **user-mode, read-only** `gpu.*` GPU-telemetry backend (AMD ADL / NVIDIA NVML / Intel L0). Reduced assurance (no kernel guard), off by default; `--allow-gpu-sensors` forces it on. Read by the **sensor service**. |
+| `AllowAquaSensors` | bool | `false` | enable the **user-mode, read-only, removable** `aqua.*` Aquacomputer USB-HID backend (Quadro). Reduced assurance, off by default; `--allow-aqua-sensors` forces it on. Read by the **sensor service**. |
 
 > Under LocalSystem, `%LOCALAPPDATA%` resolves to
 > `C:\Windows\System32\config\systemprofile\AppData\Local\…`, **not** your user profile.
@@ -120,6 +127,9 @@ makes the broker **fail closed** (`RequireAuthorizedClient=true`) with a loud lo
 | `--device=<id>` `--color=<RRGGBB>` | args for `rgb.set` |
 | `--scopes=<a,b>` | scopes to request in the client hello |
 | `--allow-hid-rgb` | (control **service**) force the USB-HID RGB transport on for this run; no-op on a client invocation |
+| `--rgb-allow-unpinned-hid` | (control **service**) force `AllowUnpinnedHidRgb` on — drive an unpinned USB-HID RGB zone (bring-up only) |
+| `--allow-gpu-sensors` | (sensor **service**) force the user-mode `gpu.*` backend on for this run |
+| `--allow-aqua-sensors` | (sensor **service**) force the user-mode `aqua.*` Aquacomputer backend on for this run |
 | `--hid-scan [--vid=1462]` | read-only USB-HID discovery: list a vendor's HID interfaces (PID + feature-report length) to find/pin a Mystic Light controller |
 | `--once` | print one named-catalog JSON snapshot read straight from the driver and exit (needs elevation to open the device) |
 | `--calibration [--user=<path>]` | print the detected board DMI + resolved catalog (no driver, no pipe, no admin) |

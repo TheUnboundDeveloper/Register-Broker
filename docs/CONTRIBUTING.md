@@ -79,7 +79,7 @@ These are the project's reason for existing; a change that violates one will be 
 
 ## 4. How to add a new **sensor**
 
-There are two cases.
+There are three cases.
 
 ### 4a. The chip is already supported — you just need a label/scale
 Board-specific labeling and scaling are **data, not code**: raw channels (stable ids like
@@ -106,6 +106,21 @@ the full walkthrough with templates and checklists is
    source*, never invented. Put it next to the existing decodes
    (`Sensors/SensorDecode.cs`).
 4. **(broker)** Add a catalog entry (4c) so clients can name it.
+
+### 4b-2. The reading comes from a user-mode vendor API (no kernel driver)
+Some sources aren't motherboard SMBus/Super-I/O chips at all — a discrete GPU's thermals
+(`gpu.*`, via AMD ADL / NVIDIA NVML / Intel Level Zero) or an off-board USB controller
+(`aqua.*`, Aquacomputer Quadro over USB-HID). These are **user-mode, strictly read-only**
+sources with **no driver change and no re-sign** — same reduced-assurance posture as the
+USB-HID RGB path. They are each **opt-in, off by default** (`AllowGpuSensors` /
+`AllowAquaSensors`, with matching `--allow-gpu-sensors` / `--allow-aqua-sensors` and installer
+`-WithGpuSensors` / `-WithAquaSensors`), and live behind a provider seam
+(`Gpu/`, `Aqua/`) registered as a user-mode `ChannelBackendDef` rather than the SMBus backend.
+A USB source the user can unplug at runtime is flagged **`removable`** in `sensor.list` (an
+additive field; the protocol stays v2). Load any vendor DLL by **absolute System32 path**
+(hijack-safe). Designs: [GPU-SENSOR-SUPPORT.md](GPU-SENSOR-SUPPORT.md),
+[AQUA-SENSOR-SUPPORT.md](AQUA-SENSOR-SUPPORT.md). After the provider exists, register the
+channels (4c).
 
 ### 4c. Register it in the catalog
 Add a `RawChannel` to `ChipChannels` in `BrokerSensorBridge/Sensors/RawChannel.cs` with: a

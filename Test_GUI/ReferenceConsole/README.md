@@ -37,7 +37,11 @@ this exe's Authenticode signer would need to be pinned.
 ## Tabs
 
 - **Sensors** — `sensor.readall` grid, live-poll toggle with adjustable interval, in-place row
-  updates (no flicker), per-read latency.
+  updates (no flicker), per-read latency. The count reflects the **available-and-usable** set (the
+  live readall size): **removable** sensors (e.g. an Aquacomputer controller) drop cleanly from the
+  count when unplugged, pinned cards show **"—"** when their sensor is absent, and GPU cards are
+  **tinted by vendor**. New groups like `gpu.voltage` and `aqua.*` surface automatically — no
+  console change needed for a new sensor.
 - **RGB** — the effect engine (below).
 - **Diagnostics** — ping/latency, granted scopes, raw log.
 

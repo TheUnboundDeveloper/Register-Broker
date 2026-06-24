@@ -13,8 +13,8 @@ kernel-enforced map.
 ![Register Broker Reference Console — a non-admin dashboard reading 43 live sensors and driving DRAM, an MSI ARGB header, and two Razer devices at once through the broker](docs/images/reference-console-dashboard.png)
 
 > The first-party **[Reference Console](docs/REFERENCE-CONSOLE.md)** above is an ordinary,
-> non-admin desktop app — no elevation, no kernel driver of its own — reading the full 43-sensor
-> catalog live while driving RAM, a motherboard ARGB header, and Razer peripherals together
+> non-admin desktop app — no elevation, no kernel driver of its own — reading the full live sensor
+> catalog while driving RAM, a motherboard ARGB header, and Razer peripherals together
 > through the broker. That's the whole thesis in one window.
 
 ```
@@ -86,7 +86,7 @@ trust blindly.
 
 ## What works today
 
-**43-sensor catalog** (incl. read-only fan-PWM duty) served to non-admin clients over authenticated pipe; RGB drivable on DRAM, **motherboard headers, and USB peripherals (Razer)**.
+**~61-sensor catalog on the dev box** (43 base SMBus/Super-I/O/SMU + 9 read-only `gpu.*` + 9 read-only `aqua.*`; incl. read-only fan-PWM duty) served to non-admin clients over authenticated pipe; RGB drivable on DRAM, **motherboard headers, and USB peripherals (Razer)**.
 
 | Capability | Mechanism | Status |
 |---|---|---|
@@ -98,6 +98,8 @@ trust blindly.
 | Board temps / fans / voltages | Nuvoton NCT6775 family (6779, 6791–6798) | 🟡 implemented, HW-unvalidated |
 | Fan PWM duty % (read-only telemetry) | NCT668x EC duty byte → `nct6687d.pwm.*` (no fan-write path) | ✅ hardware-validated (NCT6687D) |
 | DIMM temperatures | JC42 / TSE2004av over SMBus | ✅ hardware-validated |
+| GPU temps / fan / power / clocks / usage / voltage (read-only) | AMD ADL · NVIDIA NVML · Intel Level Zero (user-mode, `gpu.*`) | ✅ HW-validated (AMD RX 7900 XTX); NVIDIA/Intel 🟡 — opt-in |
+| Aquacomputer temps / flow / fans (read-only, removable) | Aquacomputer USB-HID (user-mode, `aqua.*`) | ✅ HW-validated (Quadro) — opt-in |
 | Per-LED DRAM RGB (non-admin!) | ENE/Aura (block write, 1–32 B atomic) | ✅ hardware-validated |
 | Motherboard ARGB headers (non-admin!) | MSI Mystic Light over USB-HID (JRAINBOW) | ✅ hardware-validated (MSI B550I) — opt-in |
 | Peripheral RGB (non-admin!) | Razer Chroma keyboards/mice over USB-HID | ✅ hardware-validated (Naga Trinity, Cynosa Chroma) — opt-in |
@@ -150,7 +152,8 @@ zones; the client contract (`rgb.list` / `rgb.set`) is identical across transpor
   to the controller directly, no kernel brick-guard). It's **enabled by default** (`AllowHidRgb`)
   because most hosts running RGB control want it — set `AllowHidRgb` to `false` in the control
   service's `appsettings.json` to opt out. Each device is pinned to its USB product id / usage so
-  only the intended controller is driven. See
+  only the intended controller is driven; **unpinned** HID zones are no longer driven by default
+  (bring-up only, behind `AllowUnpinnedHidRgb` / `--rgb-allow-unpinned-hid`). See
   [docs/RGB-BOARD-BRINGUP.md](docs/RGB-BOARD-BRINGUP.md).
 - **No effects engine — but per-LED frames are supported.** `rgb.set` takes either one whole-device
   color (`color`) or a per-LED array (`colors[]`), so addressable headers (MSI JRAINBOW via the
@@ -216,6 +219,9 @@ Details: [docs/USER-GUIDE.md](docs/USER-GUIDE.md) (run it) ·
   a **separate, opt-in driver+service** that a security-conscious user can simply decline, leaving
   the core driver's assurances intact. **We'll revisit it if it's frequently requested** — open an
   issue if you want it.
+- **Storage temperature / SMART is deferred.** It was evaluated and found to be **admin-only on
+  Windows** (the disk/SMART query paths require elevation), so it was deliberately **not** added to
+  the non-admin path. It stays off the roadmap unless a non-privileged route is found.
 - **RGB scope boundary**: whole-device and per-LED colors are supported, but the broker has **no
   built-in effects/animation engine** (animation is the consumer's job) and GPUs / AIO liquid
   coolers are unsupported. The NCT6687 EC 12V-header (JRGB) path is wired but inert pending

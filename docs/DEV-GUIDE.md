@@ -123,8 +123,11 @@ Writes a color to the ENE DRAM controllers and commits. Watch the RAM change.
 
 > **USB-HID RGB discovery is *not* a DevProbe.** Motherboard ARGB headers (MSI Mystic Light) are
 > found with `--hid-scan` in a **normal** build (read-only — enumerate a USB vendor's HID
-> interfaces, print PID + feature-report length). It doesn't touch the kernel driver. Full board
-> RGB bring-up: [RGB-BOARD-BRINGUP.md](RGB-BOARD-BRINGUP.md).
+> interfaces, print PID + feature-report length). It doesn't touch the kernel driver. An
+> **unpinned** USB-HID RGB zone (one whose profile leaves `HidProductId: 0`) is **not driven by
+> default** — it is bring-up-only behind `AllowUnpinnedHidRgb` / `--rgb-allow-unpinned-hid`: set
+> that flag, find the PID with `--hid-scan`, then **pin** `HidProductId` so shipping profiles drive
+> only that exact device. Full board RGB bring-up: [RGB-BOARD-BRINGUP.md](RGB-BOARD-BRINGUP.md).
 
 ---
 

@@ -213,6 +213,17 @@ Rules of the road for RGB consumers:
   reconnect, re-hello (sessions expire after 10 minutes).
 - **New sensors appear as new catalog ids.** Re-run `sensor.list` to pick them up; no
   client update is needed when the broker learns a new chip.
+- **Handle `removable` sensors as "may not be connected."** A `sensor.list` entry can carry
+  an optional `"removable": true` (additive field; protocol stays v2) when its source is
+  hot-pluggable — e.g. an off-board USB controller (the `aqua.*` Aquacomputer channels). Such
+  a sensor can vanish from `sensor.list` / `sensor.readall` when its device is unplugged and
+  reappear on re-plug; render that as **"not connected," not an error.** Don't assume a saved
+  id is always present.
+- **Some sensor groups are opt-in / off by default.** GPU telemetry (`gpu.*`) and Aquacomputer
+  telemetry (`aqua.*`) are user-mode, reduced-assurance backends the operator enables on the
+  **sensor service** (`AllowGpuSensors` / `AllowAquaSensors`, both default off — see
+  [REFERENCE.md](REFERENCE.md)). Your app needs no special code: if enabled and present, the ids
+  simply appear in `sensor.list`; if not, they're absent like any other undetected hardware.
 - **Expect to be audited.** Every connect and op is logged broker-side with your
   process identity. Hardened deployments can also *enforce* an allow-list by
   Authenticode signer or path (`RequireAuthorizedClient`) — if your users run such a

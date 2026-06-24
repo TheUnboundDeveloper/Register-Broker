@@ -22,7 +22,7 @@ code; it only speaks the wire protocol ([CLIENT-PROTOCOL.md](CLIENT-PROTOCOL.md)
 
 | The framework promise | How the console proves it |
 |---|---|
-| Non-admin sensor access | The **Sensors** tab live-polls `sensor.readall`; the session reports `elevated=False`. |
+| Non-admin sensor access | The **Sensors** tab live-polls `sensor.readall`; the session reports `elevated=False`. The sensor count reflects what is **available and usable right now** (the live `sensor.readall` size), so opt-in groups (`gpu.*`, `aqua.*`) and **removable** sensors raise or lower it as they appear/vanish. |
 | Non-admin RGB control | The **RGB** tab drives DRAM, MSI ARGB headers, and Razer peripherals via `rgb.set`. |
 | Per-LED control is real | The **Manual per-LED** and **Comet** effects paint individual LEDs through `rgb.set`'s `colors:[…]` array. |
 | The broker is a pure transport | Every animation is rendered **client-side** and streamed as solid-color frames; no broker or driver change is involved. |
@@ -85,7 +85,13 @@ Authenticode signer would need to be pinned (see [SIGNING-AND-DEPLOYMENT.md](SIG
 ## Tabs
 
 - **Sensors** — `sensor.readall` grid, live-poll toggle with adjustable interval, in-place row
-  updates (no flicker), per-read latency.
+  updates (no flicker), per-read latency. The displayed count is the **available-and-usable** set
+  (the live readall size, not a cumulative list): **removable** sensors (e.g. an Aquacomputer
+  controller, flagged `removable` in `sensor.list`) drop cleanly from the count when unplugged.
+  Pinned dashboard cards show **"—"** when their sensor is absent rather than a stale value, and
+  GPU cards are **tinted by vendor**. New sensor groups such as `gpu.voltage` and `aqua.*` surface
+  **automatically** — the console reads whatever the broker serves, so no console change is needed
+  for a new sensor.
 - **RGB** — the client-side effect engine (below).
 - **Diagnostics** — ping / latency, granted scopes, raw log.
 

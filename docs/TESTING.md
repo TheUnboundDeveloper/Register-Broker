@@ -13,6 +13,8 @@ moves a 🟡 to a ✅ for everyone.
 | **Nuvoton NCT6683 / NCT6686** (EC family) | many MSI (NCT6687D is ✅ validated) | 🟡 implemented, unvalidated |
 | **Intel i801 SMBus host** | any Intel chipset board | ⬜ written, unvalidated (read path) |
 | **AMD SMU SVI2 voltages** (`smu.cpu.vcore`, `smu.soc.voltage`) | Ryzen Matisse (17h/0x71, Zen 2) / Vermeer (19h/0x21, Zen 3) desktop | ✅ Vermeer (5800X3D) · 🟡 Matisse (built, unvalidated) |
+| **GPU sensors** (`gpu.*`, user-mode, opt-in `AllowGpuSensors`) | AMD (ADL) ✅ · NVIDIA (NVML) / Intel (Level Zero) 🟡 | ✅ AMD RX 7900 XTX (incl. `gpu.voltage`) · 🟡 NVIDIA / Intel (built, unvalidated) |
+| **Aquacomputer sensors** (`aqua.*`, user-mode, opt-in `AllowAquaSensors`) | Aquacomputer Quadro (USB `0x0C70:0xF00D`) | ✅ Quadro (temps/flow/fan RPM) |
 
 Full status detail: [SENSOR-CHIPSET-INVENTORY.md](SENSOR-CHIPSET-INVENTORY.md).
 

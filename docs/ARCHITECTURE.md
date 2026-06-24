@@ -214,6 +214,40 @@ zero-access fallback (feature reports work on a 0-access handle) and binds the c
 by its `(interface, usage)` tuple — the same discriminator the reference Razer/OpenRazer protocol
 uses.
 
+### 5.2 User-mode sensor backends — a distinct reduced-assurance layer
+
+Most sensors ride the kernel driver (Layer 2): the SMBus/Super-I/O/SMU reads, and the
+brick-guarded SMBus writes, are all bounded, in-kernel-validated transactions. **Some sources
+are not on the motherboard's kernel-reachable buses at all**, so the broker reads them in
+**user mode** via a vendor/OS API instead of the driver:
+
+| Group | Backend | Assurance |
+|---|---|---|
+| `gpu.*` | AMD ADL / NVIDIA NVML / Intel Level Zero Sysman (selected per machine) | user-mode, **read-only**, no kernel guard; opt-in `AllowGpuSensors` (default off) |
+| `aqua.*` | Aquacomputer USB-HID controller (Quadro `0x0C70:0xF00D`) — blocking `ReadFile` on the HID interrupt-IN endpoint | user-mode, **read-only**, no kernel guard; opt-in `AllowAquaSensors` (default off); **removable** (hot-pluggable, flagged in `sensor.list`) |
+
+These are a deliberately **separate, reduced-assurance layer** from the kernel-brick-guarded
+sources: they involve no kernel surface (so there is nothing for the in-kernel guard to bound),
+they are **strictly read-only** (no write op is resolved for them), and each is **opt-in, off by
+default** with the same posture as the user-mode USB-HID RGB transport. The catalog ids appear
+the same way to a client; the assurance difference is a deployment property, not a protocol one.
+Design records: `docs/GPU-SENSOR-SUPPORT.md`, `docs/AQUA-SENSOR-SUPPORT.md`.
+
+### 5.3 Gating & hardening posture
+
+The privileged surface is held narrow by default and widened only by explicit operator opt-in:
+
+- **Opt-in flags** gate the reduced-assurance paths — `AllowHidRgb` (USB-HID RGB; **on** by
+  default), `AllowGpuSensors` (off), `AllowAquaSensors` (off). A path that isn't enabled isn't
+  loaded.
+- **USB-HID RGB zones are pinned by USB product id.** An *unpinned* zone (matched only by
+  feature-report length) is **bring-up-only** — refused unless `AllowUnpinnedHidRgb` /
+  `--rgb-allow-unpinned-hid` is set (default off) — so a shipped profile never drives an
+  unintended device.
+- **Vendor GPU DLLs load hijack-safe.** `atiadlxx.dll` / `nvml.dll` / `ze_loader.dll` are loaded
+  by **absolute `System32` path**, never by bare name, to avoid current-directory / search-order
+  DLL hijack.
+
 ---
 
 ## 6. Why it's structured this way (key decisions)
@@ -237,6 +271,11 @@ Working and hardware-validated (AMD dev box): the full read path (CPU via SMU in
 board via NCT6687D Super-I/O, DIMM temps + SPD over SMBus), non-admin per-LED RGB write, the
 identity-authenticated pipe, and the Windows-service packaging.
 
+Also working as user-mode reduced-assurance read backends (§5.2, opt-in): `gpu.*` GPU telemetry
+(AMD ADL validated on an RX 7900 XTX; NVIDIA/Intel built, HW-unvalidated) and `aqua.*`
+Aquacomputer telemetry (Quadro validated on the dev box). On the dev box the live catalog is
+**~61 ids** (43 base + 9 `gpu.*` + 9 `aqua.*`).
+
 Built but **not hardware-validated**: the **Intel i801** SMBus backend and the **NCT6775
 bank-select Super-I/O family** (NCT6683/6686 are register-identical to the validated 6687D
 but also unvalidated) — community testing welcome, see [TESTING.md](TESTING.md). The ITE
@@ -248,6 +287,7 @@ only), flipping `RequireAuthorizedClient` on by default (still audit-only), SMU 
 metrics (CPU package power / clocks — these need the SMU mailbox + a physical-memory read of
 the DMA'd table, which the narrow driver deliberately won't do; CPU **voltages** shipped in
 1.4.0 because they read as fixed named registers), and SMBus writes outside the RGB windows
-(deliberately refused). The
+(deliberately refused). **Storage temperature / SMART** was investigated and found to require an
+**admin-only** access path, so it is **not** in the non-admin sensor path and stays deferred. The
 productionization path is [SIGNING-AND-DEPLOYMENT.md](SIGNING-AND-DEPLOYMENT.md); release
 history is in [`CHANGELOG.md`](../CHANGELOG.md).

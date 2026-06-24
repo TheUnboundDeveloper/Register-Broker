@@ -67,12 +67,21 @@ Every request is `{"token":"<b64>","op":"<name>", ...}`. Responses are single fr
 ← {"type":"data","op":"sensor.list","sensors":[
      {"id":"smu.cpu.temp","label":"CPU Temperature","unit":"°C"},
      {"id":"nct6687d.temp.2","label":"VRM MOS Temperature","unit":"°C"},
-     {"id":"nct6687d.fan.3","label":"Fan 3","unit":"RPM"}, …
+     {"id":"nct6687d.fan.3","label":"Fan 3","unit":"RPM"},
+     {"id":"aqua.temp.0","label":"Aqua Temp 1","unit":"°C","removable":true}, …
   ]}
 ```
 This is the **only** discovery mechanism. It returns the broker's curated catalog — there is
 no way to enumerate hardware, addresses, or registers. Ids are **stable raw ids**
 (`{chip}.{kind}.{index}`, see `SENSOR-MAP.md`); labels come from board calibration data.
+
+Each entry is `{id, label, unit}` **plus an optional `"removable": true`** for sensors backed
+by a **hot-pluggable source** (e.g. an off-board USB controller — the `aqua.*` Aquacomputer
+channels). `removable` is **additive** (older clients that read only `id`/`label`/`unit` keep
+working; the protocol version stays **2**). A removable sensor can come and go between
+`sensor.list` calls as its device is plugged/unplugged — a consumer should treat its **absence
+as "not connected," not an error.** Sensors without the field are fixed-presence (always listed
+when their chip is detected).
 
 ### `sensor.read` — read one named sensor
 ```

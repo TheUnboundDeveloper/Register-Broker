@@ -8,6 +8,8 @@ that matches what you want to do.
 | Goal | Read |
 |---|---|
 | **Use it** — read my PC sensors / control my RGB as a normal (non-admin) user | [USER-GUIDE.md](USER-GUIDE.md) |
+| **Add GPU sensors** — opt-in read-only `gpu.*` (AMD / NVIDIA / Intel) | [GPU-SENSOR-SUPPORT.md](GPU-SENSOR-SUPPORT.md) |
+| **Add Aquacomputer sensors** — opt-in read-only, removable `aqua.*` (Quadro) | [AQUA-SENSOR-SUPPORT.md](AQUA-SENSOR-SUPPORT.md) |
 | **See it work** — the first-party demonstrator GUI (Reference Console) and how to run it | [REFERENCE-CONSOLE.md](REFERENCE-CONSOLE.md) |
 | **Sync RGB to music** — the standalone audio-reactive consumer (mic / system output) | [`../RgbAudioReactive/README.md`](../RgbAudioReactive/README.md) |
 | **Drive RGB** — the rgb.list / rgb.set command syntax and examples | [RGB-COMMANDS.md](RGB-COMMANDS.md) |

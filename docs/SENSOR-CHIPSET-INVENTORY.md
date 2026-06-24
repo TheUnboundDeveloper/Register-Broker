@@ -60,6 +60,16 @@
 - **How:** `SmbusIntel.c` (BAR4). Code complete; **no Intel test hardware** — read unproven, write `NotImplemented`.
 - **Source:** Linux `i2c-i801`.
 
+### GPU telemetry — AMD ADL · NVIDIA NVML · Intel Level Zero (USER-MODE, NOT via the driver) · ✅ AMD / 🟡 NVIDIA · Intel
+- **What:** discrete-GPU temps/fan/clocks/usage/voltage. A GPU is not a motherboard-SMBus device, so this is a **user-mode vendor-API backend** in the broker (no kernel driver, no re-sign), opt-in (`AllowGpuSensors`, off by default), **strictly read-only**. Vendor selected automatically per machine; vendor DLLs loaded by absolute `System32` path (hijack-safe).
+- **Channels:** `gpu.temp` / `.hotspot` / `.mem`, `gpu.fan` (RPM) / `.pct`, `gpu.power`, `gpu.clock.core` / `.mem`, `gpu.usage`, `gpu.voltage` (per-vendor coverage gated — a metric a vendor doesn't report is omitted).
+- **Detail:** `docs/GPU-SENSOR-SUPPORT.md`. **Source:** AMD ADL SDK (PMLog) · NVIDIA NVML · Intel oneAPI Level Zero Sysman. AMD ✅ HW-validated (RX 7900 XTX); NVIDIA + Intel 🟡 built, unvalidated.
+
+### Aquacomputer controllers — USB-HID (USER-MODE, REMOVABLE, NOT via the driver) · ✅ Quadro
+- **What:** off-board liquid-cooling controller telemetry. A USB-HID device, so (like GPU sensors) a **user-mode backend** — opt-in (`AllowAquaSensors`, off by default), strictly read-only, and **removable** (channels flagged `removable` in `sensor.list`; hot-plug aware, no flapping). First device: **Aquacomputer Quadro** (`0x0C70:0xF00D`).
+- **Channels:** `aqua.temp.0`–`.3` (°C), `aqua.flow.0` (L/h), `aqua.fan.0`–`.3` (RPM).
+- **Detail:** `docs/AQUA-SENSOR-SUPPORT.md`. **Source:** Linux `aquacomputer_d5next.c`, cross-checked with liquidctl. ✅ HW-validated on the dev-box Quadro.
+
 ---
 
 ## 2. By chipset / RGB control
@@ -115,6 +125,8 @@ board's zones.
 | Board temps/fans/volts (MSI newer) | NCT6683 / NCT6686 EC-space | 🟡 |
 | Board temps/fans/volts (ASUS/ASRock/Gigabyte-Nuvoton/EVGA/Biostar) | NCT6775 family bank-select | 🟡 |
 | DIMM temps | JC42 over AMD FCH SMBus | ✅ |
+| GPU temps/fan/clocks/usage/voltage | AMD ADL / NVIDIA NVML / Intel L0 (user-mode, opt-in) | ✅ AMD / 🟡 NVIDIA · Intel |
+| Aquacomputer temps/flow/fans | Quadro USB-HID (user-mode, opt-in, removable) | ✅ |
 | DRAM RGB (per-LED, non-admin) | ENE/Aura SMBus, brick-guarded | ✅ |
 | Intel SMBus host | i801 | ⬜ |
 | Gigabyte/ITE motherboard RGB + ITE sensors | — | 🗄️ archived |
