@@ -47,6 +47,11 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<SensorRow> _sensorRows = new();
     private readonly ObservableCollection<SensorGroup> _sensorGroups = new();
     private readonly Dictionary<string, SensorGroup> _groupByName = new();
+    // Sensors that have dropped out of the live catalog (e.g. an unplugged removable Quadro),
+    // counted per readall cycle so a single transient miss doesn't flicker a fixed sensor out.
+    private readonly Dictionary<string, int> _sensorMiss = new();
+    // Sensors that were available AND usable (read OK) in the last readall — the count shown in the UI.
+    private int _usableSensorCount;
     private readonly ObservableCollection<RgbRow> _rgbRows = new();
     private readonly ObservableCollection<LedCell> _ledCells = new();
     private readonly ObservableCollection<ActivityEntry> _activity = new();
@@ -1302,12 +1307,15 @@ public partial class MainWindow : Window
             var t0 = DateTime.UtcNow;
             var list = await _sensors.SensorReadAllAsync();
             _lastLatencyMs = (DateTime.UtcNow - t0).TotalMilliseconds;
+            // sensor.readall returns only sensors that are available AND read OK this cycle, so its
+            // count is exactly "available and usable" — the number surfaced everywhere in the UI.
+            _usableSensorCount = list.Count;
             MergeSensors(list);
             UpdateOverview(list);
             UpdateSensorBoxes(list);
             UpdateLatency();
             UpdateCounts();
-            SensorCount.Text = $"{list.Count} sensors · {_lastLatencyMs:F0} ms";
+            SensorCount.Text = $"{_usableSensorCount} sensors · {_lastLatencyMs:F0} ms";
         }
         catch (Exception ex) { LogEvent("ERROR", "sensor.readall failed: " + ex.Message, null); StopPolling(); }
     }
@@ -1315,13 +1323,41 @@ public partial class MainWindow : Window
     private void MergeSensors(IReadOnlyList<SensorInfo> list)
     {
         var byId = _sensorRows.ToDictionary(r => r.Id);
+        var present = new HashSet<string>(list.Count);
         foreach (var s in list)
         {
+            present.Add(s.Id);
+            _sensorMiss.Remove(s.Id);
             if (byId.TryGetValue(s.Id, out var row)) { row.Update(s); continue; }
 
             var newRow = new SensorRow(s) { ShowOrigin = _showOrigins };
             _sensorRows.Add(newRow);
             GroupFor(GroupOf(s)).Rows.Add(newRow);
+        }
+
+        /* Prune rows whose sensor has dropped out of the live catalog — a removable controller
+           (e.g. the Quadro) unplugged, or a sensor gone unavailable — so the list and the count
+           stay "available and usable". Debounced by 2 cycles so one transient read miss never
+           flickers a fixed sensor out. (Pinned dashboard cards keep showing "—" per the removable
+           contract; only the auto-built Sensors list is pruned.) */
+        foreach (var row in _sensorRows.ToList())
+        {
+            if (present.Contains(row.Id)) continue;
+            int miss = (_sensorMiss.TryGetValue(row.Id, out int m) ? m : 0) + 1;
+            _sensorMiss[row.Id] = miss;
+            if (miss >= 2) RemoveSensorRow(row);
+        }
+    }
+
+    private void RemoveSensorRow(SensorRow row)
+    {
+        _sensorRows.Remove(row);
+        _sensorMiss.Remove(row.Id);
+        foreach (var g in _sensorGroups.ToList())
+        {
+            if (!g.Rows.Remove(row)) continue;
+            if (g.Rows.Count == 0) { _sensorGroups.Remove(g); _groupByName.Remove(g.Name); }
+            break;
         }
     }
 
@@ -1439,9 +1475,13 @@ public partial class MainWindow : Window
     private void UpdateSensorBoxes(IReadOnlyList<SensorInfo> list)
     {
         if (_sensorBoxViews.Count == 0) return;
-        foreach (var s in list)
-            if (_sensorBoxViews.TryGetValue(s.Id, out var view))
-                SetCard(view.Val, view.Spark, s.Value);
+        var values = new Dictionary<string, double?>(list.Count);
+        foreach (var s in list) values[s.Id] = s.Value;
+        // Update every pinned card; a card whose sensor is no longer available/usable (e.g. an
+        // unplugged removable Quadro) gets a null value -> SetCard shows "—" (not connected) rather
+        // than a frozen stale reading.
+        foreach (var (id, view) in _sensorBoxViews)
+            SetCard(view.Val, view.Spark, values.TryGetValue(id, out var v) ? v : null);
     }
 
     private static bool Has(SensorInfo s, string k)
@@ -1473,7 +1513,9 @@ public partial class MainWindow : Window
     private void UpdateCounts()
     {
         DevicesText.Text = _rgbRows.Count.ToString();
-        SensorsCountText.Text = _sensorRows.Count.ToString();
+        // "available and usable" — the last readall's count, not the cumulative row list (which can
+        // include sensors that have since dropped out, e.g. an unplugged removable controller).
+        SensorsCountText.Text = _usableSensorCount.ToString();
     }
 
     private void UpdateUptime()
