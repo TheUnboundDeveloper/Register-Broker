@@ -136,6 +136,7 @@ public partial class MainWindow : Window
         PropertyChanged += OnWindowPropertyChanged;
         ApplyGlobalSettings();
         SetupDashboardBoxes();
+        ApplyGpuVendorColor();   // tint the GPU card by vendor (AMD red / NVIDIA green / Intel blue)
         MountRgbPanels(onRgbPage: false);   // dashboard is the default view -> RGB panels start in its cards
 
         _uptimeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -692,6 +693,14 @@ public partial class MainWindow : Window
         var id = SensorBoxPrefix + sensorId;
         BoxTitles[id] = label;
         var accent = AccentForGroup(group);
+        var badgeText = BadgeFor(group);
+        // GPU sensor cards are tinted by vendor (AMD red / NVIDIA green / Intel blue), matching the
+        // GPU overview card, so every gpu.* reading on the dashboard reads as the same vendor colour.
+        if (sensorId.StartsWith("gpu", StringComparison.OrdinalIgnoreCase) && GpuVendor.Kind != GpuVendorKind.None)
+        {
+            accent = new SolidColorBrush(GpuVendor.AccentColor(GpuVendor.Kind));
+            badgeText = "GPU";
+        }
 
         var bar = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
         bar.Classes.Add("dragbar");
@@ -717,7 +726,7 @@ public partial class MainWindow : Window
         var badgeColor = (accent as ISolidColorBrush)?.Color ?? Colors.Gray;
         var badge = new Border { Width = 26, Height = 26, CornerRadius = new Avalonia.CornerRadius(7),
             Background = new SolidColorBrush(Color.FromArgb(40, badgeColor.R, badgeColor.G, badgeColor.B)),
-            Child = new TextBlock { Text = BadgeFor(group), FontSize = 9, FontWeight = FontWeight.Bold,
+            Child = new TextBlock { Text = badgeText, FontSize = 9, FontWeight = FontWeight.Bold,
                 Foreground = accent, HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center } };
         var val = new TextBlock { Text = "—", FontSize = 26, FontWeight = FontWeight.Bold,
@@ -1412,6 +1421,19 @@ public partial class MainWindow : Window
         SetCard(GpuVal, GpuSpark, gpu);
         SetCard(VrmVal, VrmSpark, vrm);
         SetCard(SysVal, SysSpark, sys);
+    }
+
+    // Colour the GPU card by which vendor the broker serves GPU sensors from:
+    // AMD = red, NVIDIA = green, Intel = blue. No GPU runtime present -> keep the default styling.
+    private void ApplyGpuVendorColor()
+    {
+        var kind = GpuVendor.Kind;
+        if (kind == GpuVendorKind.None) return;
+        var c = GpuVendor.AccentColor(kind);
+        var accent = new SolidColorBrush(c);
+        GpuBadge.Background = new SolidColorBrush(Color.FromArgb(0x26, c.R, c.G, c.B));
+        GpuBadgeText.Foreground = accent;   // vendor colour on the badge + sparkline only;
+        GpuSpark.Stroke = accent;           // the temperature value stays white (TextPrimary).
     }
 
     private void UpdateSensorBoxes(IReadOnlyList<SensorInfo> list)

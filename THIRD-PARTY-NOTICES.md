@@ -71,6 +71,21 @@ brick-guard, so they are gated by `AllowHidRgb` (on by default as of 2026-06-22;
 set `false` to opt out) and reduced-assurance; the broker's baked report builder
 is the only write boundary.
 
+Read-only **GPU telemetry** (`gpu.*` sensors, `BrokerSensorBridge/Gpu/`) is obtained through the
+three GPU vendors' published, first-party C APIs, reproduced as documented facts (entry-point
+names, enum values, struct layouts) — no SDK source is copied or distributed. Each vendor DLL
+ships with its graphics driver and is **loaded at runtime via P/Invoke, never redistributed**. All
+three paths are user-mode, **read-only** (only sensor getters are resolved — no overclock/fan/power
+write entry points), opt-in (`AllowGpuSensors`, off by default) and reduced-assurance:
+
+- **AMD Display Library (ADL)** — `atiadlxx.dll`; `AdapterInfo` / `ADLPMLogDataOutput` layouts and
+  `ADL_PMLOG_*` indices from `adl_sdk.h` / `adl_structures.h`, cross-checked against
+  LibreHardwareMonitor's `ADLSensorType` enum (`Gpu/AdlInterop.cs`).
+- **NVIDIA Management Library (NVML)** — `nvml.dll`; the published `nvml.h` C API, the same
+  interface `nvidia-smi` is built on (`Gpu/NvmlGpuProvider.cs`).
+- **Intel oneAPI Level Zero / Sysman** — `ze_loader.dll`; the `ze_api.h` / `zes_api.h` telemetry
+  API (`Gpu/LevelZeroGpuProvider.cs`).
+
 ## Build / runtime dependencies
 
 ### Broker + driver (the privileged stack)

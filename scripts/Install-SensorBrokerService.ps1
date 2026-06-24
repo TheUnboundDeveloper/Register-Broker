@@ -14,6 +14,10 @@
                        Light) motherboard-header transport (reduced assurance,
                        opt-in; writes AllowHidRgb=true; implies -WithRgbControl).
 
+    Add -WithGpuSensors to enable the read-only GPU sensor source (AMD ADL;
+    served as gpu.* on the SensorBroker service; reduced assurance, opt-in;
+    writes AllowGpuSensors=true — no control service needed).
+
   The broker/control services run the SAME published exe with --service; the
   process detects the SCM and hosts the long-running body under it (see
   ServiceHost.cs).  Because they run as LocalSystem the broker widens the pipe
@@ -41,6 +45,11 @@ param(
     # assurance (user-mode, no kernel brick-guard) — see docs/SECURITY.md. Implies the
     # control service, so it turns on -WithRgbControl automatically.
     [switch]$WithHidRgb,
+    # Enable the opt-in read-only GPU sensor source (AMD ADL today) on the SENSOR service
+    # (writes AllowGpuSensors=true into appsettings.json). A discrete GPU's thermals are a
+    # vendor user-mode API, not an SMBus device, so this is reduced assurance (no kernel
+    # driver, no brick-guard) but strictly READ-ONLY. Served as gpu.* sensors. See docs/SECURITY.md.
+    [switch]$WithGpuSensors,
     [switch]$SkipDriver,            # do not (re)register the kernel driver service
     [switch]$NoDriverDependency,    # do not make the broker depend on the driver service
     [switch]$NoStart,               # register but do not start the services
@@ -169,7 +178,7 @@ $Exe = (Resolve-Path $Exe).Path
 #--------------------------------------------------------------------------
 $AppSettings = Join-Path $BridgeDir "appsettings.json"
 $setAuth = ($RequireAuthorizedClient -or $AllowedClientSigners.Count -or $AllowedClientPaths.Count)
-if ((Test-Path $AppSettings) -and ($setAuth -or $WithHidRgb)) {
+if ((Test-Path $AppSettings) -and ($setAuth -or $WithHidRgb -or $WithGpuSensors)) {
     Write-Host "[cfg] Updating $AppSettings"
 
     $cfg = Get-Content $AppSettings -Raw | ConvertFrom-Json
@@ -201,6 +210,13 @@ if ((Test-Path $AppSettings) -and ($setAuth -or $WithHidRgb)) {
     if ($WithHidRgb) {
         $cfg | Add-Member -NotePropertyName AllowHidRgb -NotePropertyValue $true -Force
         Write-Host "[cfg] AllowHidRgb=true (USB-HID motherboard-header RGB enabled — reduced assurance, no kernel brick-guard)."
+    }
+
+    # Read-only GPU sensor source (vendor user-mode API, AMD ADL today). Reduced assurance
+    # (no kernel driver/brick-guard) but read-only; served as gpu.* on the sensor service.
+    if ($WithGpuSensors) {
+        $cfg | Add-Member -NotePropertyName AllowGpuSensors -NotePropertyValue $true -Force
+        Write-Host "[cfg] AllowGpuSensors=true (read-only GPU sensors via vendor API — reduced assurance, no kernel guard)."
     }
 
     # Write BOM-less UTF-8 deterministically. Windows PowerShell 5.1 'Set-Content -Encoding UTF8'

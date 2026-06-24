@@ -31,12 +31,20 @@ internal sealed class ChannelBackendDef
     /// <summary>Backend-level availability (per-channel predicates may narrow further).</summary>
     public Func<ISmbusBackend, bool> Gate { get; }
     public IReadOnlyList<RawChannel> Channels { get; }
+    /// <summary>
+    /// True for a USER-MODE source that does not ride the kernel driver (e.g. GPU sensors via a
+    /// vendor API). Such an entry has no DriverBackends to match against the kernel registry, so
+    /// the registry's "declares a driver backend" / "name exists in driver enumeration" checks
+    /// skip it. Reduced-assurance, opt-in — see SECURITY.md.
+    /// </summary>
+    public bool IsUserMode { get; }
 
     public ChannelBackendDef(string name, string[] driverBackends, string idPrefix,
-                             Func<ISmbusBackend, bool> gate, IReadOnlyList<RawChannel> channels)
+                             Func<ISmbusBackend, bool> gate, IReadOnlyList<RawChannel> channels,
+                             bool isUserMode = false)
     {
         Name = name; DriverBackends = driverBackends; IdPrefix = idPrefix;
-        Gate = gate; Channels = channels;
+        Gate = gate; Channels = channels; IsUserMode = isUserMode;
     }
 }
 
@@ -67,6 +75,21 @@ internal static class ChannelRegistry
         => b.SuperioAvailable && (ChipFamilies.IsNctEc(b.SuperioChipId) || b.SuperioChipId == 0);
     private static bool IsNct6775(ISmbusBackend b)
         => b.SuperioAvailable && ChipFamilies.IsNct6775(b.SuperioChipId);
+
+    /* GPU sensors are a USER-MODE source (vendor API), not a kernel backend: the gate and reads
+       ignore the SMBus backend and key off the process-wide GpuSensorProvider singleton, which is
+       null until the sensor service opts in (AllowGpuSensors) and a GPU is detected. The backend-
+       level gate is just "is a GPU present"; per-metric availability is finer (a metric the GPU/
+       driver does not populate is gated out, not listed-but-erroring), like CcdTempPresent. The
+       provider caches one telemetry sample per burst, so the gate's TryRead is cheap. */
+    private static bool GpuUp(ISmbusBackend _) => GpuSensorProvider.Current?.IsAvailable == true;
+
+    private static RawChannel Gpu(string id, string unit, int round, GpuMetric metric)
+        => new(id, unit, round,
+               _ => GpuSensorProvider.Current is { } p && p.TryRead(metric, out double _),
+               _ => GpuSensorProvider.Current is { } p && p.TryRead(metric, out double v)
+                    ? new RawReading(true, v, "Ok")
+                    : new RawReading(false, 0, "NotAvailable"));
 
     /// <summary>The registry. Order is serving order (sensor.list is stable across releases).</summary>
     public static readonly IReadOnlyList<ChannelBackendDef> Backends = Build();
@@ -203,6 +226,28 @@ internal static class ChannelRegistry
                 b => b.Available, list));
         }
 
+        /*-- GPU telemetry (READ-ONLY, USER-MODE). Not a kernel backend: served from the vendor API
+             (AMD ADL PMLog today) via the GpuSensorProvider singleton. Opt-in (AllowGpuSensors) and
+             reduced assurance — no kernel driver, no brick-guard, no write path. Present only when a
+             supported GPU is detected; an unsupported metric reads "not available" honestly. --*/
+        {
+            var list = new List<RawChannel>
+            {
+                Gpu("gpu.temp",          "°C",  1, GpuMetric.TempEdge),
+                Gpu("gpu.temp.hotspot",  "°C",  1, GpuMetric.TempHotspot),
+                Gpu("gpu.temp.mem",      "°C",  1, GpuMetric.TempMem),
+                Gpu("gpu.fan",           "RPM", 0, GpuMetric.FanRpm),
+                Gpu("gpu.fan.pct",       "%",   0, GpuMetric.FanPercent),
+                Gpu("gpu.power",         "W",   0, GpuMetric.PowerW),
+                Gpu("gpu.clock.core",    "MHz", 0, GpuMetric.ClockGfxMhz),
+                Gpu("gpu.clock.mem",     "MHz", 0, GpuMetric.ClockMemMhz),
+                Gpu("gpu.usage",         "%",   0, GpuMetric.UtilGfx),
+            };
+
+            defs.Add(new ChannelBackendDef("GPU (AMD ADL)", Array.Empty<string>(), "gpu.",
+                GpuUp, list, isUserMode: true));
+        }
+
         return defs;
     }
 
@@ -223,7 +268,8 @@ internal static class ChannelRegistry
             if (!names.Add(def.Name)) return $"duplicate backend name '{def.Name}'";
             if (string.IsNullOrEmpty(def.IdPrefix) || !prefixes.Add(def.IdPrefix))
                 return $"missing/duplicate id prefix '{def.IdPrefix}' ({def.Name})";
-            if (def.DriverBackends.Count == 0) return $"'{def.Name}' declares no driver backend";
+            if (!def.IsUserMode && def.DriverBackends.Count == 0) return $"'{def.Name}' declares no driver backend";
+            if (def.IsUserMode && def.DriverBackends.Count != 0) return $"user-mode '{def.Name}' must not declare a driver backend";
             if (def.Channels.Count == 0) return $"'{def.Name}' has no channels";
 
             foreach (RawChannel ch in def.Channels)

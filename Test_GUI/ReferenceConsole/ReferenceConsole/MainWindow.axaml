@@ -245,8 +245,8 @@
                   </Grid>
                   <StackPanel Spacing="6">
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                      <Border Width="26" Height="26" CornerRadius="7" Background="#16321F">
-                        <TextBlock Text="GPU" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource Green}"
+                      <Border x:Name="GpuBadge" Width="26" Height="26" CornerRadius="7" Background="#16321F">
+                        <TextBlock x:Name="GpuBadgeText" Text="GPU" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource Green}"
                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
                       </Border>
                       <TextBlock x:Name="GpuVal" Text="—" FontSize="26" FontWeight="Bold"

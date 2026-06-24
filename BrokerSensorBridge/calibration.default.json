@@ -289,6 +289,42 @@
     {
       "rawId": "dimm.7",
       "label": "DIMM 7 Temperature"
+    },
+    {
+      "rawId": "gpu.temp",
+      "label": "GPU Temperature"
+    },
+    {
+      "rawId": "gpu.temp.hotspot",
+      "label": "GPU Hot Spot"
+    },
+    {
+      "rawId": "gpu.temp.mem",
+      "label": "GPU Memory Temperature"
+    },
+    {
+      "rawId": "gpu.fan",
+      "label": "GPU Fan"
+    },
+    {
+      "rawId": "gpu.fan.pct",
+      "label": "GPU Fan Duty"
+    },
+    {
+      "rawId": "gpu.power",
+      "label": "GPU Power"
+    },
+    {
+      "rawId": "gpu.clock.core",
+      "label": "GPU Core Clock"
+    },
+    {
+      "rawId": "gpu.clock.mem",
+      "label": "GPU Memory Clock"
+    },
+    {
+      "rawId": "gpu.usage",
+      "label": "GPU Utilization"
     }
   ],
   "boards": [

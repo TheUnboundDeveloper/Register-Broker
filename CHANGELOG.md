@@ -9,6 +9,38 @@ assembly version, git tags) and the **pipe protocol version** (currently `2`, se
 in the client hello — see `docs/CLIENT-PROTOCOL.md` §8) are independent. New sensors
 and additive ops do not bump the protocol version.
 
+## [Unreleased]
+
+### Added — read-only GPU sensors (AMD · NVIDIA · Intel; user-mode, opt-in)
+
+- **GPU telemetry is now served as `gpu.*` sensors** over the normal `sensor.list` /
+  `sensor.read` / `sensor.readall` ops, non-admin, alongside the CPU/board sensors:
+  `gpu.temp` (edge), `gpu.temp.hotspot`, `gpu.temp.mem`, `gpu.fan` (RPM), `gpu.fan.pct`,
+  `gpu.power` (W), `gpu.clock.core`, `gpu.clock.mem` (MHz), `gpu.usage` (%). The Reference
+  Console's previously-empty **GPU Temperature** card auto-populates (no Console change).
+- **Broker-only, no driver change / re-sign.** A discrete GPU's thermals are not an SMBus
+  device, so this is a **user-mode vendor-API backend** in the broker (minimal P/Invoke, no new
+  NuGet dep), not a kernel backend. Same reduced-assurance shape as the USB-HID RGB path, but
+  **strictly read-only** (no GPU write op exists). One `IGpuSensorProvider` seam, one `IsUserMode`
+  `ChannelBackendDef` (prefix `gpu.`); `GpuSensorProvider.TryCreate` probes AMD → NVIDIA → Intel
+  and uses whichever vendor library answers, so the right provider is picked automatically.
+- **Three vendors implemented:**
+  - **AMD** (`Gpu/AdlInterop.cs`, ADL PMLog via `atiadlxx.dll`) — **HW-validated on a Radeon
+    RX 7900 XTX** (RDNA3): edge/hotspot/mem temps, fan, clocks, utilization read real, physically
+    consistent values (PMLog indices anchored on hardware by `BUS_LANES = 16`). `gpu.power`/
+    `ASIC_POWER` isn't populated by the current RDNA3 driver's PMLog set → reports not-available
+    rather than a guessed value.
+  - **NVIDIA** (`Gpu/NvmlGpuProvider.cs`, NVML via `nvml.dll`) — temp, fan %, power, core/mem
+    clock, utilization. **Built, HW-unvalidated** (no NVIDIA GPU on the dev box).
+  - **Intel** (`Gpu/LevelZeroGpuProvider.cs`, Level Zero **Sysman** via `ze_loader.dll`) — edge +
+    memory temp, GPU + memory clock, fan RPM (power/utilization are counter deltas, deferred).
+    **Built, HW-unvalidated**; every call degrades gracefully (a wrong descriptor tag hides one
+    metric, never crashes).
+- **Opt-in, off by default:** `AllowGpuSensors` (default `false`), `--allow-gpu-sensors`, or
+  `Install-SensorBrokerService.ps1 -WithGpuSensors`. Calibration labels added; `DecoderRegistry`
+  cites the vendor sources; 8 new selftest gates (`SELFTEST PASS`). Session-0 (LocalSystem)
+  validation for the GPU path still pending. Details: `docs/GPU-SENSOR-SUPPORT.md`.
+
 ## [1.6.0] — 2026-06-22 — device-aware brick-guard + RGB device expansion + USB-HID RGB on by default
 
 > Building out RGB device coverage ported from the public hardware register maps (facts only —

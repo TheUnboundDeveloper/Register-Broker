@@ -64,6 +64,15 @@ impact beyond what's described below and in `docs/ARCHITECTURE.md`:
   RGB control wants it and the blast radius is bounded to the RGB controller itself (no SPD/sensor
   bus). Operators who want the stricter posture set `AllowHidRgb: false` in the control service's
   `appsettings.json`. Reports showing impact beyond confused LEDs are welcome.
+- **GPU sensors are a reduced-assurance, READ-ONLY source, off by default.** A discrete GPU's
+  thermals are not an SMBus device, so `gpu.*` is served by a user-mode vendor-API backend in the
+  broker (AMD **ADL** today), not the kernel driver — it does **not** pass the brick-guard because
+  there is no driver involved. Unlike the HID RGB path it is **strictly read-only**: no GPU write
+  op exists anywhere (only sensor getters are resolved), so the only residual is the vendor-library
+  dependency (`atiadlxx.dll`, loaded at runtime, never redistributed) running in the broker
+  process. It is **opt-in** (`AllowGpuSensors` defaults to `false`; enable in the sensor service's
+  `appsettings.json`, via `--allow-gpu-sensors`, or `Install-SensorBrokerService.ps1
+  -WithGpuSensors`). Design + provenance: `docs/GPU-SENSOR-SUPPORT.md`.
 
 ## Supported versions
 

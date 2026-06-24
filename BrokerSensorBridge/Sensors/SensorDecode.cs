@@ -106,6 +106,7 @@ internal static class DecoderRegistry
         ["nct6687d."] = "Linux nct6683 + Fred78290/nct6687d (NctTempC / NctFanRpm / NctVoltageMv / NctPwmPercent)",
         ["nct6775."]  = "Linux nct6775-core (NctTempC / NctFanRpm / Nct6775VoltageMv)",
         ["dimm."]     = "Linux jc42 (Jc42TempC)",
+        ["gpu."]      = "AMD ADL PMLog (ADL2_New_QueryPMLogData_Get; AMD ADL SDK) — values returned in engineering units",
     };
 
     public static bool Covers(string rawId)

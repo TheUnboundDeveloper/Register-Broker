@@ -271,6 +271,22 @@ internal static class Program
             SensorCatalog.Configure(CalibrationStore.Load(board, Log, defaultCalibPath, userCalibPath));
 
             /*-----------------------------------------------------------*\
+            | GPU sensors (READ-ONLY, USER-MODE, opt-in). When enabled,    |
+            | probe the vendor API (AMD ADL) and publish the gpu.* channels|
+            | via the provider singleton. Off / no GPU -> the channels     |
+            | stay absent (inert-when-absent, like every other backend).   |
+            | Read lazily at request time, so wiring it after Configure is |
+            | correct. Reduced assurance: no kernel driver, no brick-guard.|
+            \*-----------------------------------------------------------*/
+            if (Config.AllowGpuSensors)
+            {
+                GpuSensorProvider.Current = GpuSensorProvider.TryCreate(Log);
+                Log(GpuSensorProvider.Current is { IsAvailable: true } gpu
+                    ? $"GPU sensors: {gpu.Name} via AMD ADL — read-only, reduced assurance (user-mode, no kernel guard)."
+                    : "GPU sensors: enabled (AllowGpuSensors) but no supported GPU detected — gpu.* stay absent.");
+            }
+
+            /*-----------------------------------------------------------*\
             | One-shot mode: print a single named-catalog snapshot, read  |
             | straight from the driver, and exit. Useful for diagnostics. |
             \*-----------------------------------------------------------*/
@@ -311,6 +327,8 @@ internal static class Program
         }
         finally
         {
+            (GpuSensorProvider.Current as IDisposable)?.Dispose();
+            GpuSensorProvider.Current = null;
             smbus?.Dispose();
             Log("BrokerSensorBridge exiting.");
         }
@@ -813,6 +831,10 @@ internal static class Program
               that keeps the broker and kernel tables from drifting apart. --*/
         failures += SelfTestBackendRegistry();
 
+        /*-- GPU sensors: the read-only user-mode gpu.* channels are absent without a provider,
+              available + decode their value with one, and never light a CPU/board family. --*/
+        failures += SelfTestGpuSensors();
+
         /*-- RGB catalog: board-aware zone profiles validate, the MSI profile resolves the full
               zone vocabulary, the generic fallback is DRAM-only, and label overrides + transport
               gating build the expected device set. --*/
@@ -1105,6 +1127,72 @@ internal static class Program
         {
             Console.WriteLine($"  [FAIL] registry: threw {ex.Message}");
             failures++;
+        }
+
+        return failures;
+    }
+
+    /*-----------------------------------------------------------*\
+    | GPU sensors (read-only, user-mode). Asserts:                 |
+    |   * the gpu.* channels exist in the catalog,                 |
+    |   * with NO provider they are absent (inert-when-absent) and |
+    |     the GPU presence never lights a CPU/board family,        |
+    |   * with a fixed provider they become available and read the |
+    |     supplied value in the right unit, and a metric the GPU   |
+    |     does not expose reports "not available" honestly.        |
+    | The SMBus backend arg is irrelevant to gpu.* (they key off   |
+    | the provider singleton), so a plain mock is used throughout. |
+    \*-----------------------------------------------------------*/
+    private static int SelfTestGpuSensors()
+    {
+        int failures = 0;
+        void Check(string name, bool ok)
+        {
+            Console.WriteLine($"  [{(ok ? "PASS" : "FAIL")}] gpu: {name}");
+            if (!ok) failures++;
+        }
+
+        var anyBackend = new MockSmbusBackend(available: true);   // gpu.* ignore the backend
+        try
+        {
+            SensorCatalogEntry? gpuTemp  = SensorCatalog.Find("gpu.temp");
+            SensorCatalogEntry? gpuPower = SensorCatalog.Find("gpu.power");
+            SensorCatalogEntry? gpuMem   = SensorCatalog.Find("gpu.temp.mem");
+            Check("catalog has gpu.temp + gpu.power + gpu.temp.mem",
+                  gpuTemp != null && gpuPower != null && gpuMem != null);
+            if (gpuTemp == null || gpuPower == null || gpuMem == null) return failures + 1;
+
+            /* No provider -> gpu.* absent; CPU/board sensors unaffected. */
+            GpuSensorProvider.Current = null;
+            Check("gpu.* absent without a provider", !gpuTemp.IsAvailable(anyBackend) && !gpuPower.IsAvailable(anyBackend));
+
+            /* A fixed provider lights the channels it supplies and decodes their value/unit. */
+            GpuSensorProvider.Current = new FixedGpuProvider("Test GPU", new Dictionary<GpuMetric, double>
+            {
+                [GpuMetric.TempEdge] = 61.0,
+                [GpuMetric.PowerW]   = 120.0,
+            });
+            Check("gpu.temp available with provider", gpuTemp.IsAvailable(anyBackend));
+            SensorReading t = gpuTemp.Read(anyBackend);
+            Check("gpu.temp reads 61.0 °C", t.Ok && t.Unit == "°C" && Math.Abs(t.Value - 61.0) < 1e-9);
+            SensorReading p = gpuPower.Read(anyBackend);
+            Check("gpu.power reads 120 W", p.Ok && p.Unit == "W" && Math.Abs(p.Value - 120.0) < 1e-9);
+
+            /* A metric the provider does not expose reports not-available, not a bogus zero. */
+            Check("unsupplied gpu metric -> not ok", !gpuMem.Read(anyBackend).Ok);
+
+            /* GPU presence must not light a CPU/board family (cross-source isolation). */
+            Check("GPU provider does not light smu.cpu.temp", !SensorCatalog.Find("smu.cpu.temp")!.IsAvailable(anyBackend));
+            Check("GPU provider does not light nct6687d.temp.0", !SensorCatalog.Find("nct6687d.temp.0")!.IsAvailable(anyBackend));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  [FAIL] gpu: threw {ex.Message}");
+            failures++;
+        }
+        finally
+        {
+            GpuSensorProvider.Current = null;   // leave the catalog GPU-free for the later server cases
         }
 
         return failures;
@@ -1772,6 +1860,18 @@ internal sealed class BridgeConfig
     \*-----------------------------------------------------------*/
     public bool AllowHidRgb { get; set; } = true;
 
+    /*-----------------------------------------------------------*\
+    | GPU sensors (read-only) via the vendor user-mode API         |
+    | (AMD ADL today). OFF by default: a discrete GPU's thermals   |
+    | are not an SMBus device, so this loads a vendor library in   |
+    | the broker process — like AllowHidRgb it does NOT pass the   |
+    | kernel brick-guard (there is no driver involved) and is      |
+    | reduced assurance, so it is opt-in. READ-ONLY: no GPU write  |
+    | path exists. Set true in appsettings.json (server-side) or   |
+    | --allow-gpu-sensors to force it on. See SECURITY.md.         |
+    \*-----------------------------------------------------------*/
+    public bool AllowGpuSensors { get; set; } = false;
+
     [JsonIgnore]
     public string LogFileExpanded => Environment.ExpandEnvironmentVariables(LogFile);
     [JsonIgnore]
@@ -1800,6 +1900,10 @@ internal sealed class BridgeConfig
         /* CLI override (handy for bring-up): --allow-hid-rgb forces the USB-HID RGB transport on. */
         if (args.Any(a => a.Equals("--allow-hid-rgb", StringComparison.OrdinalIgnoreCase)))
             cfg.AllowHidRgb = true;
+
+        /* CLI override: --allow-gpu-sensors forces the read-only GPU sensor source on. */
+        if (args.Any(a => a.Equals("--allow-gpu-sensors", StringComparison.OrdinalIgnoreCase)))
+            cfg.AllowGpuSensors = true;
 
         return cfg;
     }

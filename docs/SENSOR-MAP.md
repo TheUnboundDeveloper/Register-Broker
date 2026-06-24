@@ -43,6 +43,34 @@ Register facts ported from the Linux hwmon drivers (`nct6687d`, `nct6775`).
 The ITE IT87xx backend (`it87.*` channels) was **retired 2026-06-11** (removed from the
 tree; design record `GIGABYTE-SUPPORT.md`), along with its `board.ite.*` aliases.
 
+## GPU telemetry (read-only, USER-MODE — NOT via the driver)
+
+A discrete GPU does not expose its sensors on the motherboard SMBus, so `gpu.*` is the one
+sensor group that does **not** ride the kernel driver. It is served by a user-mode vendor-API
+backend in the broker — **AMD ADL**, **NVIDIA NVML**, or **Intel Level Zero Sysman**, selected
+automatically per machine — opt-in (`AllowGpuSensors`, off by default), reduced assurance (no
+kernel brick-guard — there is no driver involved), and **strictly read-only** (no GPU write op
+exists). Values arrive in engineering units; a channel is listed only when the GPU/driver actually
+reports it (so coverage varies by vendor). The table below shows the AMD mapping (✅ validated on
+an RX 7900 XTX); NVIDIA + Intel are built but HW-unvalidated. Full design + per-vendor coverage:
+`docs/GPU-SENSOR-SUPPORT.md`.
+
+| Logical name | Source | "Location" | Raw → value | Status |
+|---|---|---|---|---|
+| `gpu.temp` | AMD ADL PMLog | `TEMPERATURE_EDGE` (vendor API, not an address) | °C as reported | ✅ validated (RX 7900 XTX) |
+| `gpu.temp.hotspot` | AMD ADL PMLog | `TEMPERATURE_HOTSPOT` | °C | ✅ |
+| `gpu.temp.mem` | AMD ADL PMLog | `TEMPERATURE_MEM` | °C | ✅ |
+| `gpu.fan` | AMD ADL PMLog | `FAN_RPM` | RPM | ✅ (0 at idle — zero-fan) |
+| `gpu.fan.pct` | AMD ADL PMLog | `FAN_PERCENTAGE` | % | ✅ |
+| `gpu.power` | AMD ADL PMLog | `ASIC_POWER` | W | 🟡 absent on the current RDNA3 driver's PMLog set → not-available (no guessing) |
+| `gpu.clock.core` | AMD ADL PMLog | `CLK_GFXCLK` | MHz | ✅ |
+| `gpu.clock.mem` | AMD ADL PMLog | `CLK_MEMCLK` | MHz | ✅ |
+| `gpu.usage` | AMD ADL PMLog | `INFO_ACTIVITY_GFX` | % | ✅ |
+
+PMLOG indices ported from the AMD ADL SDK (`adl_structures.h`), cross-checked against
+LibreHardwareMonitor's `ADLSensorType`; anchored on hardware by `BUS_LANES = 16` (PCIe x16).
+NVIDIA/Intel slot in behind the same `IGpuSensorProvider` with no catalog change.
+
 ## Config / identification (not a live metric)
 
 | Logical name | Source | Location | Notes |

@@ -1,87 +1,128 @@
-# GPU Sensors — Feasibility Investigation (read-only sources)
+# GPU Sensors — read-only, user-mode (AMD ADL · NVIDIA NVML · Intel Level Zero)
 
-**Status: investigated, recommended DEFERRED (architecture mismatch).** This is a findings
-record, not a committed feature. Question asked: *can the Register Broker framework add GPU
-temperature (and similar) as read-only sensor sources, served non-admin like the existing
-CPU/board sensors?*
+**Status: implemented for AMD, NVIDIA, and Intel behind one vendor-agnostic seam; opt-in,
+read-only.** GPU temperatures and related telemetry are served as `gpu.*` sensors through the
+normal `sensor.list` / `sensor.read` / `sensor.readall` ops, non-admin, alongside the CPU/board
+sensors. **No kernel driver change** — the GPU source is a user-mode vendor-API backend in the
+broker, the same reduced-assurance shape as the USB-HID RGB transport.
 
-Short answer: **not through the current narrow SMBus / Super-I/O driver.** A modern discrete
-GPU does not expose its temperature as a plain SMBus device the broker can name and read.
-Reaching it means a GPU-vendor API or GPU MMIO, which crosses the framework's hard guardrails.
-The clean path, if it is ever wanted, is a **separate opt-in sidecar service** — exactly the
-shape already chosen for the deferred SMU PM-table metrics.
+**Validation:** AMD (ADL PMLog) is **HW-validated on an RX 7900 XTX**. NVIDIA (NVML) and Intel
+(Level Zero Sysman) are **built but HW-unvalidated** — the dev box has no NVIDIA/Intel GPU — and
+will be tested when that hardware is available. At runtime `GpuSensorProvider.TryCreate` probes
+AMD → NVIDIA → Intel and uses whichever vendor library answers, so the right provider is selected
+automatically per machine.
+
+| Vendor | Library | Provider | Status |
+|---|---|---|---|
+| AMD | `atiadlxx.dll` (ADL PMLog) | `Gpu/GpuSensorProvider.cs` (`AmdAdlGpuProvider`) + `Gpu/AdlInterop.cs` | ✅ HW-validated (RX 7900 XTX) |
+| NVIDIA | `nvml.dll` (NVML) | `Gpu/NvmlGpuProvider.cs` | 🟡 built, HW-unvalidated |
+| Intel | `ze_loader.dll` (Level Zero **Sysman**) | `Gpu/LevelZeroGpuProvider.cs` | 🟡 built, HW-unvalidated |
+
+Per-vendor metric coverage (a metric a vendor/library does not expose is gated out, not listed):
+
+| Metric | AMD (PMLog) | NVIDIA (NVML) | Intel (L0 Sysman) |
+|---|---|---|---|
+| `gpu.temp` (edge) | ✅ | ✅ | ✅ |
+| `gpu.temp.hotspot` | ✅ | — | — |
+| `gpu.temp.mem` | ✅ | — | ✅ |
+| `gpu.fan` (RPM) | ✅ | — | ✅ |
+| `gpu.fan.pct` | ✅ | ✅ | — |
+| `gpu.power` (W) | (driver-dependent) | ✅ | — (energy-counter delta, deferred) |
+| `gpu.clock.core` | ✅ | ✅ | ✅ |
+| `gpu.clock.mem` | ✅ | ✅ | ✅ |
+| `gpu.usage` | ✅ | ✅ | — (activity-counter delta, deferred) |
 
 ---
 
-## How sensors reach the broker today
+## Why GPU sensors are a user-mode source (not a driver backend)
 
-Every served sensor rides one of three **named, bounded** transports, with register maps baked
-into signed kernel code (never in data):
+A discrete GPU does **not** expose its temperature as a motherboard-SMBus device the broker can
+name and read. The thermal sensors live on-package, managed by the GPU firmware, and are reported
+through a **vendor user-mode API** — AMD **ADL** (`atiadlxx.dll`), NVIDIA NVML/NVAPI, Intel
+Level-Zero. Reaching them through the kernel would mean GPU MMIO or loading a vendor library in
+Ring 0 — both break the framework's hard guardrails ("never physical memory, MSRs, or arbitrary
+port I/O; the driver stays narrow"). So GPU sensors are served the only way that fits: a
+**user-mode provider inside the broker** that calls the vendor API and publishes the readings as
+ordinary named sensors.
 
-| Transport | Backend | Examples |
+This mirrors the existing **USB-HID RGB** decision (`AllowHidRgb`): a capability that cannot pass
+the kernel brick-guard is allowed as an **opt-in, reduced-assurance, user-mode** path, with the
+broker as the only boundary. Unlike HID RGB, the GPU path is **strictly read-only** — there is no
+GPU write op anywhere (it resolves only sensor getters), so the brick risk is nil; the
+reduced-assurance label is purely about the vendor-library dependency and running in the broker
+process rather than behind the signed driver.
+
+The signed kernel driver is **untouched**: adding GPU sensors required no new IOCTL, no rebuild,
+and no re-sign — exactly like adding a board RGB profile.
+
+## How it works
+
+| Layer | File | Role |
 |---|---|---|
-| AMD SMN (PCI config) | SMU | `smu.cpu.temp`, per-CCD, `smu.cpu.vcore` |
-| Super-I/O (LPC/EC) | NCT668x / NCT6775 | board temps, fans, voltages, PWM duty |
-| System SMBus | JC42 | `dimm.*` DIMM temps (0x18–0x1F) |
+| Vendor interop | `Gpu/AdlInterop.cs` · `Gpu/NvmlGpuProvider.cs` · `Gpu/LevelZeroGpuProvider.cs` | Minimal per-vendor P/Invoke (no new NuGet dep): load the vendor DLL, init, pick the GPU, read telemetry. AMD pulls the **PMLog** block in one call; NVIDIA/Intel use individual getters. Read-only entry points only — no overclock/fan/power write calls are resolved. |
+| Provider + seam | `BrokerSensorBridge/Gpu/GpuSensorProvider.cs` | `IGpuSensorProvider` + `AmdAdlGpuProvider`, `NvidiaNvmlGpuProvider`, `IntelLevelZeroGpuProvider` (the AMD impl caches one PMLog sample per ~250 ms). Process-wide singleton `GpuSensorProvider.Current`, set at startup only when `AllowGpuSensors`; `TryCreate` probes AMD → NVIDIA → Intel and returns the first that answers. |
+| Channels | `BrokerSensorBridge/Sensors/ChannelRegistry.cs` | One `ChannelBackendDef` (`IsUserMode`, prefix `gpu.`) whose gate/read close over the provider and ignore the SMBus backend. Per-metric gating: a metric the GPU/driver does not populate is not listed (like `CcdTempPresent`). |
+| Provenance | `BrokerSensorBridge/Sensors/SensorDecode.cs` | `DecoderRegistry["gpu."]` cites the ADL PMLog source. Values come back in engineering units, so the "decode" is passthrough. |
+| Labels | `calibration.default.json` | `gpu.temp` → "GPU Temperature", etc. Data only — labels/scale/hide, never an address. |
+| Config | `Program.cs` (`BridgeConfig.AllowGpuSensors`) | Off by default. `appsettings.json` `"AllowGpuSensors": true` (server-side, sensor service) or `--allow-gpu-sensors`, or install with `-WithGpuSensors`. |
 
-Adding a backend = a kernel probe+read file with a chip-id gate, a descriptor row in the
-backend registry, a decoder in `SensorDecode.cs`, and a channel in `ChannelRegistry.cs`. The
-driver only ever exposes `{kind, index}` reads — never an address from the client.
-(`BrokerSmbusDriver/SmbusDetect.c`, `BrokerSensorBridge/Sensors/ChannelRegistry.cs`,
-`SensorDecode.cs`.)
+## Served channels (`gpu.*`)
 
-## The guardrails that decide this
+| Id | Unit | ADL PMLog sensor |
+|---|---|---|
+| `gpu.temp` | °C | `TEMPERATURE_EDGE` |
+| `gpu.temp.hotspot` | °C | `TEMPERATURE_HOTSPOT` |
+| `gpu.temp.mem` | °C | `TEMPERATURE_MEM` |
+| `gpu.fan` | RPM | `FAN_RPM` |
+| `gpu.fan.pct` | % | `FAN_PERCENTAGE` |
+| `gpu.power` | W | `ASIC_POWER` |
+| `gpu.clock.core` | MHz | `CLK_GFXCLK` |
+| `gpu.clock.mem` | MHz | `CLK_MEMCLK` |
+| `gpu.usage` | % | `INFO_ACTIVITY_GFX` |
 
-From `CLAUDE.md` and `docs/ARCHITECTURE.md`:
+A channel only appears when the GPU/driver actually reports it (PMLog `supported` flag). The
+`gpu.temp` channel populates the Reference Console's **GPU Temperature** card automatically
+(it matches any `*gpu* + temperature` sensor — no Console change).
 
-> **The driver stays narrow.** Bounded, validated, named-register IOCTLs only — never physical
-> memory, MSRs, or arbitrary port I/O. Register maps live in signed code, never in data.
+## Hardware validation
 
-The **SMU PM-table** deferral (Open items #3) is the governing precedent: package power and
-per-core clocks were *not* added because they need the SMU mailbox plus a physical-memory read
-of a DMA'd table — and the explicit decision was that if revisited it must be a **separate
-opt-in driver+service**, leaving the core driver's assurance untouched. GPU access is the same
-class of problem.
+**Dev box — AMD Radeon RX 7900 XTX (RDNA3), Adrenalin 32.0.31021:** detected by name, 25 PMLog
+sensors reported. Idle read via `--once --allow-gpu-sensors`: edge **27 °C** < hotspot **40 °C** <
+mem **48 °C** (correct ordering), fan **0 RPM** (zero-fan idle) at **23 %** duty target, core
+**~200 MHz**, mem **2686 MHz**, usage **~5 %**. The PMLog index numbering was anchored to ground
+truth on this card by `BUS_LANES = 16` (PCIe x16). `gpu.power` (`ASIC_POWER`) is **not populated**
+by the current RDNA3 driver's PMLog set, so it reports not-available rather than a guessed value —
+the channel will light up on a driver/ASIC that does report it.
 
-## Why GPU temperature is not an SMBus read
+**Still pending:** confirming ADL returns data from the **LocalSystem service in session 0** (the
+above was an interactive run). The HID path needed that check; if ADL refuses headless, the
+`IGpuSensorProvider` seam lets the AMD provider move to a small sidecar with no other change.
 
-- **NVIDIA / AMD / Intel discrete GPUs** keep the thermal sensor on-package, managed by the GPU
-  firmware. It is reported through vendor APIs — **NVML/NVAPI** (NVIDIA), **ADL/AMDSMI** (AMD),
-  Level-Zero/IGCL (Intel) — not as a device at a motherboard-SMBus address (0x18–0x1F, 0x50–0x7F).
-- The GPU *does* have an I2C/SMBus controller, but it is the card's **own private bus** behind
-  PCIe, reachable only via the display driver / GPU MMIO. This repo already drew that line for
-  **GPU RGB**: `CHANGELOG.md` records GPU SMBus RGB as out of scope precisely because it lives on
-  the GPU's own I2C bus via NVAPI, "likely GPU MMIO — breaking the driver-stays-narrow / no
-  physical memory guardrails."
-- A handful of boards publish an **EC-sampled "GPU temperature"** over Super-I/O. That is a
-  board-EC proxy value, not the GPU's real sensor; where present it already surfaces as a normal
-  `nct6687d.temp.*` channel and needs no GPU-specific work.
+## Provenance / licensing
 
-So the three ways to get a real GPU temperature — vendor API, GPU MMIO, or display-driver-mediated
-I2C — all require either loading vendor libraries or physical-memory/MMIO access. None fit the
-narrow kernel driver.
+All three are **published, first-party vendor interfaces**, used as documented facts; the vendor
+DLLs ship with their respective drivers and are **loaded at runtime via P/Invoke, never
+redistributed**. No GPL code is used. Recorded in `THIRD-PARTY-NOTICES.md`.
 
-## Options & recommendation
+- **AMD ADL** — entry-point names, struct layouts, and `ADL_PMLOG_*` indices are AMD ADL SDK facts
+  (`adl_sdk.h` / `adl_structures.h`), cross-checked against LibreHardwareMonitor's `ADLSensorType`.
+- **NVIDIA NVML** — the published NVIDIA Management Library C API (`nvml.h`); the same interface
+  `nvidia-smi` uses. Read-only getters only.
+- **Intel Level Zero / Sysman** — the oneAPI `ze_api.h` / `zes_api.h` telemetry API. Read-only.
+  The `stype` descriptor tags and `*_state` struct layouts are the first thing to re-verify on a
+  real Intel GPU (a wrong tag degrades one metric to not-available, it does not crash).
 
-| Option | Verdict |
-|---|---|
-| **A.** Read GPU temp over the existing SMBus/Super-I/O backends | ❌ No hardware path on modern GPUs. |
-| **B.** Add a GPU-vendor API into the broker/driver | ❌ Violates no-physical-memory / driver-stays-narrow. |
-| **C.** Separate opt-in **GPU sensor sidecar** (user-mode, vendor APIs: NVML/NVAPI/ADL) feeding the broker pipe | 🟡 Feasible, *reduced assurance*; deferred — mirrors the SMU PM-table decision. |
+## Notes for the NVIDIA / Intel bring-up (untested paths)
 
-**Recommendation: defer (Option C if ever pursued).** A user-mode sidecar that calls NVML/NVAPI/
-ADL and republishes readings over the broker's named pipe would keep the signed driver and its
-assurance posture completely untouched — the driver is the real security boundary, and the
-BrokerControl-from-SensorBroker split is the existing precedent for adding a capability as its
-own service. It would ship explicitly labelled reduced-assurance (no kernel brick-guard, depends
-on vendor libraries / running GPU driver). This is a meaningful new subsystem, not a backend row,
-so it is out of scope for a routine sensor addition.
+Both are wired exactly like AMD and selected automatically by `TryCreate`; they need a machine with
+that GPU to validate. When testing:
 
-## Reference Console note
+- **NVIDIA:** confirm `nvml.dll` loads (System32 on modern drivers; the provider also falls back to
+  `…\NVIDIA Corporation\NVSMI\`). Expect `gpu.temp`, `gpu.fan.pct`, `gpu.power`, `gpu.clock.core/.mem`,
+  `gpu.usage`. Hot-spot / memory-temp / fan-RPM aren't in NVML's base getter API → not listed.
+- **Intel:** the provider sets `ZES_ENABLE_SYSMAN=1` before `zeInit`. Verify the `zes_structure_type_t`
+  tag constants in `LevelZeroGpuProvider.cs` against the installed `zes_api.h` first — they gate the
+  frequency/temperature property reads. Expect edge + memory temp, GPU + memory clock, fan RPM;
+  power and utilization (counter deltas) are deferred.
 
-The dashboard's **GPU Temperature** card is aspirational scaffolding: it scans the catalog for a
-`gpu` temperature and currently finds none, so it reads `—`. As of this task the **Add box** menu
-is sensor-derived, so a removed GPU card is offered back only when a GPU temperature is actually
-detected — i.e. it stays out of the menu until/unless a source like the sidecar above exists. No
-change to the broker or driver was made for GPU support; this document is the investigation
-deliverable.
+Multi-GPU could extend the ids to `gpu0.*` / `gpu1.*` later (today the first present GPU is served).
