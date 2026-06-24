@@ -84,7 +84,10 @@ jobs:
 
       - name: Draft GitHub release (NO binaries - see header)
         if: steps.check.outputs.new == 'true'
-        uses: softprops/action-gh-release@v3
+        # Pinned to a full commit SHA (immutable) instead of the mutable @v3 tag, so a retag or
+        # compromise of this third-party action can't inject code into the release pipeline
+        # (CodeQL actions/unpinned-tag). The trailing comment keeps it readable + Dependabot-updatable.
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           draft: true
