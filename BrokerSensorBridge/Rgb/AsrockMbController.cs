@@ -65,19 +65,26 @@ internal sealed class AsrockMbController
 
     private bool LatchModeStatic()
     {
+        // One reusable 1-byte argument buffer, hoisted OUT of the loop: a stackalloc inside the loop
+        // would grow the stack each iteration without reclaiming it until return (CA2014). Blk is a
+        // synchronous block write that consumes the span before it returns, so reuse is safe.
+        Span<byte> arg = stackalloc byte[1];
+
         foreach (int zone in _zones)
         {
             switch (_variant)
             {
                 case VariantV2:
-                    if (!Blk(REG_MODE, stackalloc byte[1] { MODE_STATIC }) || !Blk(REG_SET_ALL, stackalloc byte[1] { 0x00 })) return false;
+                    arg[0] = MODE_STATIC; if (!Blk(REG_MODE, arg)) return false;
+                    arg[0] = 0x00;        if (!Blk(REG_SET_ALL, arg)) return false;
                     break;
                 case VariantV1:
-                    if (!Blk(REG_SET_ALL, stackalloc byte[1] { 0x00 }) || !Blk(REG_ZONE_SEL, stackalloc byte[1] { (byte)zone })
-                        || !Blk(REG_MODE, stackalloc byte[1] { MODE_STATIC })) return false;
+                    arg[0] = 0x00;        if (!Blk(REG_SET_ALL, arg)) return false;
+                    arg[0] = (byte)zone;  if (!Blk(REG_ZONE_SEL, arg)) return false;
+                    arg[0] = MODE_STATIC; if (!Blk(REG_MODE, arg)) return false;
                     break;
                 default: // ASR (single zone)
-                    if (!Blk(REG_MODE, stackalloc byte[1] { MODE_STATIC })) return false;
+                    arg[0] = MODE_STATIC; if (!Blk(REG_MODE, arg)) return false;
                     break;
             }
         }

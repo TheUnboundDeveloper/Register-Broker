@@ -97,7 +97,14 @@ internal static class PeerSignature
             else
                 return false;                    // NOSIGNATURE / BAD_DIGEST / EXPIRED / REVOKED -> reject
 
+            // CreateFromSignedFile is the only managed API that extracts the Authenticode SIGNER
+            // certificate from a signed PE. X509CertificateLoader (the SYSLIB0057 replacement) loads
+            // certificate FILES and has no PE-signature equivalent, so suppress the deprecation rather
+            // than drop to raw CryptQueryObject P/Invoke in this security-sensitive pin path. The
+            // WinTrust check above already validated the signature before we read the signer.
+#pragma warning disable SYSLIB0057
             using var raw = X509Certificate.CreateFromSignedFile(imagePath);
+#pragma warning restore SYSLIB0057
             thumbprint = raw.GetCertHashString();                          // SHA-1, uppercase hex
             thumbprintSha256 = raw.GetCertHashString(HashAlgorithmName.SHA256); // SHA-256, uppercase hex
             subject = raw.Subject;
