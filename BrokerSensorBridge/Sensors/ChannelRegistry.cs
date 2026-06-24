@@ -258,6 +258,7 @@ internal static class ChannelRegistry
                 Gpu("gpu.clock.core",    "MHz", 0, GpuMetric.ClockGfxMhz),
                 Gpu("gpu.clock.mem",     "MHz", 0, GpuMetric.ClockMemMhz),
                 Gpu("gpu.usage",         "%",   0, GpuMetric.UtilGfx),
+                Gpu("gpu.voltage",       "V",   3, GpuMetric.VoltageGfx),
             };
 
             defs.Add(new ChannelBackendDef("GPU (AMD ADL)", Array.Empty<string>(), "gpu.",

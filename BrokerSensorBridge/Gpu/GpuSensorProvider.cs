@@ -29,7 +29,8 @@ internal enum GpuMetric
     PowerW,         // total board/ASIC power (W)
     ClockGfxMhz,    // graphics (core) clock (MHz)
     ClockMemMhz,    // memory clock (MHz)
-    UtilGfx         // graphics activity / utilization (%)
+    UtilGfx,        // graphics activity / utilization (%)
+    VoltageGfx      // graphics core (GFX) voltage (V)
 }
 
 internal interface IGpuSensorProvider
@@ -82,6 +83,7 @@ internal sealed class AmdAdlGpuProvider : IGpuSensorProvider, IDisposable
     private const int PMLOG_FAN_RPM             = 14;
     private const int PMLOG_FAN_PERCENTAGE      = 15;
     private const int PMLOG_INFO_ACTIVITY_GFX   = 19;
+    private const int PMLOG_GFX_VOLTAGE         = 21;   // ADL_PMLOG_GFX_VOLTAGE — reported in mV
     private const int PMLOG_ASIC_POWER          = 23;
     private const int PMLOG_TEMPERATURE_HOTSPOT = 27;
 
@@ -138,6 +140,7 @@ internal sealed class AmdAdlGpuProvider : IGpuSensorProvider, IDisposable
             GpuMetric.ClockGfxMhz => PMLOG_CLK_GFXCLK,
             GpuMetric.ClockMemMhz => PMLOG_CLK_MEMCLK,
             GpuMetric.UtilGfx     => PMLOG_INFO_ACTIVITY_GFX,
+            GpuMetric.VoltageGfx  => PMLOG_GFX_VOLTAGE,
             _ => -1
         };
         if (index < 0) return false;
@@ -147,6 +150,7 @@ internal sealed class AmdAdlGpuProvider : IGpuSensorProvider, IDisposable
             EnsureFresh();
             if (!_haveSample || _supported[index] == 0) return false;
             value = _value[index];
+            if (metric == GpuMetric.VoltageGfx) value /= 1000.0;   // ADL reports GFX voltage in mV → V
             return true;
         }
     }

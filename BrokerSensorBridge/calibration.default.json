@@ -327,6 +327,10 @@
       "label": "GPU Utilization"
     },
     {
+      "rawId": "gpu.voltage",
+      "label": "GPU Voltage"
+    },
+    {
       "rawId": "aqua.temp.0",
       "label": "Aqua Temp 1"
     },

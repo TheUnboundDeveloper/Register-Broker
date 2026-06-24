@@ -1191,14 +1191,17 @@ internal static class Program
             /* A fixed provider lights the channels it supplies and decodes their value/unit. */
             GpuSensorProvider.Current = new FixedGpuProvider("Test GPU", new Dictionary<GpuMetric, double>
             {
-                [GpuMetric.TempEdge] = 61.0,
-                [GpuMetric.PowerW]   = 120.0,
+                [GpuMetric.TempEdge]   = 61.0,
+                [GpuMetric.PowerW]     = 120.0,
+                [GpuMetric.VoltageGfx] = 0.727,
             });
             Check("gpu.temp available with provider", gpuTemp.IsAvailable(anyBackend));
             SensorReading t = gpuTemp.Read(anyBackend);
             Check("gpu.temp reads 61.0 °C", t.Ok && t.Unit == "°C" && Math.Abs(t.Value - 61.0) < 1e-9);
             SensorReading p = gpuPower.Read(anyBackend);
             Check("gpu.power reads 120 W", p.Ok && p.Unit == "W" && Math.Abs(p.Value - 120.0) < 1e-9);
+            SensorCatalogEntry? gpuVolt = SensorCatalog.Find("gpu.voltage");
+            Check("gpu.voltage reads 0.727 V", gpuVolt != null && gpuVolt.Read(anyBackend) is { Ok: true, Unit: "V" } gv && Math.Abs(gv.Value - 0.727) < 1e-9);
 
             /* A metric the provider does not expose reports not-available, not a bogus zero. */
             Check("unsupplied gpu metric -> not ok", !gpuMem.Read(anyBackend).Ok);

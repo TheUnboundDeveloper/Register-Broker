@@ -66,6 +66,7 @@ an RX 7900 XTX); NVIDIA + Intel are built but HW-unvalidated. Full design + per-
 | `gpu.clock.core` | AMD ADL PMLog | `CLK_GFXCLK` | MHz | ✅ |
 | `gpu.clock.mem` | AMD ADL PMLog | `CLK_MEMCLK` | MHz | ✅ |
 | `gpu.usage` | AMD ADL PMLog | `INFO_ACTIVITY_GFX` | % | ✅ |
+| `gpu.voltage` | AMD ADL PMLog | `GFX_VOLTAGE` (index 21, mV → V) | V | ✅ (~0.727 V on RX 7900 XTX) |
 
 PMLOG indices ported from the AMD ADL SDK (`adl_structures.h`), cross-checked against
 LibreHardwareMonitor's `ADLSensorType`; anchored on hardware by `BUS_LANES = 16` (PCIe x16).

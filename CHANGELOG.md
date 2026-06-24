@@ -43,7 +43,9 @@ and additive ops do not bump the protocol version.
 - **GPU telemetry is now served as `gpu.*` sensors** over the normal `sensor.list` /
   `sensor.read` / `sensor.readall` ops, non-admin, alongside the CPU/board sensors:
   `gpu.temp` (edge), `gpu.temp.hotspot`, `gpu.temp.mem`, `gpu.fan` (RPM), `gpu.fan.pct`,
-  `gpu.power` (W), `gpu.clock.core`, `gpu.clock.mem` (MHz), `gpu.usage` (%). The Reference
+  `gpu.power` (W), `gpu.clock.core`, `gpu.clock.mem` (MHz), `gpu.usage` (%), `gpu.voltage`
+  (V, AMD GFX core voltage from ADL `GFX_VOLTAGE`/index 21, HW-validated ~0.727 V on the
+  RX 7900 XTX; NVIDIA/Intel report not-available). The Reference
   Console's previously-empty **GPU Temperature** card auto-populates (no Console change).
 - **Broker-only, no driver change / re-sign.** A discrete GPU's thermals are not an SMBus
   device, so this is a **user-mode vendor-API backend** in the broker (minimal P/Invoke, no new
