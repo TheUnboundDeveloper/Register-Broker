@@ -287,6 +287,21 @@ internal static class Program
             }
 
             /*-----------------------------------------------------------*\
+            | Aquacomputer sensors (READ-ONLY, USER-MODE, REMOVABLE),      |
+            | opt-in. An off-board USB-HID controller (Quadro) that can be |
+            | unplugged at runtime: the provider runs a hot-plug-aware     |
+            | poller so aqua.* appear only while present and never flap.   |
+            | Reduced assurance like the GPU/HID paths — no kernel guard.  |
+            \*-----------------------------------------------------------*/
+            if (Config.AllowAquaSensors)
+            {
+                AquaSensorProvider.Current = AquaSensorProvider.TryCreate(Log);
+                Log(AquaSensorProvider.Current is { IsAvailable: true } aqua
+                    ? $"Aqua sensors: {aqua.Name} via USB-HID — read-only, removable, reduced assurance (user-mode, no kernel guard)."
+                    : "Aqua sensors: enabled (AllowAquaSensors) but no supported controller detected — aqua.* stay absent.");
+            }
+
+            /*-----------------------------------------------------------*\
             | One-shot mode: print a single named-catalog snapshot, read  |
             | straight from the driver, and exit. Useful for diagnostics. |
             \*-----------------------------------------------------------*/
@@ -329,6 +344,8 @@ internal static class Program
         {
             (GpuSensorProvider.Current as IDisposable)?.Dispose();
             GpuSensorProvider.Current = null;
+            (AquaSensorProvider.Current as IDisposable)?.Dispose();
+            AquaSensorProvider.Current = null;
             smbus?.Dispose();
             Log("BrokerSensorBridge exiting.");
         }
@@ -835,6 +852,11 @@ internal static class Program
               available + decode their value with one, and never light a CPU/board family. --*/
         failures += SelfTestGpuSensors();
 
+        /*-- Aqua sensors: the removable user-mode aqua.* channels are absent without a provider,
+              available + decode (temps/flow/fan RPM) with one, gate out a disconnected probe, are
+              flagged Removable, and never light a CPU/board family. Also checks the raw decode. --*/
+        failures += SelfTestAquaSensors();
+
         /*-- RGB catalog: board-aware zone profiles validate, the MSI profile resolves the full
               zone vocabulary, the generic fallback is DRAM-only, and label overrides + transport
               gating build the expected device set. --*/
@@ -1193,6 +1215,90 @@ internal static class Program
         finally
         {
             GpuSensorProvider.Current = null;   // leave the catalog GPU-free for the later server cases
+        }
+
+        return failures;
+    }
+
+    /*-----------------------------------------------------------*\
+    | Aqua sensors (read-only, user-mode, REMOVABLE). Asserts:     |
+    |   * the Quadro status-report decode (ported offsets) yields  |
+    |     the right temps/flow/fan RPM, gates a disconnected probe  |
+    |     (0x7FFF sentinel), and rejects a too-short report,        |
+    |   * the aqua.* channels exist and are flagged Removable,      |
+    |   * with NO provider they are absent (inert-when-absent) and  |
+    |     never light a CPU/board family,                           |
+    |   * with a fixed provider they read the supplied value in the |
+    |     right unit, and an unsupplied metric reports not-available.|
+    \*-----------------------------------------------------------*/
+    private static int SelfTestAquaSensors()
+    {
+        int failures = 0;
+        void Check(string name, bool ok)
+        {
+            Console.WriteLine($"  [{(ok ? "PASS" : "FAIL")}] aqua: {name}");
+            if (!ok) failures++;
+        }
+
+        var anyBackend = new MockSmbusBackend(available: true);   // aqua.* ignore the backend
+        try
+        {
+            /* Raw decode of a synthetic status report (values from the live dev-box Quadro). */
+            byte[] rep = new byte[QuadroProtocol.StatusReportLength];
+            rep[0] = QuadroProtocol.StatusReportId;
+            void PutBE(int off, ushort v) { rep[off] = (byte)(v >> 8); rep[off + 1] = (byte)v; }
+            PutBE(0x34, 0x0BD2);                          // temp0 = 30.26 °C
+            PutBE(0x3A, QuadroProtocol.TempSentinel);     // temp3 = disconnected
+            PutBE(0x6E, 0x0064);                          // flow = 100 dL/h -> 10.0 L/h
+            PutBE(0x70 + 0x08, 0x0E19);                   // fan0 = 3609 RPM
+            var dv = new double[QuadroProtocol.SlotCount];
+            var dok = new bool[QuadroProtocol.SlotCount];
+            Check("Quadro report decodes", QuadroProtocol.TryDecode(rep, rep.Length, dv, dok));
+            Check("temp0 -> 30.26 °C", dok[0] && Math.Abs(dv[0] - 30.26) < 1e-9);
+            Check("temp3 sentinel -> not ok", !dok[3]);
+            Check("flow -> 10.0 L/h", dok[(int)AquaMetric.Flow] && Math.Abs(dv[(int)AquaMetric.Flow] - 10.0) < 1e-9);
+            Check("fan0 -> 3609 RPM", dok[(int)AquaMetric.Fan0] && Math.Abs(dv[(int)AquaMetric.Fan0] - 3609) < 1e-9);
+            Check("short report rejected", !QuadroProtocol.TryDecode(new byte[16], 16, dv, dok));
+
+            SensorCatalogEntry? aTemp = SensorCatalog.Find("aqua.temp.0");
+            SensorCatalogEntry? aFlow = SensorCatalog.Find("aqua.flow.0");
+            SensorCatalogEntry? aFan  = SensorCatalog.Find("aqua.fan.0");
+            Check("catalog has aqua.temp.0 + flow + fan.0", aTemp != null && aFlow != null && aFan != null);
+            if (aTemp == null || aFlow == null || aFan == null) return failures + 1;
+
+            Check("aqua.* flagged removable", aTemp.Removable && aFlow.Removable && aFan.Removable);
+
+            /* No provider -> aqua.* absent; CPU/board sensors unaffected. */
+            AquaSensorProvider.Current = null;
+            Check("aqua.* absent without a provider", !aTemp.IsAvailable(anyBackend) && !aFan.IsAvailable(anyBackend));
+
+            /* A fixed provider lights the channels it supplies and decodes their value/unit. */
+            AquaSensorProvider.Current = new FixedAquaProvider("Test Quadro", new Dictionary<AquaMetric, double>
+            {
+                [AquaMetric.Temp0] = 30.3,
+                [AquaMetric.Flow]  = 10.0,
+                [AquaMetric.Fan0]  = 3609,
+            });
+            Check("aqua.temp.0 available with provider", aTemp.IsAvailable(anyBackend));
+            SensorReading t = aTemp.Read(anyBackend);
+            Check("aqua.temp.0 reads 30.3 °C", t.Ok && t.Unit == "°C" && Math.Abs(t.Value - 30.3) < 1e-9);
+            SensorReading fl = aFlow.Read(anyBackend);
+            Check("aqua.flow.0 reads 10.0 L/h", fl.Ok && fl.Unit == "L/h" && Math.Abs(fl.Value - 10.0) < 1e-9);
+
+            /* A metric the provider does not supply reports not-available, not a bogus zero. */
+            Check("unsupplied aqua metric (temp.1) -> not ok", !SensorCatalog.Find("aqua.temp.1")!.Read(anyBackend).Ok);
+
+            /* Aqua presence must not light a CPU/board family (cross-source isolation). */
+            Check("Aqua provider does not light smu.cpu.temp", !SensorCatalog.Find("smu.cpu.temp")!.IsAvailable(anyBackend));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  [FAIL] aqua: threw {ex.Message}");
+            failures++;
+        }
+        finally
+        {
+            AquaSensorProvider.Current = null;   // leave the catalog Aqua-free for the later server cases
         }
 
         return failures;
@@ -1872,6 +1978,17 @@ internal sealed class BridgeConfig
     \*-----------------------------------------------------------*/
     public bool AllowGpuSensors { get; set; } = false;
 
+    /*-----------------------------------------------------------*\
+    | Aquacomputer sensors (read-only) via USB-HID (Quadro today). |
+    | OFF by default, same reduced-assurance posture as GPU: an    |
+    | off-board controller streamed in user-mode, no kernel        |
+    | brick-guard, no write path. REMOVABLE — the controller may   |
+    | be unplugged at runtime; aqua.* are flagged removable and the |
+    | provider is hot-plug aware. Set true in appsettings.json      |
+    | (server-side) or --allow-aqua-sensors to force it on.        |
+    \*-----------------------------------------------------------*/
+    public bool AllowAquaSensors { get; set; } = false;
+
     [JsonIgnore]
     public string LogFileExpanded => Environment.ExpandEnvironmentVariables(LogFile);
     [JsonIgnore]
@@ -1904,6 +2021,10 @@ internal sealed class BridgeConfig
         /* CLI override: --allow-gpu-sensors forces the read-only GPU sensor source on. */
         if (args.Any(a => a.Equals("--allow-gpu-sensors", StringComparison.OrdinalIgnoreCase)))
             cfg.AllowGpuSensors = true;
+
+        /* CLI override: --allow-aqua-sensors forces the read-only Aquacomputer (USB-HID) source on. */
+        if (args.Any(a => a.Equals("--allow-aqua-sensors", StringComparison.OrdinalIgnoreCase)))
+            cfg.AllowAquaSensors = true;
 
         return cfg;
     }

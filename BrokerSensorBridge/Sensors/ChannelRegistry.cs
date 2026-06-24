@@ -91,6 +91,22 @@ internal static class ChannelRegistry
                     ? new RawReading(true, v, "Ok")
                     : new RawReading(false, 0, "NotAvailable"));
 
+    /* Aquacomputer sensors are also a USER-MODE source, but on a REMOVABLE off-board USB-HID
+       controller (the Quadro): the gate keys off the AquaSensorProvider singleton, which reflects
+       live presence (it goes unavailable shortly after the controller is unplugged, then back when
+       re-plugged). Every aqua.* channel is flagged Removable so consumers treat hot-plug absence as
+       "not connected", not an error. Per-metric availability is finer (a disconnected temp probe
+       reads the 0x7FFF sentinel and is gated out, like CcdTempPresent). */
+    private static bool AquaUp(ISmbusBackend _) => AquaSensorProvider.Current?.IsAvailable == true;
+
+    private static RawChannel Aqua(string id, string unit, int round, AquaMetric metric)
+        => new(id, unit, round,
+               _ => AquaSensorProvider.Current is { } p && p.TryRead(metric, out double _),
+               _ => AquaSensorProvider.Current is { } p && p.TryRead(metric, out double v)
+                    ? new RawReading(true, v, "Ok")
+                    : new RawReading(false, 0, "NotAvailable"),
+               removable: true);
+
     /// <summary>The registry. Order is serving order (sensor.list is stable across releases).</summary>
     public static readonly IReadOnlyList<ChannelBackendDef> Backends = Build();
 
@@ -246,6 +262,29 @@ internal static class ChannelRegistry
 
             defs.Add(new ChannelBackendDef("GPU (AMD ADL)", Array.Empty<string>(), "gpu.",
                 GpuUp, list, isUserMode: true));
+        }
+
+        /*-- Aquacomputer Quadro (READ-ONLY, USER-MODE, REMOVABLE). Off-board USB-HID fan/sensor
+             controller streaming status on the interrupt IN endpoint; served via the AquaSensorProvider
+             singleton. Opt-in (AllowAquaSensors), reduced assurance, hot-pluggable — the channels appear
+             only while the controller is present. Core set: 4 temp inputs + flow + 4 fan RPM. Protocol
+             ported as facts from Linux aquacomputer_d5next.c (see AquaSensorProvider/QuadroProtocol). --*/
+        {
+            var list = new List<RawChannel>
+            {
+                Aqua("aqua.temp.0", "°C",  1, AquaMetric.Temp0),
+                Aqua("aqua.temp.1", "°C",  1, AquaMetric.Temp1),
+                Aqua("aqua.temp.2", "°C",  1, AquaMetric.Temp2),
+                Aqua("aqua.temp.3", "°C",  1, AquaMetric.Temp3),
+                Aqua("aqua.flow.0", "L/h", 1, AquaMetric.Flow),
+                Aqua("aqua.fan.0",  "RPM", 0, AquaMetric.Fan0),
+                Aqua("aqua.fan.1",  "RPM", 0, AquaMetric.Fan1),
+                Aqua("aqua.fan.2",  "RPM", 0, AquaMetric.Fan2),
+                Aqua("aqua.fan.3",  "RPM", 0, AquaMetric.Fan3),
+            };
+
+            defs.Add(new ChannelBackendDef("Aquacomputer Quadro", Array.Empty<string>(), "aqua.",
+                AquaUp, list, isUserMode: true));
         }
 
         return defs;

@@ -38,8 +38,14 @@ facts; **no kernel source code is included or distributed.**
 | Nuvoton NCT668x | `drivers/hwmon/nct6683.c` | NCT6683/6686/6687D Super-I/O sensors |
 | Nuvoton NCT6775 | `drivers/hwmon/nct6775-core.c`, `nct6775-platform.c` | NCT6775-family Super-I/O sensors + IO-space-lock |
 | DIMM thermal | `drivers/hwmon/jc42.c` | JC42 / TSE2004av DIMM temperature decode |
+| Aquacomputer Quadro | `drivers/hwmon/aquacomputer_d5next.c` | Quadro USB-HID status-report offsets/scales for temps, flow, fan RPM (`QuadroProtocol`) |
 
 The Linux kernel is licensed **GPL-2.0**. https://www.kernel.org
+
+**liquidctl** (`liquidctl/driver/aquacomputer.py`, **GPL-3.0**;
+https://github.com/liquidctl/liquidctl) was used only as an independent **cross-check** of
+the Aquacomputer Quadro report offsets/scales above — no code was copied. Both sources agree
+on every offset, scale, endianness, and sentinel.
 
 **zenpower** is an independent out-of-tree Linux hwmon driver (**GPL-2.0**;
 https://github.com/ocerman/zenpower and the Zen-3 fork). Only the AMD SVI2

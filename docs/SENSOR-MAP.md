@@ -71,6 +71,25 @@ PMLOG indices ported from the AMD ADL SDK (`adl_structures.h`), cross-checked ag
 LibreHardwareMonitor's `ADLSensorType`; anchored on hardware by `BUS_LANES = 16` (PCIe x16).
 NVIDIA/Intel slot in behind the same `IGpuSensorProvider` with no catalog change.
 
+## Aquacomputer telemetry (read-only, USER-MODE, REMOVABLE — NOT via the driver)
+
+An Aquacomputer controller is an off-board USB-HID device, so `aqua.*` is a user-mode
+backend like `gpu.*` (opt-in `AllowAquaSensors`, reduced assurance, strictly read-only).
+It is **removable** — the channels are flagged `removable` in `sensor.list` and appear
+only while the controller is present (hot-plug aware; no flapping). First device: the
+**Aquacomputer Quadro** (`0x0C70:0xF00D`). Offsets ported from Linux
+`drivers/hwmon/aquacomputer_d5next.c`, cross-checked with liquidctl (`QuadroProtocol`).
+
+| Id | Source | Encoding | Unit | Status |
+|---|---|---|---|---|
+| `aqua.temp.0`–`.3` | Quadro status report `0x34`+ | BE s16 centi-°C, `0x7FFF`=disconnected | °C | ✅ validated (dev-box Quadro) |
+| `aqua.flow.0` | Quadro `0x6E` | BE u16 dL/h ÷10 | L/h | ✅ (0 when no flow meter) |
+| `aqua.fan.0`–`.3` | Quadro `0x70/0x7D/0x8A/0x97`+`0x08` | BE u16 | RPM | ✅ |
+
+Read path is a blocking `ReadFile` on the HID interrupt IN endpoint (the Quadro streams
+status; it refuses `HidD_GetInputReport`). Other Aquacomputer devices (Octo, D5 Next, …)
+slot in behind the same `IAquaSensorProvider` with no catalog change.
+
 ## Config / identification (not a live metric)
 
 | Logical name | Source | Location | Notes |

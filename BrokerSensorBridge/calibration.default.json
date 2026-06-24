@@ -325,6 +325,42 @@
     {
       "rawId": "gpu.usage",
       "label": "GPU Utilization"
+    },
+    {
+      "rawId": "aqua.temp.0",
+      "label": "Aqua Temp 1"
+    },
+    {
+      "rawId": "aqua.temp.1",
+      "label": "Aqua Temp 2"
+    },
+    {
+      "rawId": "aqua.temp.2",
+      "label": "Aqua Temp 3"
+    },
+    {
+      "rawId": "aqua.temp.3",
+      "label": "Aqua Temp 4"
+    },
+    {
+      "rawId": "aqua.flow.0",
+      "label": "Coolant Flow"
+    },
+    {
+      "rawId": "aqua.fan.0",
+      "label": "Aqua Fan 1"
+    },
+    {
+      "rawId": "aqua.fan.1",
+      "label": "Aqua Fan 2"
+    },
+    {
+      "rawId": "aqua.fan.2",
+      "label": "Aqua Fan 3"
+    },
+    {
+      "rawId": "aqua.fan.3",
+      "label": "Aqua Fan 4"
     }
   ],
   "boards": [

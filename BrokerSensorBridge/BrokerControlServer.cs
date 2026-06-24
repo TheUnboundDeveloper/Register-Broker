@@ -543,8 +543,14 @@ internal sealed class BrokerControlServer
 
     private async Task<string> HandleSensorListAsync(NamedPipeServerStream pipe, CancellationToken token)
     {
+        /* 'removable' marks a hot-pluggable source (e.g. the Aquacomputer Quadro over USB-HID):
+           the entry legitimately drops out of this list when its controller is unplugged, so a
+           consumer can show "not connected" instead of flagging a vanished sensor as an error.
+           Omitted from the frame for the common (false) case to keep the list compact. */
         var items = SensorCatalog.Available(_smbus)
-            .Select(e => new { id = e.Id, label = e.Label, unit = e.Unit })
+            .Select(e => e.Removable
+                ? (object)new { id = e.Id, label = e.Label, unit = e.Unit, removable = true }
+                : new { id = e.Id, label = e.Label, unit = e.Unit })
             .ToArray();
         await WriteFrameAsync(pipe, new { type = "data", op = "sensor.list", sensors = items }, token);
         return "data";

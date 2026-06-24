@@ -22,14 +22,20 @@ internal sealed class SensorCatalogEntry
     public string Id { get; }
     public string Label { get; }
     public string Unit { get; }
+    /// <summary>True when the underlying source is hot-pluggable (e.g. a removable USB-HID
+    /// controller). Surfaced in sensor.list so consumers render hot-plug absence as
+    /// "not connected" instead of an error. See RawChannel.Removable.</summary>
+    public bool Removable { get; }
     private readonly Func<ISmbusBackend, bool> _available;
     private readonly Func<ISmbusBackend, SensorReading> _read;
 
     public SensorCatalogEntry(string id, string label, string unit,
                               Func<ISmbusBackend, bool> available,
-                              Func<ISmbusBackend, SensorReading> read)
+                              Func<ISmbusBackend, SensorReading> read,
+                              bool removable = false)
     {
         Id = id; Label = label; Unit = unit; _available = available; _read = read;
+        Removable = removable;
     }
 
     public bool IsAvailable(ISmbusBackend b) => _available(b);
@@ -70,7 +76,8 @@ internal static class SensorCatalog
                     return r.Ok
                         ? new SensorReading(true, Math.Round(r.Value * scale + offset, round), unit, "Ok")
                         : new SensorReading(false, 0, unit, r.Status);
-                }));
+                },
+                removable: ch.Removable));
         }
         return list;
     }

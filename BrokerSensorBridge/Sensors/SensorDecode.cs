@@ -107,6 +107,7 @@ internal static class DecoderRegistry
         ["nct6775."]  = "Linux nct6775-core (NctTempC / NctFanRpm / Nct6775VoltageMv)",
         ["dimm."]     = "Linux jc42 (Jc42TempC)",
         ["gpu."]      = "AMD ADL PMLog (ADL2_New_QueryPMLogData_Get; AMD ADL SDK) — values returned in engineering units",
+        ["aqua."]     = "Linux aquacomputer_d5next.c (Quadro status report) cross-checked with liquidctl — QuadroProtocol offsets",
     };
 
     public static bool Covers(string rawId)

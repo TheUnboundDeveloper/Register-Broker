@@ -22,6 +22,9 @@ internal sealed class HidDevice : IDisposable
 
     /// <summary>Feature-report length in bytes (incl. the leading report id), from HIDP_CAPS.</summary>
     public int FeatureReportByteLength { get; }
+    /// <summary>Input-report length in bytes (incl. the leading report id), from HIDP_CAPS. Non-zero
+    /// for devices that push status on the interrupt IN endpoint (read via <see cref="ReadInput"/>).</summary>
+    public int InputReportByteLength { get; }
     public ushort VendorId { get; }
     public ushort ProductId { get; }
     public string Path { get; }
@@ -32,10 +35,11 @@ internal sealed class HidDevice : IDisposable
     public int InterfaceNumber { get; }
 
     private HidDevice(SafeFileHandle handle, string path, ushort vid, ushort pid,
-                      int featureLen, ushort usagePage, ushort usage)
+                      int featureLen, int inputLen, ushort usagePage, ushort usage)
     {
         _handle = handle; Path = path; VendorId = vid; ProductId = pid;
-        FeatureReportByteLength = featureLen; UsagePage = usagePage; Usage = usage;
+        FeatureReportByteLength = featureLen; InputReportByteLength = inputLen;
+        UsagePage = usagePage; Usage = usage;
         InterfaceNumber = ParseInterfaceNumber(path);
     }
 
@@ -77,6 +81,24 @@ internal sealed class HidDevice : IDisposable
     /// </summary>
     public bool GetFeature(byte[] report) => HidD_GetFeature(_handle, report, (uint)report.Length);
 
+    /// <summary>
+    /// Reads one HID INPUT report off the interrupt IN endpoint via ReadFile (a BLOCKING read — it
+    /// returns when the device next pushes a report). This is the transport for vendor sensor devices
+    /// that STREAM status rather than answering GET_REPORT — e.g. the Aquacomputer Quadro, whose
+    /// status report HidD_GetInputReport refuses (ERROR_GEN_FAILURE) but ReadFile delivers. The
+    /// handle must have been opened with read access (OpenByVendor's R|W open succeeds for
+    /// vendor-defined collections). Pass a buffer of <see cref="InputReportByteLength"/> bytes; the
+    /// first byte is the report id. Returns true and the byte count on success. Call only from a
+    /// dedicated thread — the broker's request threads must not block on it. Disposing the device
+    /// from another thread unblocks a pending read (it returns false), which is how the poller stops.
+    /// </summary>
+    public bool ReadInput(byte[] buffer, out int read)
+    {
+        bool ok = ReadFile(_handle, buffer, (uint)buffer.Length, out uint got, IntPtr.Zero);
+        read = (int)got;
+        return ok && got > 0;
+    }
+
     public void Dispose() => _handle.Dispose();
 
     /// <summary>
@@ -116,8 +138,8 @@ internal sealed class HidDevice : IDisposable
                 var attrs = new HIDD_ATTRIBUTES { Size = (uint)Marshal.SizeOf<HIDD_ATTRIBUTES>() };
                 if (!HidD_GetAttributes(h, ref attrs) || attrs.VendorID != vendorId) { h.Dispose(); continue; }
 
-                GetCaps(h, out int featureLen, out ushort usagePage, out ushort usage);
-                found.Add(new HidDevice(h, path, attrs.VendorID, attrs.ProductID, featureLen, usagePage, usage));
+                GetCaps(h, out int featureLen, out int inputLen, out ushort usagePage, out ushort usage);
+                found.Add(new HidDevice(h, path, attrs.VendorID, attrs.ProductID, featureLen, inputLen, usagePage, usage));
             }
         }
         finally { SetupDiDestroyDeviceInfoList(set); }
@@ -125,16 +147,17 @@ internal sealed class HidDevice : IDisposable
         return found;
     }
 
-    private static void GetCaps(SafeFileHandle h, out int featureLen, out ushort usagePage, out ushort usage)
+    private static void GetCaps(SafeFileHandle h, out int featureLen, out int inputLen, out ushort usagePage, out ushort usage)
     {
-        featureLen = 0; usagePage = 0; usage = 0;
+        featureLen = 0; inputLen = 0; usagePage = 0; usage = 0;
         if (!HidD_GetPreparsedData(h, out IntPtr pre) || pre == IntPtr.Zero) return;
         try
         {
-            byte[] caps = new byte[256];   // HIDP_CAPS: Usage @0, UsagePage @2, FeatureReportByteLength @8
+            byte[] caps = new byte[256];   // HIDP_CAPS: Usage @0, UsagePage @2, InputReportByteLength @4, FeatureReportByteLength @8
             if (HidP_GetCaps(pre, caps) != HIDP_STATUS_SUCCESS) return;
             usage      = BitConverter.ToUInt16(caps, 0);
             usagePage  = BitConverter.ToUInt16(caps, 2);
+            inputLen   = BitConverter.ToUInt16(caps, 4);
             featureLen = BitConverter.ToUInt16(caps, 8);
         }
         finally { HidD_FreePreparsedData(pre); }
@@ -193,4 +216,7 @@ internal sealed class HidDevice : IDisposable
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern SafeFileHandle CreateFileW(string lpFileName, uint dwDesiredAccess, uint dwShareMode,
         IntPtr lpSecurityAttributes, uint dwCreationDisposition, uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    private static extern bool ReadFile(SafeFileHandle hFile, byte[] buffer, uint bytesToRead, out uint bytesRead, IntPtr overlapped);
 }

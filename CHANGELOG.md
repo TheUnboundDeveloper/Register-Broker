@@ -11,6 +11,33 @@ and additive ops do not bump the protocol version.
 
 ## [Unreleased]
 
+### Added — read-only Aquacomputer sensors (`aqua.*`; USB-HID, user-mode, opt-in, removable)
+
+- **Aquacomputer Quadro telemetry is now served as `aqua.*` sensors** over the normal
+  `sensor.list` / `sensor.read` / `sensor.readall` ops, non-admin: `aqua.temp.0`–`.3` (4
+  temperature inputs, °C), `aqua.flow.0` (coolant flow, L/h), `aqua.fan.0`–`.3` (4 fan
+  tachometers, RPM). A temperature input with no probe connected reports the `0x7FFF`
+  sentinel and is gated out (not a bogus reading).
+- **Broker-only, no driver change / re-sign.** An Aquacomputer controller is an off-board
+  USB-HID device, not an SMBus chip, so this is a **user-mode** backend (one
+  `IAquaSensorProvider` seam, one `IsUserMode` `ChannelBackendDef`, prefix `aqua.`) — same
+  reduced-assurance shape as the GPU sensors / USB-HID RGB, **strictly read-only** (no
+  Aquacomputer write op exists). Read path is a blocking `ReadFile` on the HID interrupt IN
+  endpoint (the Quadro streams its status report and refuses `HidD_GetInputReport`).
+- **Removable / hot-pluggable, no flapping.** The controller can be unplugged at runtime,
+  so `aqua.*` are flagged **`removable`** in `sensor.list` (additive field; protocol stays
+  `2`). A background poller with a staleness window (one missed report never drops the
+  sensors) and a re-open backoff (sensors return on re-plug) makes absence clean rather than
+  a flapping/erroring callout. New `RawChannel.Removable` → `SensorCatalogEntry.Removable` →
+  `sensor.list`.
+- **HW-validated** on the dev box's Quadro (4 temps + fan RPM + flow read live and
+  physically consistent). Protocol ported as **facts** from Linux
+  `drivers/hwmon/aquacomputer_d5next.c`, cross-checked against liquidctl (`QuadroProtocol`).
+- **Opt-in, off by default:** `AllowAquaSensors` (default `false`), `--allow-aqua-sensors`,
+  or `Install-SensorBrokerService.ps1 -WithAquaSensors`. Calibration labels added;
+  `DecoderRegistry` provenance + 14 selftest gates (decode/sentinel/removable/gating). Full
+  design: `docs/AQUA-SENSOR-SUPPORT.md`.
+
 ### Added — read-only GPU sensors (AMD · NVIDIA · Intel; user-mode, opt-in)
 
 - **GPU telemetry is now served as `gpu.*` sensors** over the normal `sensor.list` /
