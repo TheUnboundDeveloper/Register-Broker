@@ -11,6 +11,18 @@ and additive ops do not bump the protocol version.
 
 ## [Unreleased]
 
+### Fixed — 0-warning build
+
+- **`AsrockMbController.LatchModeStatic`: hoisted a `stackalloc` out of the per-zone loop**
+  (CA2014). The previous stackalloc-inside-loop grew the stack each iteration without reclaiming
+  it until return — a latent stack-overflow on a many-zone board. Now a single reused buffer;
+  behavior unchanged (same writes, same short-circuit order). On the HW-unvalidated ASRock path.
+- **`PeerSignature`: justified-suppressed `SYSLIB0057`.** `X509Certificate.CreateFromSignedFile`
+  is the only managed API that extracts the Authenticode signer from a signed PE, and the suggested
+  `X509CertificateLoader` replacement has no PE-signature equivalent, so the deprecation is
+  pragma-suppressed rather than reworked into raw `CryptQueryObject` P/Invoke in the signer-pin path.
+- The broker now builds with **0 warnings**.
+
 ### Hardened — no speculative hardware access (gating)
 
 - **Unpinned USB-HID RGB zones are no longer driven in a normal build.** A Mystic Light zone
