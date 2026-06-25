@@ -76,10 +76,12 @@ and no re-sign — exactly like adding a board RGB profile.
 | `gpu.temp.mem` | °C | `TEMPERATURE_MEM` |
 | `gpu.fan` | RPM | `FAN_RPM` |
 | `gpu.fan.pct` | % | `FAN_PERCENTAGE` |
-| `gpu.power` | W | `ASIC_POWER` |
+| `gpu.power` | W | `BOARD_POWER` (idx 73; Total Board Power) → falls back to `ASIC_POWER` (idx 23) where the board sensor is absent |
 | `gpu.clock.core` | MHz | `CLK_GFXCLK` |
 | `gpu.clock.mem` | MHz | `CLK_MEMCLK` |
 | `gpu.usage` | % | `INFO_ACTIVITY_GFX` |
+| `gpu.usage.mem` | % | `INFO_ACTIVITY_MEM` (idx 20; memory-controller load) |
+| `gpu.mem.used` | MB | `ADL2_Adapter_VRAMUsage_Get` (dedicated VRAM in use; a direct ADL call, not PMLog — optional entry point, absent on older drivers). Despite the "InMB" name some drivers return KB (RX 7900 XTX did: raw 2,478,836 = 2.36 GB), so the value is auto-detected and normalized to MB. |
 | `gpu.voltage` | V | `GFX_VOLTAGE` (sensor-type index 21; reported in mV, converted to V) |
 
 A channel only appears when the GPU/driver actually reports it (PMLog `supported` flag). The
@@ -93,9 +95,19 @@ sensors reported. Idle read via `--once --allow-gpu-sensors`: edge **27 °C** < 
 mem **48 °C** (correct ordering), fan **0 RPM** (zero-fan idle) at **23 %** duty target, core
 **~200 MHz**, mem **2686 MHz**, usage **~5 %**, core voltage **~0.727 V** (`gpu.voltage`, `GFX_VOLTAGE`
 index 21, reported in mV → V). The PMLog index numbering was anchored to ground
-truth on this card by `BUS_LANES = 16` (PCIe x16). `gpu.power` (`ASIC_POWER`) is **not populated**
-by the current RDNA3 driver's PMLog set, so it reports not-available rather than a guessed value —
-the channel will light up on a driver/ASIC that does report it.
+truth on this card by `BUS_LANES = 16` (PCIe x16).
+
+`gpu.power` `ASIC_POWER` (idx 23) is **not populated** by the current RDNA3 driver's PMLog set, but
+**Total Board Power** `BOARD_POWER` (idx 73) **is** — anchored at **77 W** idle against a labeled
+reference's TBP (78 W) — so `gpu.power` now prefers idx 73 and only falls back to `ASIC_POWER` on a
+driver/ASIC that reports it. `gpu.usage.mem` (`INFO_ACTIVITY_MEM`, idx 20) read **0 %** at idle.
+
+Per-chiplet **GCD/MCD hotspots** and the **VR (VDDC/SoC/VDDIO/VDDCI) temperatures** that some tools
+show are **not present in this card's `QueryPMLogData` block** (those sensor-type indices report
+`supported == 0`; the populated slots 53–57 are throttle-percent counters, not temperatures). They
+are sourced from a different SMU metrics path and were deliberately **not** mapped to guessed PMLog
+indices. The live supported index=value table can be dumped with the dev-only probe
+`--gpu-pmlog-dump` (DevProbes build).
 
 **Still pending:** confirming ADL returns data from the **LocalSystem service in session 0** (the
 above was an interactive run). The HID path needed that check; if ADL refuses headless, the

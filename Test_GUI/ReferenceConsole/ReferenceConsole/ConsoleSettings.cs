@@ -32,6 +32,16 @@ public sealed class ConsoleSettings
     /// <summary>When true, minimizing hides the window to a system-tray icon instead of the taskbar.</summary>
     public bool MinimizeToTray { get; set; }
 
+    /// <summary>Launch this console automatically when the user signs in (HKCU Run key — non-admin).</summary>
+    public bool AutoStartGui { get; set; }
+
+    /// <summary>
+    /// User preference: the broker Windows services should start with Windows. Persisted regardless
+    /// of whether it could be applied (setting a service start type needs administrator rights); the
+    /// console applies it best-effort and an elevated install/run can honour it later.
+    /// </summary>
+    public bool AutoStartServices { get; set; }
+
     /// <summary>
     /// The window's last Normal-state placement [x, y, w, h] (screen pixels for x/y, DIPs for w/h),
     /// so the console reopens at the size/spot you left it. Null until the window has been shown once.
@@ -52,6 +62,50 @@ public sealed class ConsoleSettings
     public Dictionary<string, double[]>? DashSizes { get; set; }
     public Dictionary<string, double[]>? DashFree { get; set; }
     public string? DashLayoutMode { get; set; }
+
+    /// <summary>Whether the dashboard cards are locked (frozen) against move/resize. Independent of
+    /// <see cref="SettingsLocked"/> — the dashboard and settings locks are separate.
+    /// LEGACY: pre-sections this was the built-in dashboard's lock; now migrated into
+    /// <see cref="DashSections"/>[0]. Kept only so an older settings file migrates cleanly.</summary>
+    public bool DashLocked { get; set; }
+
+    /// <summary>
+    /// All dashboard sections in sidebar order: the built-in "Dashboard" (Id "main") plus any the
+    /// user added via "+ Add Section". Each carries its own card layout AND its own lock, so the
+    /// sections are fully independent. Null on a pre-sections settings file; <see cref="EnsureSections"/>
+    /// migrates the legacy single-dashboard fields into a "main" entry on first load.
+    /// </summary>
+    public List<DashSectionState>? DashSections { get; set; }
+
+    /// <summary>Return the section list, migrating the legacy single-dashboard fields into a "main"
+    /// entry the first time (so existing layouts survive the upgrade).</summary>
+    public List<DashSectionState> EnsureSections()
+    {
+        if (DashSections is { Count: > 0 } && DashSections.Any(s => s.Id == "main"))
+            return DashSections;
+        DashSections ??= new();
+        if (DashSections.All(s => s.Id != "main"))
+            DashSections.Insert(0, new DashSectionState
+            {
+                Id = "main",
+                Name = null,                       // the built-in section's title is fixed ("Dashboard")
+                Hidden = DashHidden,
+                SensorBoxes = DashSensorBoxes ?? new(),
+                Sizes = DashSizes,
+                Free = DashFree,
+                LayoutMode = DashLayoutMode,
+                Locked = DashLocked,
+            });
+        return DashSections;
+    }
+
+    /// <summary>
+    /// Settings-page card layout: free-placement positions [x,y] and sizes [w,h] (-1 = auto) keyed by
+    /// card id, plus whether the cards are locked (frozen) against move/resize.
+    /// </summary>
+    public Dictionary<string, double[]>? SettingsFree { get; set; }
+    public Dictionary<string, double[]>? SettingsSizes { get; set; }
+    public bool SettingsLocked { get; set; }
 
     /// <summary>Per-device effect configuration, keyed by the broker's device id.</summary>
     public Dictionary<string, DeviceSettings> Devices { get; set; } = new();
@@ -107,6 +161,20 @@ public sealed class ConsoleSettings
         if (File.Exists(FilePath)) File.Replace(tmp, FilePath, null);
         else File.Move(tmp, FilePath);
     }
+}
+
+/// <summary>One dashboard section's persisted layout + lock. The built-in dashboard is Id "main"
+/// (Name null → shown as "Dashboard"); user sections get a generated id and an editable name.</summary>
+public sealed class DashSectionState
+{
+    public string Id { get; set; } = "";
+    public string? Name { get; set; }
+    public List<string>? Hidden { get; set; }                 // box ids hidden (built-in panels)
+    public List<string> SensorBoxes { get; set; } = new();    // raw sensor ids added as metric cards
+    public Dictionary<string, double[]>? Sizes { get; set; }  // box id -> [w,h] (-1 = auto)
+    public Dictionary<string, double[]>? Free { get; set; }   // box id -> [x,y] canvas position
+    public string? LayoutMode { get; set; }                   // "grid" | "free"
+    public bool Locked { get; set; }                          // this section's own lock (independent)
 }
 
 /// <summary>One RGB device's saved effect configuration.</summary>

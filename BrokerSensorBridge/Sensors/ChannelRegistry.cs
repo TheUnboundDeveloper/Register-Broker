@@ -107,6 +107,17 @@ internal static class ChannelRegistry
                     : new RawReading(false, 0, "NotAvailable"),
                removable: true);
 
+    /* A UPS is a removable user-mode HID Power Device — same shape as the Aqua provider. */
+    private static bool UpsUp(ISmbusBackend _) => UpsSensorProvider.Current?.IsAvailable == true;
+
+    private static RawChannel Ups(string id, string unit, int round, UpsMetric metric)
+        => new(id, unit, round,
+               _ => UpsSensorProvider.Current is { } p && p.TryRead(metric, out double _),
+               _ => UpsSensorProvider.Current is { } p && p.TryRead(metric, out double v)
+                    ? new RawReading(true, v, "Ok")
+                    : new RawReading(false, 0, "NotAvailable"),
+               removable: true);
+
     /// <summary>The registry. Order is serving order (sensor.list is stable across releases).</summary>
     public static readonly IReadOnlyList<ChannelBackendDef> Backends = Build();
 
@@ -258,6 +269,8 @@ internal static class ChannelRegistry
                 Gpu("gpu.clock.core",    "MHz", 0, GpuMetric.ClockGfxMhz),
                 Gpu("gpu.clock.mem",     "MHz", 0, GpuMetric.ClockMemMhz),
                 Gpu("gpu.usage",         "%",   0, GpuMetric.UtilGfx),
+                Gpu("gpu.usage.mem",     "%",   0, GpuMetric.UtilMem),
+                Gpu("gpu.mem.used",      "MB",  0, GpuMetric.MemUsedMb),
                 Gpu("gpu.voltage",       "V",   3, GpuMetric.VoltageGfx),
             };
 
@@ -286,6 +299,25 @@ internal static class ChannelRegistry
 
             defs.Add(new ChannelBackendDef("Aquacomputer Quadro", Array.Empty<string>(), "aqua.",
                 AquaUp, list, isUserMode: true));
+        }
+
+        /*-- UPS (READ-ONLY, USER-MODE, REMOVABLE). A standard USB HID Power Device (usage page 0x84):
+             battery/line status read from FEATURE reports by HID usage. Served via the UpsSensorProvider
+             singleton; opt-in (AllowUpsSensors), reduced assurance, hot-pluggable. Core set: battery
+             charge + runtime + output load + input/output voltage. Usages are USB-IF HID Power Device
+             facts (see UpsSensorProvider). --*/
+        {
+            var list = new List<RawChannel>
+            {
+                Ups("ups.charge",      "%",   0, UpsMetric.ChargePercent),
+                Ups("ups.runtime",     "min", 0, UpsMetric.RuntimeMin),
+                Ups("ups.load",        "%",   0, UpsMetric.LoadPercent),
+                Ups("ups.voltage.in",  "V",   0, UpsMetric.VoltageIn),
+                Ups("ups.voltage.out", "V",   0, UpsMetric.VoltageOut),
+            };
+
+            defs.Add(new ChannelBackendDef("UPS (HID Power Device)", Array.Empty<string>(), "ups.",
+                UpsUp, list, isUserMode: true));
         }
 
         return defs;

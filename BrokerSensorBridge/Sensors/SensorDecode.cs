@@ -108,6 +108,7 @@ internal static class DecoderRegistry
         ["dimm."]     = "Linux jc42 (Jc42TempC)",
         ["gpu."]      = "AMD ADL PMLog (ADL2_New_QueryPMLogData_Get; AMD ADL SDK) — values returned in engineering units",
         ["aqua."]     = "Linux aquacomputer_d5next.c (Quadro status report) cross-checked with liquidctl — QuadroProtocol offsets",
+        ["ups."]      = "USB-IF HID Power Device usage tables (RemainingCapacity/RunTimeToEmpty/PercentLoad/Voltage) — raw logical value, exponent ignored as NUT does",
     };
 
     public static bool Covers(string rawId)

@@ -19,6 +19,8 @@ namespace BrokerSensorBridge;
 internal sealed class HidDevice : IDisposable
 {
     private readonly SafeFileHandle _handle;
+    private IntPtr _preparsed = IntPtr.Zero;   // cached HID preparsed data (lazy; freed on Dispose)
+    private bool _preparsedTried;
 
     /// <summary>Feature-report length in bytes (incl. the leading report id), from HIDP_CAPS.</summary>
     public int FeatureReportByteLength { get; }
@@ -99,13 +101,28 @@ internal sealed class HidDevice : IDisposable
         return ok && got > 0;
     }
 
-    public void Dispose() => _handle.Dispose();
+    public void Dispose()
+    {
+        if (_preparsed != IntPtr.Zero) { HidD_FreePreparsedData(_preparsed); _preparsed = IntPtr.Zero; }
+        _handle.Dispose();
+    }
 
     /// <summary>
     /// Opens every present HID interface whose USB vendor id matches <paramref name="vendorId"/>.
     /// Best-effort: unreadable interfaces are skipped. Caller disposes the returned devices.
     /// </summary>
     public static IReadOnlyList<HidDevice> OpenByVendor(ushort vendorId, Action<string> log)
+        => OpenMatching(log, vendorId: vendorId, usagePage: 0);
+
+    /// <summary>
+    /// Opens every present HID interface whose top-level collection UsagePage matches
+    /// <paramref name="usagePage"/> (e.g. 0x84 = USB HID Power Device, for UPS/battery). Used when the
+    /// device is identified by its standard HID class rather than a fixed vendor id. Best-effort.
+    /// </summary>
+    public static IReadOnlyList<HidDevice> OpenByUsagePage(ushort usagePage, Action<string> log)
+        => OpenMatching(log, vendorId: 0, usagePage: usagePage);
+
+    private static IReadOnlyList<HidDevice> OpenMatching(Action<string> log, ushort vendorId, ushort usagePage)
     {
         var found = new List<HidDevice>();
         HidD_GetHidGuid(out Guid hidGuid);
@@ -136,15 +153,95 @@ internal sealed class HidDevice : IDisposable
                 if (h.IsInvalid) { h.Dispose(); continue; }
 
                 var attrs = new HIDD_ATTRIBUTES { Size = (uint)Marshal.SizeOf<HIDD_ATTRIBUTES>() };
-                if (!HidD_GetAttributes(h, ref attrs) || attrs.VendorID != vendorId) { h.Dispose(); continue; }
+                if (!HidD_GetAttributes(h, ref attrs)) { h.Dispose(); continue; }
+                if (vendorId != 0 && attrs.VendorID != vendorId) { h.Dispose(); continue; }
 
-                GetCaps(h, out int featureLen, out int inputLen, out ushort usagePage, out ushort usage);
-                found.Add(new HidDevice(h, path, attrs.VendorID, attrs.ProductID, featureLen, inputLen, usagePage, usage));
+                GetCaps(h, out int featureLen, out int inputLen, out ushort up, out ushort usage);
+                if (usagePage != 0 && up != usagePage) { h.Dispose(); continue; }
+
+                found.Add(new HidDevice(h, path, attrs.VendorID, attrs.ProductID, featureLen, inputLen, up, usage));
             }
         }
         finally { SetupDiDestroyDeviceInfoList(set); }
 
         return found;
+    }
+
+    /// <summary>
+    /// One parsed HID value-cap entry: which (UsagePage, Usage) lives in which report id / link
+    /// collection, plus the field's bit size and decoded base-10 unit exponent. Used to read a
+    /// descriptor-driven device (e.g. a HID Power Device / UPS) by usage rather than fixed offsets.
+    /// </summary>
+    internal readonly struct HidValueCap
+    {
+        public readonly ushort UsagePage;
+        public readonly ushort Usage;
+        public readonly ushort LinkCollection;
+        public readonly byte   ReportId;
+        public readonly int    BitSize;
+        public readonly int    UnitsExp;   // decoded signed base-10 exponent (HID nibble: 8..15 => -8..-1)
+        public HidValueCap(ushort up, ushort u, ushort lc, byte rid, int bits, int exp)
+        { UsagePage = up; Usage = u; LinkCollection = lc; ReportId = rid; BitSize = bits; UnitsExp = exp; }
+    }
+
+    /// <summary>Lazily acquire (and cache) the device's HID preparsed data, or IntPtr.Zero if unavailable.</summary>
+    private IntPtr Preparsed()
+    {
+        if (!_preparsedTried)
+        {
+            _preparsedTried = true;
+            _preparsed = HidD_GetPreparsedData(_handle, out IntPtr pre) ? pre : IntPtr.Zero;
+        }
+        return _preparsed;
+    }
+
+    /// <summary>
+    /// Enumerate the device's value caps for the FEATURE (or INPUT) report type. Returns an empty
+    /// list when the device has none / preparsed data is unavailable. Read-only.
+    /// </summary>
+    public IReadOnlyList<HidValueCap> GetValueCaps(bool feature)
+    {
+        var result = new List<HidValueCap>();
+        IntPtr pre = Preparsed();
+        if (pre == IntPtr.Zero) return result;
+
+        byte[] caps = new byte[256];
+        if (HidP_GetCaps(pre, caps) != HIDP_STATUS_SUCCESS) return result;
+        int count = BitConverter.ToUInt16(caps, feature ? 60 : 48);   // HIDP_CAPS.NumberFeature/InputValueCaps
+        if (count <= 0) return result;
+
+        int reportType = feature ? 2 : 0;                              // HIDP_REPORT_TYPE Feature=2, Input=0
+        byte[] buf = new byte[count * HIDP_VALUE_CAPS_SIZE];
+        ushort len = (ushort)count;
+        if (HidP_GetValueCaps(reportType, buf, ref len, pre) != HIDP_STATUS_SUCCESS) return result;
+
+        for (int i = 0; i < len; i++)
+        {
+            int o = i * HIDP_VALUE_CAPS_SIZE;
+            ushort usagePage = BitConverter.ToUInt16(buf, o + 0);
+            byte   reportId  = buf[o + 2];
+            ushort linkColl  = BitConverter.ToUInt16(buf, o + 6);
+            ushort bitSize   = BitConverter.ToUInt16(buf, o + 18);
+            int    expRaw    = (int)(BitConverter.ToUInt32(buf, o + 32) & 0xF);
+            ushort usage     = BitConverter.ToUInt16(buf, o + 56);     // NotRange.Usage (== Range.UsageMin)
+            int exp = expRaw > 7 ? expRaw - 16 : expRaw;
+            result.Add(new HidValueCap(usagePage, usage, linkColl, reportId, bitSize, exp));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Extract one usage's raw logical value from a report buffer (HidP_GetUsageValue). The buffer must
+    /// already hold a fetched FEATURE report (see <see cref="GetFeature"/>) for the matching report id.
+    /// Returns false when the usage is absent from that report. Read-only.
+    /// </summary>
+    public bool TryGetUsageValue(byte[] report, ushort usagePage, ushort linkCollection, ushort usage, out uint value)
+    {
+        value = 0;
+        IntPtr pre = Preparsed();
+        if (pre == IntPtr.Zero) return false;
+        return HidP_GetUsageValue(2 /* Feature */, usagePage, linkCollection, usage, out value, pre,
+                                  report, (uint)report.Length) == HIDP_STATUS_SUCCESS;
     }
 
     private static void GetCaps(SafeFileHandle h, out int featureLen, out int inputLen, out ushort usagePage, out ushort usage)
@@ -183,6 +280,7 @@ internal sealed class HidDevice : IDisposable
     /*-- Interop --*/
     private const uint DIGCF_PRESENT = 0x02, DIGCF_DEVICEINTERFACE = 0x10;
     private const int HIDP_STATUS_SUCCESS = 0x00110000;
+    private const int HIDP_VALUE_CAPS_SIZE = 72;   // sizeof(HIDP_VALUE_CAPS) on x64
     private static readonly IntPtr INVALID_HANDLE_VALUE = new(-1);
 
     [StructLayout(LayoutKind.Sequential)]
@@ -200,6 +298,8 @@ internal sealed class HidDevice : IDisposable
     [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] private static extern bool HidD_GetPreparsedData(SafeFileHandle h, out IntPtr preparsed);
     [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] private static extern bool HidD_FreePreparsedData(IntPtr preparsed);
     [DllImport("hid.dll")] private static extern int HidP_GetCaps(IntPtr preparsed, byte[] caps);
+    [DllImport("hid.dll")] private static extern int HidP_GetValueCaps(int reportType, byte[] valueCaps, ref ushort valueCapsLength, IntPtr preparsed);
+    [DllImport("hid.dll")] private static extern int HidP_GetUsageValue(int reportType, ushort usagePage, ushort linkCollection, ushort usage, out uint usageValue, IntPtr preparsed, byte[] report, uint reportLength);
 
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr SetupDiGetClassDevs(ref Guid classGuid, IntPtr enumerator, IntPtr hwndParent, uint flags);

@@ -35,6 +35,7 @@ internal sealed class AdlInterop : IDisposable
     private readonly AdlMainMemoryAllocDelegate _malloc;
     private readonly ADL2_Main_Control_Destroy_t _destroy;
     private readonly ADL2_New_QueryPMLogData_Get_t _queryPmLog;
+    private readonly ADL2_Adapter_VRAMUsage_Get_t? _vramUsage;   // optional — absent on older ADL
     private IntPtr _context;
     private bool _disposed;
 
@@ -46,10 +47,11 @@ internal sealed class AdlInterop : IDisposable
     private AdlInterop(IntPtr context, int adapterIndex, string adapterName,
                        AdlMainMemoryAllocDelegate malloc,
                        ADL2_Main_Control_Destroy_t destroy,
-                       ADL2_New_QueryPMLogData_Get_t queryPmLog)
+                       ADL2_New_QueryPMLogData_Get_t queryPmLog,
+                       ADL2_Adapter_VRAMUsage_Get_t? vramUsage)
     {
         _context = context; AdapterIndex = adapterIndex; AdapterName = adapterName;
-        _malloc = malloc; _destroy = destroy; _queryPmLog = queryPmLog;
+        _malloc = malloc; _destroy = destroy; _queryPmLog = queryPmLog; _vramUsage = vramUsage;
     }
 
     /// <summary>
@@ -75,6 +77,10 @@ internal sealed class AdlInterop : IDisposable
             log("[gpu] atiadlxx.dll is missing a required ADL2 entry point — AMD GPU sensors unavailable.");
             return null;
         }
+
+        /* VRAM usage is an optional extra (separate from PMLog); resolve best-effort so an older
+           atiadlxx.dll that lacks it simply leaves gpu.mem.used not-available. */
+        TryGet(lib, "ADL2_Adapter_VRAMUsage_Get", out ADL2_Adapter_VRAMUsage_Get_t? vramUsage);
 
         /* The malloc callback ADL calls to allocate buffers it hands back. Must outlive the context. */
         AdlMainMemoryAllocDelegate malloc = size => Marshal.AllocHGlobal(size);
@@ -132,7 +138,7 @@ internal sealed class AdlInterop : IDisposable
                     return null;
                 }
 
-                var adl = new AdlInterop(context, chosenIndex, chosenName, malloc, destroy!, queryPmLog!);
+                var adl = new AdlInterop(context, chosenIndex, chosenName, malloc, destroy!, queryPmLog!, vramUsage);
                 context = IntPtr.Zero;   // ownership transferred to the instance; don't destroy in finally
                 return adl;
             }
@@ -179,6 +185,26 @@ internal sealed class AdlInterop : IDisposable
         finally { Marshal.FreeHGlobal(buf); }
     }
 
+    /// <summary>
+    /// Reads dedicated VRAM in use (MB) via ADL2_Adapter_VRAMUsage_Get. Separate from the PMLog block.
+    /// Returns false when the entry point is absent (older driver) or the query errors. Read-only.
+    /// </summary>
+    public bool TryGetVramUsageMb(out int megabytes)
+    {
+        megabytes = 0;
+        if (_disposed || _context == IntPtr.Zero || _vramUsage is null) return false;
+        try
+        {
+            if (_vramUsage(_context, AdapterIndex, out int raw) != ADL_OK || raw < 0) return false;
+            /* Despite the entry point's "InMB" name, some drivers return KB. Anchored on an
+               RX 7900 XTX: raw 2,478,836 -> 2.36 GB in use (matches a labeled reference). Auto-detect:
+               anything above 64 GB-as-MB can't be megabytes for any real GPU, so treat it as KB. */
+            megabytes = raw > 65536 ? raw / 1024 : raw;
+            return true;
+        }
+        catch { return false; }
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -215,6 +241,8 @@ internal sealed class AdlInterop : IDisposable
     private delegate int ADL2_Adapter_AdapterInfo_Get_t(IntPtr context, IntPtr info, int inputSize);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int ADL2_New_QueryPMLogData_Get_t(IntPtr context, int adapterIndex, IntPtr pmLogDataOutput);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int ADL2_Adapter_VRAMUsage_Get_t(IntPtr context, int adapterIndex, out int vramUsageInMB);
 
     /// <summary>ADL AdapterInfo (adl_structures.h). All-int + inline ANSI char[256] fields, no pointers.</summary>
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]

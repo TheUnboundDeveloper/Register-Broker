@@ -55,6 +55,10 @@ param(
     # streamed in user-mode, reduced assurance (no kernel driver, no brick-guard) but strictly
     # READ-ONLY and REMOVABLE (hot-pluggable). Served as aqua.* sensors. See docs/SECURITY.md.
     [switch]$WithAquaSensors,
+    # Enable the opt-in read-only UPS sensor source (USB HID Power Device) on the SENSOR service
+    # (writes AllowUpsSensors=true into appsettings.json). A user-mode HID device, reduced assurance
+    # (no kernel driver, no brick-guard) but strictly READ-ONLY and REMOVABLE. Served as ups.* sensors.
+    [switch]$WithUpsSensors,
     [switch]$SkipDriver,            # do not (re)register the kernel driver service
     [switch]$NoDriverDependency,    # do not make the broker depend on the driver service
     [switch]$NoStart,               # register but do not start the services
@@ -183,7 +187,7 @@ $Exe = (Resolve-Path $Exe).Path
 #--------------------------------------------------------------------------
 $AppSettings = Join-Path $BridgeDir "appsettings.json"
 $setAuth = ($RequireAuthorizedClient -or $AllowedClientSigners.Count -or $AllowedClientPaths.Count)
-if ((Test-Path $AppSettings) -and ($setAuth -or $WithHidRgb -or $WithGpuSensors -or $WithAquaSensors)) {
+if ((Test-Path $AppSettings) -and ($setAuth -or $WithHidRgb -or $WithGpuSensors -or $WithAquaSensors -or $WithUpsSensors)) {
     Write-Host "[cfg] Updating $AppSettings"
 
     $cfg = Get-Content $AppSettings -Raw | ConvertFrom-Json
@@ -229,6 +233,13 @@ if ((Test-Path $AppSettings) -and ($setAuth -or $WithHidRgb -or $WithGpuSensors 
     if ($WithAquaSensors) {
         $cfg | Add-Member -NotePropertyName AllowAquaSensors -NotePropertyValue $true -Force
         Write-Host "[cfg] AllowAquaSensors=true (read-only Aquacomputer USB-HID sensors — reduced assurance, removable, no kernel guard)."
+    }
+
+    # Read-only UPS sensor source (USB HID Power Device). Reduced assurance (no kernel
+    # driver/brick-guard) but read-only and removable; served as ups.* on the sensor service.
+    if ($WithUpsSensors) {
+        $cfg | Add-Member -NotePropertyName AllowUpsSensors -NotePropertyValue $true -Force
+        Write-Host "[cfg] AllowUpsSensors=true (read-only UPS USB-HID sensors — reduced assurance, removable, no kernel guard)."
     }
 
     # Write BOM-less UTF-8 deterministically. Windows PowerShell 5.1 'Set-Content -Encoding UTF8'

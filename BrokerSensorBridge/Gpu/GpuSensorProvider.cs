@@ -30,6 +30,8 @@ internal enum GpuMetric
     ClockGfxMhz,    // graphics (core) clock (MHz)
     ClockMemMhz,    // memory clock (MHz)
     UtilGfx,        // graphics activity / utilization (%)
+    UtilMem,        // memory-controller activity / utilization (%)
+    MemUsedMb,      // dedicated VRAM in use (MB)
     VoltageGfx      // graphics core (GFX) voltage (V)
 }
 
@@ -83,9 +85,15 @@ internal sealed class AmdAdlGpuProvider : IGpuSensorProvider, IDisposable
     private const int PMLOG_FAN_RPM             = 14;
     private const int PMLOG_FAN_PERCENTAGE      = 15;
     private const int PMLOG_INFO_ACTIVITY_GFX   = 19;
+    private const int PMLOG_INFO_ACTIVITY_MEM   = 20;   // ADL_PMLOG_INFO_ACTIVITY_MEM — memory-controller load (%)
     private const int PMLOG_GFX_VOLTAGE         = 21;   // ADL_PMLOG_GFX_VOLTAGE — reported in mV
     private const int PMLOG_ASIC_POWER          = 23;
     private const int PMLOG_TEMPERATURE_HOTSPOT = 27;
+    /* Total Board Power (W). Anchored on the RX 7900 XTX (RDNA3): idx 73 read 77 W at idle, matching
+       a labeled reference's "Total Board Power (TBP)" 78 W, while ASIC_POWER (23) is unpopulated on
+       this driver. PowerW prefers board power and falls back to ASIC where 73 is absent — so the
+       channel reports real power on RDNA3 instead of "not available". */
+    private const int PMLOG_BOARD_POWER         = 73;
 
     private const long CacheTtlMs = 250;   // one PMLog query serves a whole sensor.readall burst
 
@@ -129,6 +137,16 @@ internal sealed class AmdAdlGpuProvider : IGpuSensorProvider, IDisposable
         value = 0;
         if (_disposed) return false;
 
+        /* VRAM usage is a direct ADL call, not part of the cached PMLog block. */
+        if (metric == GpuMetric.MemUsedMb)
+        {
+            lock (_lock)
+            {
+                if (_adl.TryGetVramUsageMb(out int mb)) { value = mb; return true; }
+                return false;
+            }
+        }
+
         int index = metric switch
         {
             GpuMetric.TempEdge    => PMLOG_TEMPERATURE_EDGE,
@@ -136,19 +154,29 @@ internal sealed class AmdAdlGpuProvider : IGpuSensorProvider, IDisposable
             GpuMetric.TempMem     => PMLOG_TEMPERATURE_MEM,
             GpuMetric.FanRpm      => PMLOG_FAN_RPM,
             GpuMetric.FanPercent  => PMLOG_FAN_PERCENTAGE,
-            GpuMetric.PowerW      => PMLOG_ASIC_POWER,
             GpuMetric.ClockGfxMhz => PMLOG_CLK_GFXCLK,
             GpuMetric.ClockMemMhz => PMLOG_CLK_MEMCLK,
             GpuMetric.UtilGfx     => PMLOG_INFO_ACTIVITY_GFX,
+            GpuMetric.UtilMem     => PMLOG_INFO_ACTIVITY_MEM,
             GpuMetric.VoltageGfx  => PMLOG_GFX_VOLTAGE,
             _ => -1
         };
-        if (index < 0) return false;
 
         lock (_lock)
         {
             EnsureFresh();
-            if (!_haveSample || _supported[index] == 0) return false;
+            if (!_haveSample) return false;
+
+            /* GPU power: prefer Total Board Power, fall back to ASIC power where the board sensor
+               is absent. Resolved against the live sample so we pick whichever the driver populates. */
+            if (metric == GpuMetric.PowerW)
+            {
+                if (_supported[PMLOG_BOARD_POWER] != 0)      index = PMLOG_BOARD_POWER;
+                else if (_supported[PMLOG_ASIC_POWER] != 0)  index = PMLOG_ASIC_POWER;
+                else return false;
+            }
+            if (index < 0 || _supported[index] == 0) return false;
+
             value = _value[index];
             if (metric == GpuMetric.VoltageGfx) value /= 1000.0;   // ADL reports GFX voltage in mV → V
             return true;

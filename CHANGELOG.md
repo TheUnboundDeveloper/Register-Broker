@@ -11,6 +11,46 @@ and additive ops do not bump the protocol version.
 
 ## [Unreleased]
 
+### Added — UPS / battery monitoring via USB HID Power Device (broker-only, opt-in, removable)
+
+- **New `ups.*` sensors** from any standard USB **HID Power Device** (UPS): `ups.charge` (battery %),
+  `ups.runtime` (minutes remaining), `ups.load` (output load %), `ups.voltage.in` and
+  `ups.voltage.out` (V). Same user-mode, read-only, **removable** posture as the Aquacomputer
+  provider — a background hot-plug-aware poller, no kernel driver, no write path. Opt-in
+  (`AllowUpsSensors` / `--allow-ups-sensors`).
+- Identified by **HID class** (top-level collection usage page 0x84), not a vendor id, so any
+  compliant UPS works; the usage map (report ids / link collections) is discovered from the
+  device's value caps at runtime, not hard-coded. Usages are USB-IF HID Power Device facts
+  (RemainingCapacity 0x85/0x66, RunTimeToEmpty 0x85/0x68, PercentLoad 0x84/0x35, Voltage 0x84/0x30).
+- **Anchored + HW-validated** on a CyberPower UPS (VID 0x0764/PID 0x0501): charge 100 %, runtime
+  ~22–24 min, load ~26 %, input/output 120 V — matching a labeled reference. The HID UnitExponent on
+  consumer UPS descriptors is unreliable (would scale 120 V to 1.2e9), so values are read as the raw
+  logical value, as Network UPS Tools does. AC/Charging/Discharging are HID *button* items (not value
+  caps) and are not exposed in this first version.
+- `HidDevice` gained generic descriptor parsing (`OpenByUsagePage`, `GetValueCaps`,
+  `TryGetUsageValue`, cached preparsed data). New dev-only probes `--ups-dump` (value-cap/usage table)
+  and `--ups-read` (end-to-end provider read).
+
+### Added — GPU memory-controller utilization + working board power (AMD ADL, broker-only)
+
+- **New `gpu.mem.used` sensor** (dedicated VRAM in use, MB) via `ADL2_Adapter_VRAMUsage_Get` — a
+  direct ADL call (optional entry point; absent on older drivers → reads not-available).
+
+- **New `gpu.usage.mem` sensor** (ADL PMLog `INFO_ACTIVITY_MEM`, idx 20) — GPU memory-controller
+  load %, alongside the existing `gpu.usage` (GFX activity). Same user-mode, opt-in
+  (`AllowGpuSensors`), read-only ADL path as the other `gpu.*` channels — no driver change.
+- **`gpu.power` now reports Total Board Power on RDNA3.** It prefers ADL PMLog board power
+  (idx 73) and falls back to `ASIC_POWER` (idx 23) only where the board sensor is absent.
+  Previously `gpu.power` read "not available" on the dev box's RX 7900 XTX because that driver's
+  PMLog set does not populate `ASIC_POWER`. **Anchored on hardware**: idx 73 read 77 W at idle,
+  matching a labeled reference's TBP (78 W); idx 20 read 0 % at idle.
+- **Honest negative result:** the per-chiplet GCD/MCD hotspots and VR (VDDC/SoC/VDDIO/VDDCI)
+  temperatures other tools surface are **not present in this card's `QueryPMLogData` block**
+  (those indices are unsupported) — they come from a different SMU metrics path, so they were
+  deliberately NOT added rather than mapped to guessed indices (the registry "anchor, never
+  guess" rule). New dev-only probe `--gpu-pmlog-dump` (DevProbes) dumps the live supported
+  PMLog index=value table used to anchor this.
+
 ### Added — Reference Console local card/sensor/device renaming (console-only)
 
 - **Right-click → "Rename…" / "Reset name"** on any dashboard card, sensor row, or RGB device

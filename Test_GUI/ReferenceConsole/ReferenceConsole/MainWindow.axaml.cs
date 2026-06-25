@@ -37,7 +37,7 @@ namespace ReferenceConsole;
 public partial class MainWindow : Window
 {
     private static readonly string[] EffectNames =
-        { "(none)", "Static", "Temperature", "Rainbow", "Breathing", "Comet", "Twinkle", "Aurora", "Fire", "Ripple", "Manual per-LED", "Audio Spectrum" };
+        { "(none)", "Static", "Temperature", "Rainbow", "Breathing", "Heartbeat", "Comet", "Scanner", "Theater Chase", "Twinkle", "Aurora", "Plasma", "Fire", "Ripple", "Juggle", "Manual per-LED", "Audio Spectrum" };
 
     private static readonly string[] Palette =
         { "FF0000", "00FF00", "0000FF", "FFFFFF", "FF6A00", "00FFFF", "FF00FF", "000000" };
@@ -81,24 +81,30 @@ public partial class MainWindow : Window
     private Button[] _navButtons = Array.Empty<Button>();
     private bool _shellInitialized;   // guards one-time seed + auto-connect (Opened can re-fire on tray restore)
 
-    // Dashboard widget boxes (draggable / removable). Default declaration order is captured
-    // at startup so "Reset layout" can restore it.
+    // Dashboard sections: each is an independent canvas of draggable/resizable cards — the built-in
+    // "Dashboard" plus any the user adds via "+ Add Section". Per-section state (boxes, layout mode,
+    // lock, selection, sensor views, default order) lives in DashSection; only the in-flight
+    // manipulation below is global, since the user drags/resizes one card in one visible section at a time.
+    private readonly List<DashSection> _sections = new();
+    private DashSection _active = null!;          // the section whose page is currently shown
+    private int _nextSectionNum = 1;              // id counter for user-created sections
+
+    // Drag-to-reorder the section nav buttons in the sidebar. A press that doesn't move past a small
+    // threshold is a normal click (navigate); past it, the button reorders within SectionNavHost.
+    private Button? _navDragBtn;
+    private Point _navDragStart;
+    private bool _navDragging;
+
     private Border? _dragBox;
-    private readonly List<string> _defaultBoxOrder = new();
-    private readonly List<Border> _allBoxes = new();
-    private string _layoutMode = "grid";        // "grid" (snap-to-grid) or "free" — both on the canvas
-    private bool _layoutSeeded;                   // canvas positions assigned once the canvas is sized
     private Point _dragStart;                    // drag origin (canvas coords)
     private double _dragOrigLeft, _dragOrigTop;
     private Border? _resizeBox;                   // box being resized via its grip
     private Point _resizeStartPtr;
     private double _resizeW, _resizeH;
 
-    // Marquee (rubber-band) multi-select + group move.
-    private readonly HashSet<Border> _selected = new();
+    // Marquee (rubber-band) multi-select + group move (the visual is per-section; this is in-flight state).
     private bool _marqueeActive;
     private Point _marqueeStart;
-    private Border? _marqueeVisual;
     private bool _groupDrag;
     private Dictionary<Border, Point> _groupOrigins = new();
     private static readonly Dictionary<string, string> BoxTitles = new()
@@ -114,10 +120,24 @@ public partial class MainWindow : Window
     // panels remain re-addable.
     private static readonly HashSet<string> SensorBackedBoxes = new() { "cpu", "gpu", "vrm", "sys" };
 
-    // Dashboard metric cards the user has added for individual sensors (id = "sensor:<sensorId>").
-    // These are built at runtime by "Add box" and updated on every poll.
-    private readonly Dictionary<string, (TextBlock Val, Sparkline Spark)> _sensorBoxViews = new();
+    // Dashboard metric cards the user has added for individual sensors live per-section now
+    // (DashSection.SensorViews / .BoxSensorId); box ids are "sensor:<sectionId>:<sensorId>".
     private const string SensorBoxPrefix = "sensor:";
+
+    // ===== Settings page: draggable / resizable cards on a canvas (parallel to, but independent of,
+    //       the dashboard's system). "Lock cards" freezes move + resize. =====
+    private const double SettingsCardW = 540;   // default card width; flow lays them out in columns of this
+    private readonly List<Border> _settingsCards = new();
+    private readonly List<Border> _settingsGrips = new();
+    private readonly List<Control> _settingsDragBars = new();   // per-card header drag handle
+    private bool _settingsLocked;
+    private bool _settingsSeeded;
+    private Border? _sDragCard;
+    private Point _sDragStart;
+    private double _sDragOrigLeft, _sDragOrigTop;
+    private Border? _sResizeCard;
+    private Point _sResizeStart;
+    private double _sResizeW, _sResizeH;
 
     public MainWindow()
     {
@@ -131,7 +151,7 @@ public partial class MainWindow : Window
         ActivityListPage.ItemsSource = _activity;
         EffectCombo.ItemsSource = EffectNames;
 
-        _navButtons = new[] { NavDashboard, NavSensors, NavRgb, NavActivity, NavSecurity, NavSettings };
+        _navButtons = new[] { NavDashboard, NavSensors, NavRgb, NavSettings };
 
         // Client-identity panel: everything derived from the real session / OS, not hard-coded.
         SecUser.Text = Environment.UserName;
@@ -143,8 +163,14 @@ public partial class MainWindow : Window
         LocalNames.Use(_settings.CustomNames);   // local-only display-name overrides (never sent to the broker)
         SetupTrayIcon();
         PropertyChanged += OnWindowPropertyChanged;
+        // Re-apply every brush we set from code when the theme flips. Code-set brushes (footer status
+        // colours, scope chips, the open RGB param panel) don't track theme dictionaries on their own;
+        // without this they keep the previous theme's colours — or get reset to the themed default —
+        // after a Dark↔Light toggle.
+        ActualThemeVariantChanged += (_, _) => OnThemeChanged();
         ApplyGlobalSettings();
         SetupDashboardBoxes();
+        SetupSettingsCards();
         ApplyGpuVendorColor();   // tint the GPU card by vendor (AMD red / NVIDIA green / Intel blue)
         MountRgbPanels(onRgbPage: false);   // dashboard is the default view -> RGB panels start in its cards
 
@@ -170,7 +196,7 @@ public partial class MainWindow : Window
             if (_shellInitialized) return;
             _shellInitialized = true;
             RestoreWindowGeometry();   // size/position/maximized from last session (also clears any spurious startup-maximize)
-            SeedCanvasLayout();        // assign canvas positions now the window/canvas is sized
+            SeedCanvasLayout(_active); // assign the dashboard's canvas positions now the window/canvas is sized
             await TryAutoConnect();
         };
         Closing += (_, _) => { SaveSettings(); Cleanup(); _trayIcon?.Dispose(); _trayIcon = null; };
@@ -255,8 +281,7 @@ public partial class MainWindow : Window
     private void OnNavDashboard(object? sender, RoutedEventArgs e) => ShowPage(PageDashboard, NavDashboard);
     private void OnNavSensors(object? sender, RoutedEventArgs e) => ShowPage(PageSensors, NavSensors);
     private void OnNavRgb(object? sender, RoutedEventArgs e) => ShowPage(PageRgb, NavRgb);
-    private void OnNavActivity(object? sender, RoutedEventArgs e) => ShowPage(PageActivity, NavActivity);
-    private void OnNavSecurity(object? sender, RoutedEventArgs e) => ShowPage(PageSecurity, NavSecurity);
+    // Activity + Security are no longer standalone pages — their panels now live on the Settings page.
     private void OnNavSettings(object? sender, RoutedEventArgs e) => ShowPage(PageSettings, NavSettings);
 
     private void ShowPage(Control page, Button nav)
@@ -264,14 +289,26 @@ public partial class MainWindow : Window
         PageDashboard.IsVisible = page == PageDashboard;
         PageSensors.IsVisible = page == PageSensors;
         PageRgb.IsVisible = page == PageRgb;
-        PageActivity.IsVisible = page == PageActivity;
-        PageSecurity.IsVisible = page == PageSecurity;
         PageSettings.IsVisible = page == PageSettings;
+        foreach (var sec in _sections)
+            if (!sec.IsMain) sec.Page.IsVisible = ReferenceEquals(page, sec.Page);
+
         // The shared RGB panels follow the active view: on the RGB page while it's shown, otherwise
         // back in the dashboard cards.
         MountRgbPanels(page == PageRgb);
         foreach (var b in _navButtons) b.Classes.Remove("active");
+        foreach (var sec in _sections)
+            if (!sec.IsMain) sec.NavButton?.Classes.Remove("active");
         if (!nav.Classes.Contains("active")) nav.Classes.Add("active");
+        if (page == PageSettings) OnSettingsShown();
+
+        // Track the active dashboard-like section so toolbar/canvas ops target the right one, and
+        // seed its canvas the first time it becomes visible (positions need a measured canvas).
+        if (_sections.FirstOrDefault(s => ReferenceEquals(s.Page, page)) is { } shown)
+        {
+            _active = shown;
+            Dispatcher.UIThread.Post(() => SeedCanvasLayout(shown), DispatcherPriority.Loaded);
+        }
     }
 
     // The RGB device list + options editor are a single shared control set with two homes: the
@@ -314,9 +351,13 @@ public partial class MainWindow : Window
     // ===================================================================
     //  Dashboard boxes — drag (reorder/move), ✕ remove, resize grip, Grid/Free mode
     // ===================================================================
-    private IEnumerable<Border> Boxes => _allBoxes;
-    private Border? BoxById(string id) => _allBoxes.FirstOrDefault(b => (b.Tag as string) == id);
+    private static Border? BoxById(DashSection s, string id) => s.Boxes.FirstOrDefault(b => (b.Tag as string) == id);
     private static string IdOf(Border b) => b.Tag as string ?? "";
+
+    // Which section owns this card / canvas (handlers fire on the visible section, but resolving from
+    // the element keeps them correct regardless of which section is "active").
+    private DashSection? SectionOfBox(Border box) => _sections.FirstOrDefault(s => s.Boxes.Contains(box));
+    private DashSection? SectionOfCanvas(Canvas c) => _sections.FirstOrDefault(s => ReferenceEquals(s.Canvas, c));
 
     // ===================================================================
     //  Local display-name overrides (cards / sensors / RGB devices)
@@ -423,11 +464,34 @@ public partial class MainWindow : Window
 
     private void SetupDashboardBoxes()
     {
-        _allBoxes.AddRange(DashGrid.Children.OfType<Border>());
-        foreach (var b in _allBoxes)
+        // Drag-reorder of the section nav buttons. Handled on the host in BOTH the tunnel and bubble
+        // phases with handledEventsToo, so the press/move/release always reach us no matter how the
+        // child Button consumes the event. The drag captures the pointer to the host (not the dragged
+        // button), so reordering a child never drops the in-flight capture.
+        const RoutingStrategies both = RoutingStrategies.Tunnel | RoutingStrategies.Bubble;
+        SectionNavHost.AddHandler(InputElement.PointerPressedEvent, OnNavPressed, both, handledEventsToo: true);
+        SectionNavHost.AddHandler(InputElement.PointerMovedEvent, OnNavMoved, both, handledEventsToo: true);
+        SectionNavHost.AddHandler(InputElement.PointerReleasedEvent, OnNavReleased, both, handledEventsToo: true);
+
+        var states = _settings.EnsureSections();
+
+        // ---- the built-in "Dashboard" section wraps the XAML canvas + toolbar ----
+        var mainState = states.First(s => s.Id == "main");
+        var main = new DashSection
         {
-            if (b.Tag is string id) _defaultBoxOrder.Add(id);
-            InjectResizeGrip(b);
+            Id = "main", IsMain = true, State = mainState,
+            Page = PageDashboard, Canvas = DashCanvas,
+            NavButton = NavDashboard, GridBtn = GridModeBtn, FreeBtn = FreeModeBtn,
+            AddBtn = AddBoxButton, LockToggle = DashLockToggle,
+        };
+        _sections.Add(main);
+        _active = main;
+
+        foreach (var b in DashGrid.Children.OfType<Border>().ToList())
+        {
+            main.Boxes.Add(b);
+            if (b.Tag is string id) main.DefaultOrder.Add(id);
+            InjectResizeGrip(main, b);
             AttachCardMenu(b);     // right-click → Rename / Reset
             ApplyBoxTitle(b);      // restore any saved local card name
         }
@@ -435,24 +499,42 @@ public partial class MainWindow : Window
         // Everything lives on the absolute-positioned canvas now; the WrapPanel was only the XAML
         // authoring host. Both Grid and Free modes are canvas-based — Grid just snaps to a cell grid
         // instead of reflowing, so an arrangement is preserved when toggling modes.
-        MoveAllBoxesToCanvas();
+        WireSectionCanvas(main);
         DashGrid.IsVisible = false;
         DashCanvas.IsVisible = true;
+        ApplyDashLayout(main);
+        SetDashLocked(main, main.Locked);   // restore this section's lock (independent of all other locks)
 
-        // A transparent background lets the canvas receive presses on empty space (for the marquee).
-        DashCanvas.Background = Brushes.Transparent;
-        DashCanvas.PointerPressed += OnCanvasPressed;
-        DashCanvas.PointerMoved += OnCanvasMoved;
-        DashCanvas.PointerReleased += OnCanvasReleased;
-        CreateMarqueeVisual();
-
-        ApplyDashLayout();
+        // ---- restore any user-created sections (their cards are recreated once the catalog is known) ----
+        foreach (var st in states.Where(s => s.Id != "main").ToList())
+        {
+            var sec = CreateSection(st);
+            ApplyDashLayout(sec);
+            SetDashLocked(sec, sec.Locked);
+        }
+        UpdateNextSectionNum();
     }
 
-    private void CreateMarqueeVisual()
+    // Move a section's authored boxes onto its canvas and wire the empty-space (marquee) handlers.
+    private void WireSectionCanvas(DashSection s)
+    {
+        foreach (var b in s.Boxes.ToList())
+        {
+            if (ReferenceEquals(b.Parent, DashGrid)) DashGrid.Children.Remove(b);
+            if (!s.Canvas.Children.Contains(b)) s.Canvas.Children.Add(b);
+        }
+        // A transparent background lets the canvas receive presses on empty space (for the marquee).
+        s.Canvas.Background = Brushes.Transparent;
+        s.Canvas.PointerPressed += OnCanvasPressed;
+        s.Canvas.PointerMoved += OnCanvasMoved;
+        s.Canvas.PointerReleased += OnCanvasReleased;
+        CreateMarqueeVisual(s);
+    }
+
+    private void CreateMarqueeVisual(DashSection s)
     {
         var accent = (Res("Accent") as ISolidColorBrush)?.Color ?? Colors.MediumPurple;
-        _marqueeVisual = new Border
+        s.Marquee = new Border
         {
             Background = new SolidColorBrush(Color.FromArgb(36, accent.R, accent.G, accent.B)),
             BorderBrush = Res("Accent"),
@@ -461,36 +543,28 @@ public partial class MainWindow : Window
             IsVisible = false,
             ZIndex = 1000,
         };
-        DashCanvas.Children.Add(_marqueeVisual);
-    }
-
-    private void MoveAllBoxesToCanvas()
-    {
-        foreach (var b in _allBoxes)
-        {
-            if (ReferenceEquals(b.Parent, DashGrid)) DashGrid.Children.Remove(b);
-            if (!DashCanvas.Children.Contains(b)) DashCanvas.Children.Add(b);
-        }
+        s.Canvas.Children.Add(s.Marquee);
     }
 
     // Wrap each box's content in a Grid so a bottom-right resize grip can overlay it.
-    private void InjectResizeGrip(Border box)
+    private void InjectResizeGrip(DashSection s, Border box)
     {
         var content = box.Child;
         box.Child = null;
         var g = new Grid();
         if (content is not null) g.Children.Add(content);
 
-        var grip = new Border { Classes = { "resizegrip" }, Tag = box };
-        grip.Child = new Avalonia.Controls.Shapes.Path
+        var gripIcon = new Avalonia.Controls.Shapes.Path
         {
             Data = Geometry.Parse("M 16,4 L 16,16 L 4,16 Z M 16,9 L 11,16 L 16,16 Z"),
-            Fill = Res("TextMuted"),
             Opacity = 0.85,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Avalonia.Thickness(0, 0, 2, 2),
         };
+        BindThemeBrush(gripIcon, Avalonia.Controls.Shapes.Shape.FillProperty, "TextMuted");
+        var grip = new Border { Classes = { "resizegrip" }, Tag = box, IsVisible = !s.Locked };
+        grip.Child = gripIcon;
         grip.PointerPressed += OnGripPressed;
         grip.PointerMoved += OnGripMoved;
         grip.PointerReleased += OnGripReleased;
@@ -501,6 +575,7 @@ public partial class MainWindow : Window
     private void OnGripPressed(object? sender, PointerPressedEventArgs e)
     {
         if (sender is not Border grip || grip.Tag is not Border box) return;
+        if (SectionOfBox(box) is not { } s || s.Locked) return;   // this section's lock only
         _resizeBox = box;
         _resizeStartPtr = e.GetPosition(this);
         _resizeW = box.Bounds.Width;
@@ -511,10 +586,10 @@ public partial class MainWindow : Window
 
     private void OnGripMoved(object? sender, PointerEventArgs e)
     {
-        if (_resizeBox is null) return;
+        if (_resizeBox is null || SectionOfBox(_resizeBox) is not { } s) return;
         var p = e.GetPosition(this);
         // Cap the size so the card's right/bottom edge stays inside the containment area.
-        var a = AreaSize();
+        var a = AreaSize(s);
         double left = NanTo0(Canvas.GetLeft(_resizeBox));
         double top = NanTo0(Canvas.GetTop(_resizeBox));
         double maxW = Math.Max(160, a.Width - left);
@@ -526,20 +601,48 @@ public partial class MainWindow : Window
     private void OnGripReleased(object? sender, PointerReleasedEventArgs e)
     {
         if (_resizeBox is null) return;
+        var s = SectionOfBox(_resizeBox);
         _resizeBox = null;
         e.Pointer.Capture(null);
         UpdateCanvasHeight();
-        PersistDashLayout();
+        if (s is not null) PersistDashLayout(s);
     }
 
     private Border? FindBoxAncestor(Visual? v)
     {
         while (v is not null)
         {
-            if (v is Border b && _allBoxes.Contains(b)) return b;
+            if (v is Border b && SectionOfBox(b) is not null) return b;
             v = v.GetVisualParent();
         }
         return null;
+    }
+
+    // ===================================================================
+    //  Dashboard "Lock cards" — freezes move + resize on the dashboard only.
+    //  Wholly separate from the Settings-page lock (_settingsLocked): different
+    //  state, toggle, and persisted flag, so neither one drives the other.
+    // ===================================================================
+    private void OnDashLockToggle(object? sender, RoutedEventArgs e)
+    {
+        // Resolve which section's toggle fired — each section owns its own lock, so this never
+        // touches another section (or the Settings-page lock).
+        var s = _sections.FirstOrDefault(x => ReferenceEquals(x.LockToggle, sender)) ?? _active;
+        SetDashLocked(s, s.LockToggle?.IsChecked == true);
+        try { _settings.Save(); } catch (Exception ex) { Log("Settings save failed: " + ex.Message); }
+        LogEvent("INFO", $"{s.Name} cards {(s.Locked ? "locked" : "unlocked")}", null);
+    }
+
+    private void SetDashLocked(DashSection s, bool locked)
+    {
+        s.Locked = locked;   // persisted in s.State.Locked — scoped to this section only
+        if (s.LockToggle is { } t && t.IsChecked != locked) t.IsChecked = locked;
+        // Hide this section's card resize grips; the press guards (OnGripPressed / OnBoxDragStart /
+        // OnCanvasPressed) block the actual move/resize/marquee while locked.
+        foreach (var box in s.Boxes)
+            foreach (var grip in box.GetLogicalDescendants().OfType<Border>()
+                                    .Where(b => b.Classes.Contains("resizegrip")))
+                grip.IsVisible = !locked;
     }
 
     private void OnBoxDragStart(object? sender, PointerPressedEventArgs e)
@@ -549,24 +652,24 @@ public partial class MainWindow : Window
         if (e.Source is Visual src && src.FindAncestorOfType<Button>(true) is not null) return;
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
         var box = FindBoxAncestor(sender as Visual);
-        if (box is null) return;
+        if (box is null || SectionOfBox(box) is not { } s || s.Locked) return;   // this section's lock only
         _dragBox = box;
-        _dragStart = e.GetPosition(DashCanvas);
+        _dragStart = e.GetPosition(s.Canvas);
         _dragOrigLeft = NanTo0(Canvas.GetLeft(box));
         _dragOrigTop = NanTo0(Canvas.GetTop(box));
 
         // Dragging a card that's part of a multi-selection moves the whole group together.
-        if (_selected.Contains(box) && _selected.Count > 1)
+        if (s.Selected.Contains(box) && s.Selected.Count > 1)
         {
             _groupDrag = true;
-            _groupOrigins = _selected.ToDictionary(b => b,
+            _groupOrigins = s.Selected.ToDictionary(b => b,
                 b => new Point(NanTo0(Canvas.GetLeft(b)), NanTo0(Canvas.GetTop(b))));
-            foreach (var b in _selected) b.Opacity = 0.6;
+            foreach (var b in s.Selected) b.Opacity = 0.6;
         }
         else
         {
             _groupDrag = false;
-            if (!_selected.Contains(box)) ClearSelection();   // dragging an unselected card -> single
+            if (!s.Selected.Contains(box)) ClearSelection(s);   // dragging an unselected card -> single
             box.Opacity = 0.6;
         }
 
@@ -576,16 +679,16 @@ public partial class MainWindow : Window
 
     private void OnBoxDragMove(object? sender, PointerEventArgs e)
     {
-        if (_dragBox is null) return;
-        var p = e.GetPosition(DashCanvas);
+        if (_dragBox is null || SectionOfBox(_dragBox) is not { } s) return;
+        var p = e.GetPosition(s.Canvas);
         double dx = p.X - _dragStart.X, dy = p.Y - _dragStart.Y;
 
         if (_groupDrag)
         {
-            if (_layoutMode == "grid") { dx = Snap(dx); dy = Snap(dy); }
+            if (s.LayoutMode == "grid") { dx = Snap(dx); dy = Snap(dy); }
             // Clamp the shared delta against the group's bounding box so the group stays rigid and
             // no member crosses an edge.
-            var a = AreaSize();
+            var a = AreaSize(s);
             double minLeft = double.MaxValue, minTop = double.MaxValue, maxRight = double.MinValue, maxBottom = double.MinValue;
             foreach (var (b, o) in _groupOrigins)
             {
@@ -601,9 +704,9 @@ public partial class MainWindow : Window
         double nx = Math.Max(0, _dragOrigLeft + dx);
         double ny = Math.Max(0, _dragOrigTop + dy);
         // Grid mode snaps the moving box to the nearest grid line; Free mode is pixel-exact.
-        if (_layoutMode == "grid") { nx = Snap(nx); ny = Snap(ny); }
+        if (s.LayoutMode == "grid") { nx = Snap(nx); ny = Snap(ny); }
         // Keep the whole card inside the containment area — its edges can't be crossed.
-        (nx, ny) = ClampPos(_dragBox, nx, ny);
+        (nx, ny) = ClampPos(s, _dragBox, nx, ny);
         Canvas.SetLeft(_dragBox, nx);
         Canvas.SetTop(_dragBox, ny);
     }
@@ -611,12 +714,13 @@ public partial class MainWindow : Window
     private void OnBoxDragEnd(object? sender, PointerReleasedEventArgs e)
     {
         if (_dragBox is null) return;
-        if (_groupDrag) foreach (var b in _selected) b.Opacity = 1; else _dragBox.Opacity = 1;
+        var s = SectionOfBox(_dragBox);
+        if (_groupDrag && s is not null) foreach (var b in s.Selected) b.Opacity = 1; else _dragBox.Opacity = 1;
         _dragBox = null;
         _groupDrag = false;
         e.Pointer.Capture(null);
         UpdateCanvasHeight();
-        PersistDashLayout();
+        if (s is not null) PersistDashLayout(s);
     }
 
     // ===================================================================
@@ -624,62 +728,64 @@ public partial class MainWindow : Window
     // ===================================================================
     private void OnCanvasPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (!e.GetCurrentPoint(DashCanvas).Properties.IsLeftButtonPressed) return;
+        if (sender is not Canvas canvas || SectionOfCanvas(canvas) is not { } s) return;
+        if (s.Locked) return;   // locked: no marquee selection (selection only drives group move/resize)
+        if (!e.GetCurrentPoint(s.Canvas).Properties.IsLeftButtonPressed) return;
         if (FindBoxAncestor(e.Source as Visual) is not null) return;   // press landed on a card
 
-        ClearSelection();
+        ClearSelection(s);
         _marqueeActive = true;
-        _marqueeStart = e.GetPosition(DashCanvas);
-        if (_marqueeVisual is not null)
+        _marqueeStart = e.GetPosition(s.Canvas);
+        if (s.Marquee is not null)
         {
-            Canvas.SetLeft(_marqueeVisual, _marqueeStart.X);
-            Canvas.SetTop(_marqueeVisual, _marqueeStart.Y);
-            _marqueeVisual.Width = 0;
-            _marqueeVisual.Height = 0;
-            _marqueeVisual.IsVisible = true;
+            Canvas.SetLeft(s.Marquee, _marqueeStart.X);
+            Canvas.SetTop(s.Marquee, _marqueeStart.Y);
+            s.Marquee.Width = 0;
+            s.Marquee.Height = 0;
+            s.Marquee.IsVisible = true;
         }
-        e.Pointer.Capture(DashCanvas);
+        e.Pointer.Capture(s.Canvas);
         e.Handled = true;
     }
 
     private void OnCanvasMoved(object? sender, PointerEventArgs e)
     {
-        if (!_marqueeActive || _marqueeVisual is null) return;
-        var p = e.GetPosition(DashCanvas);
-        Canvas.SetLeft(_marqueeVisual, Math.Min(p.X, _marqueeStart.X));
-        Canvas.SetTop(_marqueeVisual, Math.Min(p.Y, _marqueeStart.Y));
-        _marqueeVisual.Width = Math.Abs(p.X - _marqueeStart.X);
-        _marqueeVisual.Height = Math.Abs(p.Y - _marqueeStart.Y);
+        if (!_marqueeActive || sender is not Canvas canvas || SectionOfCanvas(canvas) is not { Marquee: { } m } s) return;
+        var p = e.GetPosition(s.Canvas);
+        Canvas.SetLeft(m, Math.Min(p.X, _marqueeStart.X));
+        Canvas.SetTop(m, Math.Min(p.Y, _marqueeStart.Y));
+        m.Width = Math.Abs(p.X - _marqueeStart.X);
+        m.Height = Math.Abs(p.Y - _marqueeStart.Y);
     }
 
     private void OnCanvasReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (!_marqueeActive) return;
+        if (!_marqueeActive || sender is not Canvas canvas || SectionOfCanvas(canvas) is not { } s) return;
         _marqueeActive = false;
         e.Pointer.Capture(null);
-        if (_marqueeVisual is not null) _marqueeVisual.IsVisible = false;
+        if (s.Marquee is not null) s.Marquee.IsVisible = false;
 
-        var p = e.GetPosition(DashCanvas);
+        var p = e.GetPosition(s.Canvas);
         var rect = new Rect(Math.Min(p.X, _marqueeStart.X), Math.Min(p.Y, _marqueeStart.Y),
             Math.Abs(p.X - _marqueeStart.X), Math.Abs(p.Y - _marqueeStart.Y));
         if (rect.Width >= 5 || rect.Height >= 5)
-            foreach (var b in _allBoxes)
+            foreach (var b in s.Boxes)
             {
-                if (!b.IsVisible || !DashCanvas.Children.Contains(b)) continue;
+                if (!b.IsVisible || !s.Canvas.Children.Contains(b)) continue;
                 var r = new Rect(NanTo0(Canvas.GetLeft(b)), NanTo0(Canvas.GetTop(b)), BoxW(b), BoxH(b));
-                if (rect.Intersects(r)) Select(b);
+                if (rect.Intersects(r)) Select(s, b);
             }
     }
 
-    private void Select(Border b)
+    private static void Select(DashSection s, Border b)
     {
-        if (_selected.Add(b) && !b.Classes.Contains("selected")) b.Classes.Add("selected");
+        if (s.Selected.Add(b) && !b.Classes.Contains("selected")) b.Classes.Add("selected");
     }
 
-    private void ClearSelection()
+    private static void ClearSelection(DashSection s)
     {
-        foreach (var b in _selected) b.Classes.Remove("selected");
-        _selected.Clear();
+        foreach (var b in s.Selected) b.Classes.Remove("selected");
+        s.Selected.Clear();
     }
 
     private static double NanTo0(double d) => double.IsNaN(d) ? 0 : d;
@@ -687,41 +793,45 @@ public partial class MainWindow : Window
     private void OnBoxRemove(object? sender, RoutedEventArgs e)
     {
         var box = FindBoxAncestor(sender as Visual);
-        if (box is null) return;
+        if (box is null || SectionOfBox(box) is not { } s) return;
         // A user-added sensor card is fully removed (so "Add box" offers it again); the built-in
         // boxes are only hidden so they keep their place/size when added back.
-        if (IdOf(box).StartsWith(SensorBoxPrefix, StringComparison.Ordinal)) { DiscardSensorBox(box); return; }
+        if (IdOf(box).StartsWith(SensorBoxPrefix, StringComparison.Ordinal)) { DiscardSensorBox(s, box); return; }
         box.IsVisible = false;
-        PersistDashLayout();
+        PersistDashLayout(s);
     }
 
     // Pop a menu under the button: re-add removed built-in boxes, plus add a new metric card for
     // any available sensor (grouped by category). Options are derived from the live sensor catalog.
     private void OnAddBox(object? sender, RoutedEventArgs e)
     {
+        var s = _sections.FirstOrDefault(x => ReferenceEquals(x.AddBtn, sender)) ?? _active;
         var flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedLeft };
 
         // 1) removed built-in boxes. The sensor-backed metric boxes (CPU/VRM/System/GPU temps) are
         //    intentionally EXCLUDED here — they're redundant with the per-sensor lists in the tree
         //    below, where the same reading can be added. Only non-sensor built-ins (Broker Latency)
-        //    and the panels (Sensors/RGB/Activity/Security) appear as "+" re-add entries.
-        var hiddenBuiltins = _allBoxes
-            .Where(b => !b.IsVisible && !IdOf(b).StartsWith(SensorBoxPrefix, StringComparison.Ordinal))
-            .Where(b => !SensorBackedBoxes.Contains(IdOf(b)))
-            .ToList();
+        //    and the panels (Sensors/RGB/Activity/Security) appear as "+" re-add entries — and ONLY
+        //    for the built-in dashboard; user sections are filled purely from the per-sensor cards.
+        var hiddenBuiltins = s.IsMain
+            ? s.Boxes
+                .Where(b => !b.IsVisible && !IdOf(b).StartsWith(SensorBoxPrefix, StringComparison.Ordinal))
+                .Where(b => !SensorBackedBoxes.Contains(IdOf(b)))
+                .ToList()
+            : new List<Border>();
         foreach (var b in hiddenBuiltins)
         {
             var box = b;
             var id = IdOf(box);
             var mi = new MenuItem { Header = "＋  " + LocalNames.Resolve(id, DefaultBoxTitle(id)) };
-            mi.Click += (_, _) => { box.IsVisible = true; PersistDashLayout(); };
+            mi.Click += (_, _) => { box.IsVisible = true; PersistDashLayout(s); };
             flyout.Items.Add(mi);
         }
 
         // 2) a new card for any sensor that doesn't already have one, grouped by category.
         // Each sensor (unique id) is listed exactly once. Where two different sensors share the same
         // display name, disambiguate them by appending their raw id so they're clearly not duplicates.
-        var candidates = _sensorRows.Where(r => !_sensorBoxViews.ContainsKey(r.Id)).ToList();
+        var candidates = _sensorRows.Where(r => !s.SensorViews.ContainsKey(r.Id)).ToList();
         var nameCounts = candidates
             .GroupBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
@@ -742,7 +852,7 @@ public partial class MainWindow : Window
                 var row = r;
                 bool ambiguous = nameCounts.TryGetValue(row.DisplayName, out var c) && c > 1;
                 var mi = new MenuItem { Header = ambiguous ? $"{row.DisplayName}  ·  {row.Id}" : row.DisplayName };
-                mi.Click += (_, _) => AddSensorBox(row);
+                mi.Click += (_, _) => AddSensorBox(s, row);
                 sub.Items.Add(mi);
             }
             flyout.Items.Add(sub);
@@ -753,68 +863,74 @@ public partial class MainWindow : Window
             string msg = _sensors is null ? "Connect to add sensor boxes" : "All available boxes are shown";
             flyout.Items.Add(new MenuItem { Header = msg, IsEnabled = false });
         }
-        flyout.ShowAt(AddBoxButton);
+        flyout.ShowAt(s.AddBtn ?? AddBoxButton);
     }
 
     // ===================================================================
     //  Dynamic per-sensor dashboard cards
     // ===================================================================
-    private void AddSensorBox(SensorRow row)
+    // Box id for a sensor card. The built-in dashboard keeps the legacy "sensor:<id>" so existing
+    // saved layouts still match; user sections namespace by section id so the same sensor can appear
+    // in more than one section, each card tracked and persisted independently.
+    private static string SensorBoxId(DashSection s, string sensorId)
+        => s.IsMain ? SensorBoxPrefix + sensorId : $"{SensorBoxPrefix}{s.Id}:{sensorId}";
+
+    private void AddSensorBox(DashSection s, SensorRow row)
     {
-        if (_sensorBoxViews.ContainsKey(row.Id))
+        if (s.SensorViews.ContainsKey(row.Id))
         {
-            if (BoxById(SensorBoxPrefix + row.Id) is { } existing) existing.IsVisible = true;
+            if (BoxById(s, SensorBoxId(s, row.Id)) is { } existing) existing.IsVisible = true;
             return;
         }
-        var box = BuildSensorBox(row.Id, row.DisplayName, row.Unit, GroupOf(row.Id, row.Label, row.Unit));
-        InjectResizeGrip(box);
-        _allBoxes.Add(box);
-        PlaceDynamicBox(box);
-        if (!_settings.DashSensorBoxes.Contains(row.Id)) _settings.DashSensorBoxes.Add(row.Id);
+        var box = BuildSensorBox(s, row.Id, row.DisplayName, row.Unit, GroupOf(row.Id, row.Label, row.Unit));
+        InjectResizeGrip(s, box);
+        s.Boxes.Add(box);
+        PlaceDynamicBox(s, box);
+        if (!s.State.SensorBoxes.Contains(row.Id)) s.State.SensorBoxes.Add(row.Id);
 
         // Seed the value immediately from what the row already holds, then live polling keeps it current.
-        if (_sensorBoxViews.TryGetValue(row.Id, out var view)
+        if (s.SensorViews.TryGetValue(row.Id, out var view)
             && double.TryParse(row.ValueText, NumberStyles.Any, CultureInfo.InvariantCulture, out var v))
             SetCard(view.Val, view.Spark, v);
 
-        PersistDashLayout();
+        PersistDashLayout(s);
         LogEvent("INFO", $"Added sensor box: {row.DisplayName}", null);
     }
 
-    private void DiscardSensorBox(Border box)
+    private void DiscardSensorBox(DashSection s, Border box)
     {
         var id = IdOf(box);
-        var sensorId = id[SensorBoxPrefix.Length..];
-        _sensorBoxViews.Remove(sensorId);
-        _settings.DashSensorBoxes.Remove(sensorId);
+        var sensorId = s.BoxSensorId.TryGetValue(box, out var sid) ? sid : "";
+        s.SensorViews.Remove(sensorId);
+        s.BoxSensorId.Remove(box);
+        s.State.SensorBoxes.Remove(sensorId);
         BoxTitles.Remove(id);
         _settings.CustomNames.Remove(id);   // drop any local card name; full removal starts fresh
-        _allBoxes.Remove(box);
-        if (ReferenceEquals(box.Parent, DashGrid)) DashGrid.Children.Remove(box);
-        else if (ReferenceEquals(box.Parent, DashCanvas)) DashCanvas.Children.Remove(box);
-        PersistDashLayout();
+        s.Boxes.Remove(box);
+        if (s.Canvas.Children.Contains(box)) s.Canvas.Children.Remove(box);
+        PersistDashLayout(s);
     }
 
-    // Recreate the user's saved sensor cards once the catalog is known (called after a connect+read).
+    // Recreate every section's saved sensor cards once the catalog is known (called after a connect+read).
     private void RecreateSensorBoxes()
     {
-        if (_settings.DashSensorBoxes is not { Count: > 0 }) return;
         var byId = _sensorRows.ToDictionary(r => r.Id);
-        foreach (var sid in _settings.DashSensorBoxes.ToList())
-        {
-            if (_sensorBoxViews.ContainsKey(sid)) continue;
-            if (!byId.TryGetValue(sid, out var row)) continue;   // sensor not present on this box
-            var box = BuildSensorBox(sid, row.DisplayName, row.Unit, GroupOf(sid, row.Label, row.Unit));
-            InjectResizeGrip(box);
-            _allBoxes.Add(box);
-            PlaceDynamicBox(box);
-        }
+        foreach (var s in _sections)
+            foreach (var sid in s.State.SensorBoxes.ToList())
+            {
+                if (s.SensorViews.ContainsKey(sid)) continue;
+                if (!byId.TryGetValue(sid, out var row)) continue;   // sensor not present on this box
+                var box = BuildSensorBox(s, sid, row.DisplayName, row.Unit, GroupOf(sid, row.Label, row.Unit));
+                InjectResizeGrip(s, box);
+                s.Boxes.Add(box);
+                PlaceDynamicBox(s, box);
+            }
     }
 
     // Build a metric card (drag bar + ✕, value + unit + sparkline) matching the XAML metric boxes.
-    private Border BuildSensorBox(string sensorId, string label, string unit, string group)
+    private Border BuildSensorBox(DashSection s, string sensorId, string label, string unit, string group)
     {
-        var id = SensorBoxPrefix + sensorId;
+        var id = SensorBoxId(s, sensorId);
         BoxTitles[id] = label;
         var accent = AccentForGroup(group);
         var badgeText = BadgeFor(group);
@@ -834,7 +950,8 @@ public partial class MainWindow : Window
         bar.PointerReleased += OnBoxDragEnd;
 
         var handle = new TextBlock { Text = "⠿", Margin = new Avalonia.Thickness(0, 0, 8, 0),
-            Foreground = Res("TextMuted"), VerticalAlignment = VerticalAlignment.Center };
+            VerticalAlignment = VerticalAlignment.Center };
+        BindThemeBrush(handle, TextBlock.ForegroundProperty, "TextMuted");
         handle.Classes.Add("handle");
         Grid.SetColumn(handle, 0);
         var title = new TextBlock { Text = LocalNames.Resolve(id, label), VerticalAlignment = VerticalAlignment.Center,
@@ -853,8 +970,8 @@ public partial class MainWindow : Window
             Child = new TextBlock { Text = badgeText, FontSize = 9, FontWeight = FontWeight.Bold,
                 Foreground = accent, HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center } };
-        var val = new TextBlock { Text = "—", FontSize = 26, FontWeight = FontWeight.Bold,
-            Foreground = Res("TextPrimary") };
+        var val = new TextBlock { Text = "—", FontSize = 26, FontWeight = FontWeight.Bold };
+        BindThemeBrush(val, TextBlock.ForegroundProperty, "TextPrimary");
         var unitTb = new TextBlock { Text = unit, VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Avalonia.Thickness(0, 0, 0, 5) };
         unitTb.Classes.Add("sub");
@@ -872,34 +989,35 @@ public partial class MainWindow : Window
         var box = new Border { Classes = { "card", "box" }, Tag = id, Width = 200,
             Margin = new Avalonia.Thickness(0, 0, 14, 14), Child = dock };
 
-        _sensorBoxViews[sensorId] = (val, spark);
+        s.SensorViews[sensorId] = (val, spark);
+        s.BoxSensorId[box] = sensorId;
         AttachCardMenu(box);     // right-click → Rename / Reset
         return box;
     }
 
     // Drop a runtime box onto the canvas: at its saved spot if known, otherwise in the nearest empty
     // area (so a new card never lands on top of the first box in the corner).
-    private void PlaceDynamicBox(Border box)
+    private void PlaceDynamicBox(DashSection s, Border box)
     {
         var id = IdOf(box);
-        if (!DashCanvas.Children.Contains(box)) DashCanvas.Children.Add(box);
+        if (!s.Canvas.Children.Contains(box)) s.Canvas.Children.Add(box);
 
-        if (_settings.DashSizes is { } sz && sz.TryGetValue(id, out var wh) && wh.Length == 2)
+        if (s.State.Sizes is { } sz && sz.TryGetValue(id, out var wh) && wh.Length == 2)
         {
             if (wh[0] > 0) box.Width = wh[0];
             if (wh[1] > 0) box.Height = wh[1];
         }
 
         double x, y;
-        if (_settings.DashFree is { } map && map.TryGetValue(id, out var xy) && xy.Length == 2)
+        if (s.State.Free is { } map && map.TryGetValue(id, out var xy) && xy.Length == 2)
             (x, y) = (xy[0], xy[1]);
         else
         {
-            var slot = FindEmptySlot(BoxW(box), BoxH(box), box);
+            var slot = FindEmptySlot(s, BoxW(box), BoxH(box), box);
             (x, y) = (slot.X, slot.Y);
         }
-        if (_layoutMode == "grid") { x = Snap(x); y = Snap(y); }
-        (x, y) = ClampPos(box, x, y);   // never place a card across an edge
+        if (s.LayoutMode == "grid") { x = Snap(x); y = Snap(y); }
+        (x, y) = ClampPos(s, box, x, y);   // never place a card across an edge
         Canvas.SetLeft(box, x);
         Canvas.SetTop(box, y);
     }
@@ -922,50 +1040,58 @@ public partial class MainWindow : Window
     private const double GridSnap = 20;   // grid cell size boxes snap to in Grid mode
     private const double BoxGap = 14;      // default gap used by the auto-flow / empty-slot finder
 
-    private void OnGridMode(object? sender, RoutedEventArgs e) => SetLayoutMode("grid");
-    private void OnFreeMode(object? sender, RoutedEventArgs e) => SetLayoutMode("free");
+    private void OnGridMode(object? sender, RoutedEventArgs e) => SetLayoutMode(SectionOfModeButton(sender), "grid");
+    private void OnFreeMode(object? sender, RoutedEventArgs e) => SetLayoutMode(SectionOfModeButton(sender), "free");
+
+    private DashSection SectionOfModeButton(object? sender)
+        => _sections.FirstOrDefault(x => ReferenceEquals(x.GridBtn, sender) || ReferenceEquals(x.FreeBtn, sender)) ?? _active;
 
     private static double Snap(double v) => Math.Round(v / GridSnap) * GridSnap;
 
-    private void SetModeFlag(string mode)
+    private void SetModeFlag(DashSection s, string mode)
     {
-        _layoutMode = mode == "free" ? "free" : "grid";
-        _settings.DashLayoutMode = _layoutMode;
-        GridModeBtn.Classes.Set("on", _layoutMode == "grid");
-        FreeModeBtn.Classes.Set("on", _layoutMode == "free");
+        s.LayoutMode = mode == "free" ? "free" : "grid";   // persisted in s.State.LayoutMode
+        s.GridBtn?.Classes.Set("on", s.LayoutMode == "grid");
+        s.FreeBtn?.Classes.Set("on", s.LayoutMode == "free");
     }
 
     // Switching to Grid snaps every box's *current* position to the nearest grid line — it never
     // reflows or reorders, so the spatial arrangement the user built is preserved.
-    private void SetLayoutMode(string mode)
+    private void SetLayoutMode(DashSection s, string mode)
     {
-        SetModeFlag(mode);
-        if (_layoutMode == "grid")
+        SetModeFlag(s, mode);
+        if (s.LayoutMode == "grid")
         {
-            foreach (var b in _allBoxes)
+            foreach (var b in s.Boxes)
             {
                 Canvas.SetLeft(b, Snap(NanTo0(Canvas.GetLeft(b))));
                 Canvas.SetTop(b, Snap(NanTo0(Canvas.GetTop(b))));
             }
             UpdateCanvasHeight();
         }
-        PersistDashLayout();
+        PersistDashLayout(s);
     }
 
+    // Reset is shared by the main toolbar, each section's toolbar, and the Settings "Reset dashboard
+    // layout" button — the first two carry the section on the button; everything else means "main".
     private void OnResetLayout(object? sender, RoutedEventArgs e)
+        => ResetSectionLayout(_sections.FirstOrDefault(x => ReferenceEquals(x.ResetBtn, sender))
+                              ?? _sections.First(x => x.IsMain));
+
+    private void ResetSectionLayout(DashSection s)
     {
-        _settings.DashFree = null;
-        _settings.DashSizes = null;
-        foreach (var b in _allBoxes)
+        s.State.Free = null;
+        s.State.Sizes = null;
+        foreach (var b in s.Boxes)
         {
             b.IsVisible = true;
             b.ClearValue(WidthProperty);
             b.ClearValue(HeightProperty);
         }
-        ApplyDefaultSizes();
-        SetModeFlag("grid");
-        FlowLayout(ContainerWidth());
-        PersistDashLayout();
+        ApplyDefaultSizes(s);
+        SetModeFlag(s, "grid");
+        FlowLayout(s, ContainerWidth(s));
+        PersistDashLayout(s);
     }
 
     // Default box footprints (match the XAML authored sizes) used by Reset layout + auto-flow.
@@ -978,9 +1104,9 @@ public partial class MainWindow : Window
         ["activity"] = new[] { 690d, 280d }, ["security"] = new[] { 380d, 280d },
     };
 
-    private void ApplyDefaultSizes()
+    private void ApplyDefaultSizes(DashSection s)
     {
-        foreach (var b in _allBoxes)
+        foreach (var b in s.Boxes)
         {
             if (DefaultSizes.TryGetValue(IdOf(b), out var wh))
             {
@@ -991,44 +1117,44 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ApplyDashLayout()
+    private void ApplyDashLayout(DashSection s)
     {
         // sizes
-        if (_settings.DashSizes is { } sizes)
+        if (s.State.Sizes is { } sizes)
             foreach (var (id, wh) in sizes)
-                if (BoxById(id) is { } b && wh.Length == 2)
+                if (BoxById(s, id) is { } b && wh.Length == 2)
                 {
                     if (wh[0] > 0) b.Width = wh[0];
                     if (wh[1] > 0) b.Height = wh[1];
                 }
 
         // hidden
-        if (_settings.DashHidden is { Count: > 0 })
-            foreach (var id in _settings.DashHidden)
-                if (BoxById(id) is { } b) b.IsVisible = false;
+        if (s.State.Hidden is { Count: > 0 })
+            foreach (var id in s.State.Hidden)
+                if (BoxById(s, id) is { } b) b.IsVisible = false;
 
         // mode flag only — actual positions are seeded once the canvas is sized (see SeedCanvasLayout).
-        SetModeFlag(_settings.DashLayoutMode ?? "grid");
+        SetModeFlag(s, s.LayoutMode);
     }
 
     // Live size of the containment area (the dashboard's fill row). Adapts to the window/monitor: a
     // bigger window — up to the monitor resolution — yields a bigger usable area. The canvas may not
     // be measured yet at the first Opened, so fall back to the window size minus chrome.
-    private Size AreaSize()
+    private Size AreaSize(DashSection s)
     {
-        double w = DashCanvas.Bounds.Width;
-        double h = DashCanvas.Bounds.Height;
+        double w = s.Canvas.Bounds.Width;
+        double h = s.Canvas.Bounds.Height;
         if (w < 50) w = Math.Max(800, Bounds.Width - 212 - 48);
         if (h < 50) h = Math.Max(360, Bounds.Height - 180);
         return new Size(w, h);
     }
 
-    private double ContainerWidth() => AreaSize().Width;
+    private double ContainerWidth(DashSection s) => AreaSize(s).Width;
 
     // Clamp a position so the whole card stays inside the containment area (its edges can't be crossed).
-    private (double X, double Y) ClampPos(Border box, double x, double y)
+    private (double X, double Y) ClampPos(DashSection s, Border box, double x, double y)
     {
-        var a = AreaSize();
+        var a = AreaSize(s);
         double maxX = Math.Max(0, a.Width - BoxW(box));
         double maxY = Math.Max(0, a.Height - BoxH(box));
         return (Math.Clamp(x, 0, maxX), Math.Clamp(y, 0, maxY));
@@ -1060,20 +1186,20 @@ public partial class MainWindow : Window
     };
 
     // Visible boxes in their canonical order (default order first, then any user-added sensor cards).
-    private IEnumerable<Border> OrderedVisibleBoxes()
+    private IEnumerable<Border> OrderedVisibleBoxes(DashSection s)
     {
         var seen = new HashSet<Border>();
-        foreach (var id in _defaultBoxOrder)
-            if (BoxById(id) is { IsVisible: true } b) { seen.Add(b); yield return b; }
-        foreach (var b in _allBoxes)
+        foreach (var id in s.DefaultOrder)
+            if (BoxById(s, id) is { IsVisible: true } b) { seen.Add(b); yield return b; }
+        foreach (var b in s.Boxes)
             if (b.IsVisible && seen.Add(b)) yield return b;
     }
 
     // Auto-arrange visible boxes left-to-right, wrapping at the container width (the default layout).
-    private void FlowLayout(double containerWidth)
+    private void FlowLayout(DashSection s, double containerWidth)
     {
         double x = 0, y = 0, rowH = 0;
-        foreach (var b in OrderedVisibleBoxes())
+        foreach (var b in OrderedVisibleBoxes(s))
         {
             double w = BoxW(b), h = BoxH(b);
             if (x > 0 && x + w > containerWidth) { x = 0; y += rowH + BoxGap; rowH = 0; }
@@ -1086,29 +1212,29 @@ public partial class MainWindow : Window
     }
 
     // Position every box once the canvas size is known: from saved positions if present, else auto-flow.
-    private void SeedCanvasLayout()
+    private void SeedCanvasLayout(DashSection s)
     {
-        if (_layoutSeeded) return;
-        _layoutSeeded = true;
-        if (_settings.DashFree is { Count: > 0 } saved)
+        if (s.Seeded) return;
+        s.Seeded = true;
+        if (s.State.Free is { Count: > 0 } saved)
         {
-            foreach (var b in _allBoxes)
+            foreach (var b in s.Boxes)
                 if (saved.TryGetValue(IdOf(b), out var xy) && xy.Length == 2)
                 { Canvas.SetLeft(b, xy[0]); Canvas.SetTop(b, xy[1]); }
             UpdateCanvasHeight();
         }
-        else FlowLayout(ContainerWidth());
+        else FlowLayout(s, ContainerWidth(s));
     }
 
     // Find the top-most / left-most empty cell that fits a w×h box, searching only *inside* the
     // containment area so a new card is never placed across an edge.
-    private Point FindEmptySlot(double w, double h, Border? except)
+    private Point FindEmptySlot(DashSection s, double w, double h, Border? except)
     {
-        var a = AreaSize();
+        var a = AreaSize(s);
         double maxX = Math.Max(0, a.Width - w);
         double maxY = Math.Max(0, a.Height - h);
-        var rects = _allBoxes
-            .Where(b => b.IsVisible && !ReferenceEquals(b, except) && DashCanvas.Children.Contains(b))
+        var rects = s.Boxes
+            .Where(b => b.IsVisible && !ReferenceEquals(b, except) && s.Canvas.Children.Contains(b))
             .Select(b => new Rect(NanTo0(Canvas.GetLeft(b)), NanTo0(Canvas.GetTop(b)), BoxW(b), BoxH(b)))
             .ToList();
 
@@ -1128,20 +1254,558 @@ public partial class MainWindow : Window
     // kept inside the area by clamping instead. (Retained as a hook for the existing call sites.)
     private void UpdateCanvasHeight() { }
 
-    private void PersistDashLayout()
+    private void PersistDashLayout(DashSection s)
     {
-        _settings.DashHidden = _allBoxes.Where(b => !b.IsVisible).Select(IdOf).Where(s => s.Length > 0).ToList();
+        s.State.Hidden = s.Boxes.Where(b => !b.IsVisible).Select(IdOf).Where(id => id.Length > 0).ToList();
 
-        _settings.DashSizes = _allBoxes.ToDictionary(IdOf, b => new[]
+        s.State.Sizes = s.Boxes.ToDictionary(IdOf, b => new[]
         {
             double.IsNaN(b.Width) ? -1 : b.Width,
             double.IsNaN(b.Height) ? -1 : b.Height,
         });
 
-        _settings.DashFree = _allBoxes.Where(b => DashCanvas.Children.Contains(b))
+        s.State.Free = s.Boxes.Where(b => s.Canvas.Children.Contains(b))
             .ToDictionary(IdOf, b => new[] { NanTo0(Canvas.GetLeft(b)), NanTo0(Canvas.GetTop(b)) });
 
         try { _settings.Save(); } catch (Exception ex) { Log("Layout save failed: " + ex.Message); }
+    }
+
+    // ===================================================================
+    //  User-created sections (+ Add Section)
+    //
+    //  A section is a full dashboard page of its own — same drag / resize / Grid-Free / marquee /
+    //  Add-Card / Reset toolset as the built-in Dashboard, plus rename, delete, and its OWN lock.
+    //  Each appears as a sidebar nav entry. The lock is scoped to the section: it shares no state
+    //  with the Dashboard lock, any other section's lock, or the Settings-page lock.
+    // ===================================================================
+    private void OnAddSection(object? sender, RoutedEventArgs e)
+    {
+        var num = _nextSectionNum++;
+        var state = new DashSectionState { Id = $"sec:{num}", Name = $"Section {num}", LayoutMode = "grid" };
+        _settings.EnsureSections().Add(state);
+
+        var sec = CreateSection(state);
+        ApplyDashLayout(sec);
+        SetDashLocked(sec, false);
+        try { _settings.Save(); } catch (Exception ex) { Log("Section save failed: " + ex.Message); }
+        LogEvent("INFO", $"Added section: {sec.Name}", null);
+        ShowPage(sec.Page, sec.NavButton!);   // jump to the new (empty) section
+    }
+
+    // Build a user section's page (toolbar + card canvas) and its sidebar nav button, mirroring the
+    // built-in Dashboard's layout so every card behaves identically.
+    private DashSection CreateSection(DashSectionState state)
+    {
+        var sec = new DashSection { Id = state.Id, IsMain = false, State = state };
+
+        var title = new TextBlock { Text = sec.Name, VerticalAlignment = VerticalAlignment.Center };
+        title.Classes.Add("h1");
+        sec.TitleText = title;
+
+        sec.GridBtn = SegButton("▦ Grid", true);
+        sec.FreeBtn = SegButton("✥ Free", false);
+        sec.AddBtn = GhostButton("＋ Add Card");
+        sec.ResetBtn = GhostButton("↺ Reset layout");
+        var renameBtn = GhostButton("✎ Rename");
+        var deleteBtn = GhostButton("🗑 Delete");
+        renameBtn.Tag = sec; deleteBtn.Tag = sec;
+        var lockLabel = new TextBlock { Text = "🔒 Lock cards", VerticalAlignment = VerticalAlignment.Center };
+        lockLabel.Classes.Add("sub");
+        sec.LockToggle = new ToggleSwitch { OnContent = "", OffContent = "", MinWidth = 0,
+            VerticalAlignment = VerticalAlignment.Center };
+
+        sec.GridBtn.Click += OnGridMode;
+        sec.FreeBtn.Click += OnFreeMode;
+        sec.AddBtn.Click += OnAddBox;
+        sec.ResetBtn.Click += OnResetLayout;
+        renameBtn.Click += OnRenameSection;
+        deleteBtn.Click += OnDeleteSection;
+        sec.LockToggle.Click += OnDashLockToggle;
+
+        var tools = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var c in new Control[] { sec.GridBtn, sec.FreeBtn, sec.AddBtn, sec.ResetBtn,
+                                          renameBtn, deleteBtn, lockLabel, sec.LockToggle })
+            tools.Children.Add(c);
+        Grid.SetColumn(tools, 1);
+
+        var toolbar = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"),
+            Margin = new Avalonia.Thickness(0, 0, 0, 12) };
+        Grid.SetColumn(title, 0);
+        toolbar.Children.Add(title);
+        toolbar.Children.Add(tools);
+        Grid.SetRow(toolbar, 0);
+
+        // Containment area: cards live on the Canvas; ClipToBounds keeps them inside (mirrors XAML).
+        sec.Canvas = new Canvas();
+        var clip = new Panel { ClipToBounds = true };
+        clip.Children.Add(sec.Canvas);
+        Grid.SetRow(clip, 1);
+
+        var pageGrid = new Grid { Margin = new Avalonia.Thickness(16),
+            RowDefinitions = new RowDefinitions("Auto,*"), IsVisible = false };
+        pageGrid.Children.Add(toolbar);
+        pageGrid.Children.Add(clip);
+        sec.Page = pageGrid;
+        ContentHost.Children.Add(pageGrid);
+
+        var nav = new Button { Content = "▦   " + sec.Name };
+        nav.Classes.Add("nav");
+        // Both navigation AND reorder are driven from the host pointer handlers (OnNavReleased): a
+        // release with no drag opens the section, a release after a drag commits the new order. We do
+        // NOT use Button.Click — after a drag steals pointer capture, Click becomes unreliable.
+        ToolTip.SetTip(nav, "Click to open · drag to reorder");
+        sec.NavButton = nav;
+        SectionNavHost.Children.Add(nav);
+
+        WireSectionCanvas(sec);
+        _sections.Add(sec);
+        return sec;
+    }
+
+    private static Button SegButton(string text, bool on)
+    {
+        var b = new Button { Content = text };
+        b.Classes.Add("seg");
+        if (on) b.Classes.Add("on");
+        return b;
+    }
+
+    private static Button GhostButton(string text)
+    {
+        var b = new Button { Content = text };
+        b.Classes.Add("ghost");
+        return b;
+    }
+
+    private async void OnRenameSection(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Button)?.Tag is not DashSection sec) return;
+        var name = await RenameDialog.Show(this, "Rename section", sec.Name);
+        if (string.IsNullOrWhiteSpace(name)) return;
+        sec.Name = name.Trim();
+        if (sec.TitleText is { } t) t.Text = sec.Name;
+        if (sec.NavButton is { } nb) nb.Content = "▦   " + sec.Name;
+        try { _settings.Save(); } catch (Exception ex) { Log("Section save failed: " + ex.Message); }
+        LogEvent("INFO", $"Renamed section: {sec.Name}", null);
+    }
+
+    private void OnDeleteSection(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Button)?.Tag is not DashSection sec || sec.IsMain) return;
+
+        foreach (var b in sec.Boxes.ToList())
+        {
+            BoxTitles.Remove(IdOf(b));
+            _settings.CustomNames.Remove(IdOf(b));
+        }
+        sec.Canvas.Children.Clear();
+        ContentHost.Children.Remove(sec.Page);
+        if (sec.NavButton is { } nb) SectionNavHost.Children.Remove(nb);
+        _sections.Remove(sec);
+        _settings.DashSections?.RemoveAll(st => st.Id == sec.Id);
+        if (ReferenceEquals(_active, sec)) _active = _sections.First(s => s.IsMain);
+        try { _settings.Save(); } catch (Exception ex) { Log("Section save failed: " + ex.Message); }
+        LogEvent("INFO", $"Deleted section: {sec.Name}", null);
+        ShowPage(PageDashboard, NavDashboard);
+    }
+
+    private void UpdateNextSectionNum()
+    {
+        int max = 0;
+        foreach (var s in _sections)
+            if (!s.IsMain && s.Id.StartsWith("sec:", StringComparison.Ordinal)
+                && int.TryParse(s.Id.AsSpan(4), out var n))
+                max = Math.Max(max, n);
+        _nextSectionNum = max + 1;
+    }
+
+    // ---- drag-to-reorder the section nav buttons ----
+    // Find the section nav button the pointer is over (e.Source is usually a child of the Button's
+    // template — ContentPresenter / TextBlock — so walk up to the owning nav button).
+    private Button? NavButtonFromSource(object? source)
+    {
+        var v = source as Visual;
+        while (v is not null)
+        {
+            if (v is Button b && _sections.Any(s => !s.IsMain && ReferenceEquals(s.NavButton, b))) return b;
+            v = v.GetVisualParent();
+        }
+        return null;
+    }
+
+    private void OnNavPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (NavButtonFromSource(e.Source) is not { } b) return;
+        if (!e.GetCurrentPoint(SectionNavHost).Properties.IsLeftButtonPressed) return;
+        _navDragBtn = b;
+        _navDragStart = e.GetPosition(SectionNavHost);
+        _navDragging = false;
+        // Don't capture yet — wait for the move threshold so a plain click still navigates.
+    }
+
+    private void OnNavMoved(object? sender, PointerEventArgs e)
+    {
+        if (_navDragBtn is null) return;
+        var p = e.GetPosition(SectionNavHost);
+        if (!_navDragging)
+        {
+            if (Math.Abs(p.Y - _navDragStart.Y) < 6) return;   // below threshold: still a potential click
+            _navDragging = true;
+            _navDragBtn.Opacity = 0.6;
+            // Capture to the host, not the dragged button: moving the button within the host while it
+            // holds capture would cancel the capture and abort the drag.
+            e.Pointer.Capture(SectionNavHost);
+        }
+        ReorderNavTo(p.Y);
+    }
+
+    private void OnNavReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (_navDragBtn is null) return;
+        var btn = _navDragBtn;
+        bool dragged = _navDragging;
+        btn.Opacity = 1;
+        e.Pointer.Capture(null);
+        _navDragBtn = null;
+        _navDragging = false;
+        e.Handled = true;   // we own the click/drag on these buttons; don't let Button.Click double-fire
+
+        if (dragged)
+        {
+            CommitNavOrder();
+        }
+        else if (_sections.FirstOrDefault(s => ReferenceEquals(s.NavButton, btn)) is { } sec)
+        {
+            // No movement → a plain click: open the section. (Navigation lives here, not Button.Click,
+            // because capture-stealing during a drag makes Click unreliable afterwards.)
+            ShowPage(sec.Page, sec.NavButton!);
+        }
+    }
+
+    // Live-reorder the dragged button within SectionNavHost from the pointer's Y position.
+    private void ReorderNavTo(double y)
+    {
+        if (_navDragBtn is null) return;
+        var host = SectionNavHost;
+        int cur = host.Children.IndexOf(_navDragBtn);
+        if (cur < 0) return;
+        int target = 0;
+        foreach (var child in host.Children)
+        {
+            if (ReferenceEquals(child, _navDragBtn)) continue;
+            if (y > child.Bounds.Y + child.Bounds.Height / 2) target++;
+        }
+        target = Math.Clamp(target, 0, host.Children.Count - 1);
+        if (target != cur)
+        {
+            host.Children.RemoveAt(cur);
+            host.Children.Insert(target, _navDragBtn);
+        }
+    }
+
+    // Persist the new order: the sidebar button order becomes the section order (built-in "main"
+    // always stays first), so it survives a restart.
+    private void CommitNavOrder()
+    {
+        var ordered = new List<DashSection>();
+        foreach (var child in SectionNavHost.Children)
+            if (_sections.FirstOrDefault(s => ReferenceEquals(s.NavButton, child)) is { } s)
+                ordered.Add(s);
+
+        var main = _sections.First(s => s.IsMain);
+        _sections.Clear();
+        _sections.Add(main);
+        _sections.AddRange(ordered);
+
+        var states = _settings.EnsureSections();
+        states.Clear();
+        states.Add(main.State);
+        foreach (var s in ordered) states.Add(s.State);
+
+        try { _settings.Save(); } catch (Exception ex) { Log("Section order save failed: " + ex.Message); }
+        LogEvent("INFO", "Reordered sections", null);
+    }
+
+    // ===================================================================
+    //  Settings page — drag-move / resize cards on a canvas (+ "Lock cards")
+    //
+    //  A self-contained parallel to the dashboard's canvas system: the settings cards are
+    //  absolute-positioned on SettingsCanvas, draggable by any non-interactive part of the card,
+    //  resizable via a bottom-right grip, and frozen by the Lock toggle. Positions/sizes/lock state
+    //  persist to the settings file.
+    // ===================================================================
+    private static string SIdOf(Border b) => b.Tag as string ?? "";
+
+    private void SetupSettingsCards()
+    {
+        _settingsCards.AddRange(SettingsCanvas.Children.OfType<Border>());
+        foreach (var card in _settingsCards)
+        {
+            InjectSettingsGrip(card);
+            // Drag from the card's header handle (the ⠿ bar) — same affordance as the dashboard.
+            if (FindSettingsDragBar(card) is { } bar)
+            {
+                _settingsDragBars.Add(bar);
+                bar.PointerPressed += OnSettingsCardPressed;
+                bar.PointerMoved += OnSettingsCardMoved;
+                bar.PointerReleased += OnSettingsCardReleased;
+            }
+        }
+
+        // restore saved sizes
+        if (_settings.SettingsSizes is { } sizes)
+            foreach (var card in _settingsCards)
+                if (sizes.TryGetValue(SIdOf(card), out var wh) && wh.Length == 2)
+                {
+                    if (wh[0] > 0) card.Width = wh[0];
+                    if (wh[1] > 0) card.Height = wh[1];
+                }
+
+        // restore saved positions (auto-flow is deferred to the first show otherwise)
+        if (_settings.SettingsFree is { Count: > 0 } free)
+        {
+            foreach (var card in _settingsCards)
+                if (free.TryGetValue(SIdOf(card), out var xy) && xy.Length == 2)
+                { Canvas.SetLeft(card, xy[0]); Canvas.SetTop(card, xy[1]); }
+            _settingsSeeded = true;
+        }
+
+        SetSettingsLocked(_settings.SettingsLocked);
+    }
+
+    // Overlay a bottom-right resize grip on a card (mirrors the dashboard grip).
+    private void InjectSettingsGrip(Border card)
+    {
+        var content = card.Child;
+        card.Child = null;
+        var g = new Grid();
+        if (content is not null) g.Children.Add(content);
+
+        var icon = new Avalonia.Controls.Shapes.Path
+        {
+            Data = Geometry.Parse("M 16,4 L 16,16 L 4,16 Z M 16,9 L 11,16 L 16,16 Z"),
+            Opacity = 0.85,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Avalonia.Thickness(0, 0, 2, 2),
+        };
+        BindThemeBrush(icon, Avalonia.Controls.Shapes.Shape.FillProperty, "TextMuted");
+        var grip = new Border { Classes = { "resizegrip" }, Tag = card, Child = icon };
+        grip.PointerPressed += OnSettingsGripPressed;
+        grip.PointerMoved += OnSettingsGripMoved;
+        grip.PointerReleased += OnSettingsGripReleased;
+        g.Children.Add(grip);
+        card.Child = g;
+        _settingsGrips.Add(grip);
+    }
+
+    // The header drag bar (Classes="sdragbar") within a card, and the card that owns a visual.
+    private static Control? FindSettingsDragBar(Border card)
+        => card.GetLogicalDescendants().OfType<Control>().FirstOrDefault(c => c.Classes.Contains("sdragbar"));
+
+    private Border? FindSettingsCardAncestor(Visual? v)
+    {
+        while (v is not null)
+        {
+            if (v is Border b && _settingsCards.Contains(b)) return b;
+            v = v.GetVisualParent();
+        }
+        return null;
+    }
+
+    // Ignore presses on an interactive control inside the bar (e.g. the Activity card's header buttons).
+    private static bool IsSettingsInteractive(object? source)
+    {
+        if (source is not Visual v) return false;
+        return v.FindAncestorOfType<Button>(true) is not null
+            || v.FindAncestorOfType<ComboBox>(true) is not null
+            || v.FindAncestorOfType<ToggleSwitch>(true) is not null
+            || v.FindAncestorOfType<TextBox>(true) is not null;
+    }
+
+    private void OnSettingsCardPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (_settingsLocked) return;
+        if (IsSettingsInteractive(e.Source)) return;
+        var card = FindSettingsCardAncestor(sender as Visual);
+        if (card is null) return;
+        if (!e.GetCurrentPoint(SettingsCanvas).Properties.IsLeftButtonPressed) return;
+        _sDragCard = card;
+        _sDragStart = e.GetPosition(SettingsCanvas);
+        _sDragOrigLeft = NanTo0(Canvas.GetLeft(card));
+        _sDragOrigTop = NanTo0(Canvas.GetTop(card));
+        card.Opacity = 0.7;
+        e.Pointer.Capture(sender as IInputElement);
+        e.Handled = true;
+    }
+
+    private void OnSettingsCardMoved(object? sender, PointerEventArgs e)
+    {
+        if (_sDragCard is null) return;
+        var p = e.GetPosition(SettingsCanvas);
+        double nx = _sDragOrigLeft + (p.X - _sDragStart.X);
+        double ny = _sDragOrigTop + (p.Y - _sDragStart.Y);
+        (nx, ny) = ClampSettings(_sDragCard, nx, ny);
+        Canvas.SetLeft(_sDragCard, nx);
+        Canvas.SetTop(_sDragCard, ny);
+    }
+
+    private void OnSettingsCardReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (_sDragCard is null) return;
+        _sDragCard.Opacity = 1;
+        _sDragCard = null;
+        e.Pointer.Capture(null);
+        UpdateSettingsCanvasHeight();
+        PersistSettingsLayout();
+    }
+
+    private void OnSettingsGripPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (_settingsLocked || sender is not Border grip || grip.Tag is not Border card) return;
+        _sResizeCard = card;
+        _sResizeStart = e.GetPosition(this);
+        _sResizeW = card.Bounds.Width;
+        _sResizeH = card.Bounds.Height;
+        e.Pointer.Capture(grip);
+        e.Handled = true;
+    }
+
+    private void OnSettingsGripMoved(object? sender, PointerEventArgs e)
+    {
+        if (_sResizeCard is null) return;
+        var p = e.GetPosition(this);
+        double left = NanTo0(Canvas.GetLeft(_sResizeCard));
+        double maxW = Math.Max(260, SettingsAreaWidth() - left);
+        _sResizeCard.Width = Math.Clamp(_sResizeW + (p.X - _sResizeStart.X), 260, maxW);
+        _sResizeCard.Height = Math.Max(90, _sResizeH + (p.Y - _sResizeStart.Y));
+    }
+
+    private void OnSettingsGripReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (_sResizeCard is null) return;
+        _sResizeCard = null;
+        e.Pointer.Capture(null);
+        UpdateSettingsCanvasHeight();
+        PersistSettingsLayout();
+    }
+
+    private void OnSettingsLockToggle(object? sender, RoutedEventArgs e)
+    {
+        SetSettingsLocked(SettingsLockToggle.IsChecked == true);
+        _settings.SettingsLocked = _settingsLocked;
+        try { _settings.Save(); } catch (Exception ex) { Log("Settings save failed: " + ex.Message); }
+        LogEvent("INFO", _settingsLocked ? "Settings cards locked" : "Settings cards unlocked", null);
+    }
+
+    private void SetSettingsLocked(bool locked)
+    {
+        _settingsLocked = locked;
+        if (SettingsLockToggle.IsChecked != locked) SettingsLockToggle.IsChecked = locked;
+        foreach (var grip in _settingsGrips) grip.IsVisible = !locked;
+        // The move cursor lives on the header handle, and only while cards are unlocked.
+        var cursor = new Cursor(locked ? StandardCursorType.Arrow : StandardCursorType.SizeAll);
+        foreach (var bar in _settingsDragBars) bar.Cursor = cursor;
+    }
+
+    // The card area's usable width = the scroll viewport (minus a little for the scrollbar).
+    private double SettingsAreaWidth()
+    {
+        double w = SettingsScroll.Bounds.Width;
+        if (w < 50) w = Math.Max(700, Bounds.Width - 212 - 64);
+        return w - 6;
+    }
+
+    // Keep a card's left/right edges inside the area; the bottom is free (the canvas scrolls).
+    private (double X, double Y) ClampSettings(Border card, double x, double y)
+    {
+        double cw = !double.IsNaN(card.Width) ? card.Width : (card.Bounds.Width > 1 ? card.Bounds.Width : SettingsCardW);
+        double maxX = Math.Max(0, SettingsAreaWidth() - cw);
+        return (Math.Clamp(x, 0, maxX), Math.Max(0, y));
+    }
+
+    private static double SettingsCardH(Border card)
+    {
+        if (!double.IsNaN(card.Height)) return card.Height;
+        if (card.Bounds.Height > 1) return card.Bounds.Height;
+        return SIdOf(card) switch
+        {
+            "connection" => 96, "rgbengine" => 96, "dashlayout" => 140,
+            "startup" => 184, "render" => 196, "security" => 250,
+            "identity" => 320, "activity" => 340, _ => 160,
+        };
+    }
+
+    // Grow the canvas so the scroll range reaches the lowest card.
+    private void UpdateSettingsCanvasHeight()
+    {
+        double maxBottom = 0;
+        foreach (var card in _settingsCards)
+            maxBottom = Math.Max(maxBottom, NanTo0(Canvas.GetTop(card)) + SettingsCardH(card));
+        SettingsCanvas.Height = maxBottom + 14;
+    }
+
+    // Masonry auto-flow: drop each card into the currently shortest column.
+    private void FlowSettings()
+    {
+        double areaW = SettingsAreaWidth();
+        const double gap = 14;
+        int cols = Math.Max(1, (int)Math.Floor((areaW + gap) / (SettingsCardW + gap)));
+        var colY = new double[cols];
+        foreach (var card in _settingsCards)
+        {
+            if (!card.IsVisible) continue;
+            int c = 0;
+            for (int i = 1; i < cols; i++) if (colY[i] < colY[c]) c = i;
+            Canvas.SetLeft(card, c * (SettingsCardW + gap));
+            Canvas.SetTop(card, colY[c]);
+            colY[c] += SettingsCardH(card) + gap;
+        }
+        UpdateSettingsCanvasHeight();
+    }
+
+    // First time the page is shown the canvas finally has a size. Posted at Loaded priority so the
+    // cards have measured before we lay them out: flow if nothing is saved, else clamp saved spots
+    // into the current width.
+    private void OnSettingsShown()
+        => Dispatcher.UIThread.Post(() =>
+        {
+            if (!_settingsSeeded) { FlowSettings(); _settingsSeeded = true; PersistSettingsLayout(); }
+            else
+            {
+                foreach (var card in _settingsCards)
+                {
+                    var (x, y) = ClampSettings(card, NanTo0(Canvas.GetLeft(card)), NanTo0(Canvas.GetTop(card)));
+                    Canvas.SetLeft(card, x); Canvas.SetTop(card, y);
+                }
+                UpdateSettingsCanvasHeight();
+            }
+        }, DispatcherPriority.Loaded);
+
+    private void OnResetSettingsLayout(object? sender, RoutedEventArgs e)
+    {
+        _settings.SettingsFree = null;
+        _settings.SettingsSizes = null;
+        foreach (var card in _settingsCards)
+        {
+            card.ClearValue(HeightProperty);
+            card.Width = SettingsCardW;
+            // Cards whose content fills a "*" row need an explicit height or the row collapses;
+            // ClearValue wipes the XAML default, so restore it for those.
+            if (SIdOf(card) == "activity") card.Height = SettingsCardH(card);
+        }
+        _settingsSeeded = false;
+        OnSettingsShown();   // re-flow once the cleared sizes have re-measured
+    }
+
+    private void PersistSettingsLayout()
+    {
+        _settings.SettingsFree = _settingsCards.ToDictionary(SIdOf,
+            c => new[] { NanTo0(Canvas.GetLeft(c)), NanTo0(Canvas.GetTop(c)) });
+        _settings.SettingsSizes = _settingsCards.ToDictionary(SIdOf,
+            c => new[] { double.IsNaN(c.Width) ? -1 : c.Width, double.IsNaN(c.Height) ? -1 : c.Height });
+        try { _settings.Save(); } catch (Exception ex) { Log("Settings layout save failed: " + ex.Message); }
     }
 
     // ===================================================================
@@ -1153,6 +1817,79 @@ public partial class MainWindow : Window
         FpsBox.Value = _settings.Fps;
         RefreshMsBox.Value = _settings.SensorRefreshMs;
         MinimizeTargetCombo.SelectedIndex = _settings.MinimizeToTray ? 1 : 0;
+        AutoStartGuiToggle.IsChecked = _settings.AutoStartGui;
+        AutoStartServicesToggle.IsChecked = _settings.AutoStartServices;
+        SettingsLockToggle.IsChecked = _settings.SettingsLocked;
+    }
+
+    // ===================================================================
+    //  Auto-start (console on login + broker services on login)
+    // ===================================================================
+
+    // HKCU Run entry for launching this console at sign-in (no admin needed).
+    private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string RunValueName = "RegisterBrokerConsole";
+
+    private void OnAutoStartGuiToggle(object? sender, RoutedEventArgs e)
+    {
+        bool on = AutoStartGuiToggle.IsChecked == true;
+        _settings.AutoStartGui = on;
+        try { _settings.Save(); } catch (Exception ex) { Log("Settings save failed: " + ex.Message); }
+        try
+        {
+            ApplyGuiAutoStart(on);
+            LogEvent("INFO", on ? "Console will start on login" : "Console login start disabled", null);
+        }
+        catch (Exception ex) { LogEvent("WARN", "Could not update login startup: " + ex.Message, null); }
+    }
+
+    private static void ApplyGuiAutoStart(bool on)
+    {
+        if (!OperatingSystem.IsWindows()) return;   // the HKCU Run key is a Windows-only mechanism
+        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true)
+            ?? Microsoft.Win32.Registry.CurrentUser.CreateSubKey(RunKeyPath);
+        if (key is null) return;
+        if (on)
+        {
+            var exe = Environment.ProcessPath;
+            if (!string.IsNullOrEmpty(exe)) key.SetValue(RunValueName, "\"" + exe + "\"");
+        }
+        else key.DeleteValue(RunValueName, throwOnMissingValue: false);
+    }
+
+    private void OnAutoStartServicesToggle(object? sender, RoutedEventArgs e)
+    {
+        bool on = AutoStartServicesToggle.IsChecked == true;
+        _settings.AutoStartServices = on;
+        try { _settings.Save(); } catch (Exception ex) { Log("Settings save failed: " + ex.Message); }
+        LogEvent("INFO", on
+            ? "Broker services set to auto-start (applied now if elevated, otherwise on next elevated start)"
+            : "Broker services auto-start preference cleared", null);
+        TryConfigureServiceStart(on);
+    }
+
+    // Best-effort: changing a Windows service's start type needs administrator rights this non-admin
+    // console doesn't have. The preference is already persisted; if we happen to be elevated this
+    // applies it, otherwise sc.exe fails quietly (output redirected) and the saved flag stands for an
+    // elevated install/run to honour later.
+    private static void TryConfigureServiceStart(bool auto)
+    {
+        string start = auto ? "auto" : "demand";
+        foreach (var svc in new[] { "SensorBroker", "BrokerControl", "BrokerSmbus" })
+        {
+            try
+            {
+                var psi = new ProcessStartInfo("sc", $"config {svc} start= {start}")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+                Process.Start(psi);
+            }
+            catch { /* sc unavailable / not elevated -> preference saved for later */ }
+        }
     }
 
     private void SaveSettings()
@@ -1675,14 +2412,15 @@ public partial class MainWindow : Window
 
     private void UpdateSensorBoxes(IReadOnlyList<SensorInfo> list)
     {
-        if (_sensorBoxViews.Count == 0) return;
         var values = new Dictionary<string, double?>(list.Count);
-        foreach (var s in list) values[s.Id] = s.Value;
-        // Update every pinned card; a card whose sensor is no longer available/usable (e.g. an
-        // unplugged removable Quadro) gets a null value -> SetCard shows "—" (not connected) rather
-        // than a frozen stale reading.
-        foreach (var (id, view) in _sensorBoxViews)
-            SetCard(view.Val, view.Spark, values.TryGetValue(id, out var v) ? v : null);
+        foreach (var info in list) values[info.Id] = info.Value;
+        // Update every pinned card across all sections; a card whose sensor is no longer
+        // available/usable (e.g. an unplugged removable Quadro) gets a null value -> SetCard shows
+        // "—" (not connected) rather than a frozen stale reading. The same sensor pinned in several
+        // sections updates every copy.
+        foreach (var sec in _sections)
+            foreach (var (id, view) in sec.SensorViews)
+                SetCard(view.Val, view.Spark, values.TryGetValue(id, out var v) ? v : null);
     }
 
     private static bool Has(SensorInfo s, string k)
@@ -2119,11 +2857,16 @@ public partial class MainWindow : Window
         "Temperature" => new TemperatureEffect(),
         "Rainbow" => new RainbowEffect(),
         "Breathing" => new BreathingEffect(),
+        "Heartbeat" => new HeartbeatEffect(),
         "Comet" => new CometEffect(),
+        "Scanner" => new ScannerEffect(),
+        "Theater Chase" => new TheaterChaseEffect(),
         "Twinkle" => new TwinkleEffect(),
         "Aurora" => new AuroraEffect(),
+        "Plasma" => new PlasmaEffect(),
         "Fire" => new FireEffect(),
         "Ripple" => new RippleEffect(),
+        "Juggle" => new JuggleEffect(),
         "Manual per-LED" => new ManualEffect(),
         "Audio Spectrum" => new AudioSpectrumEffect(),
         _ => null,
@@ -2132,12 +2875,11 @@ public partial class MainWindow : Window
     // ===================================================================
     //  Diagnostics / activity feed
     // ===================================================================
+    // No confirm/result modals: the ping result lands in the Activity feed (now visible right here on
+    // the Settings page and in the dashboard Activity card), so the dialogs that pointed at it are gone.
     private async void OnPing(object? sender, RoutedEventArgs e)
     {
         if (_sensors is null) { Log("Not connected."); return; }
-        bool ok = await ConfirmDialog.Show(this, "Ping broker?",
-            "Send a ping to the broker to confirm the connection is alive?", "Ping");
-        if (!ok) return;
         try
         {
             var t0 = DateTime.UtcNow;
@@ -2147,9 +2889,6 @@ public partial class MainWindow : Window
             LogEvent(alive ? "SUCCESS" : "ERROR", alive ? $"ping → pong ({ms:F1} ms)" : "ping → no pong", null);
         }
         catch (Exception ex) { LogEvent("ERROR", "ping failed: " + ex.Message, null); }
-
-        await ConfirmDialog.Info(this, "Ping sent",
-            "The ping result has been recorded in the Activity tracker — check the Activity box on the Dashboard (or the Activity tab) for the response.");
     }
 
     private void OnClearActivity(object? sender, RoutedEventArgs e)
@@ -2157,6 +2896,14 @@ public partial class MainWindow : Window
         _activity.Clear();
         LogBox.Text = "";
         _logLines = 0;
+    }
+
+    // Swap the Activity card between the structured feed and the raw diagnostics text in place.
+    private void OnRawLogToggle(object? sender, RoutedEventArgs e)
+    {
+        bool raw = RawLogToggle.IsChecked == true;
+        RawLogScroll.IsVisible = raw;
+        ActivityFeedScroll.IsVisible = !raw;
     }
 
     private int _logLines;
@@ -2219,6 +2966,39 @@ public partial class MainWindow : Window
         if (this.TryFindResource(key, theme, out var v) && v is IBrush b) return b;
         if (Application.Current is { } app && app.TryFindResource(key, theme, out var v2) && v2 is IBrush b2) return b2;
         return Brushes.Gray;
+    }
+
+    // Bind a code-created control's brush property to a themed resource so it tracks Dark↔Light
+    // switches. Unlike Res(), which snapshots the brush for the current theme only, this re-resolves
+    // whenever the active theme variant changes — the fix for dynamically built cards reading as
+    // white text in light mode.
+    private void BindThemeBrush(Control c, AvaloniaProperty prop, string key)
+        => c.Bind(prop, this.GetResourceObservable(key));
+
+    // Re-apply everything we colour from code after a theme flip (see the ctor subscription).
+    // Posted to the dispatcher so it runs AFTER Avalonia finishes re-resolving the XAML DynamicResource
+    // brushes for the new theme — otherwise those bindings would re-fire and clobber our code-set
+    // footer colours back to the themed default (the "footer colours vanish on toggle" bug).
+    private void OnThemeChanged()
+        => Dispatcher.UIThread.Post(() =>
+        {
+            RecolorFooter();
+            BuildGrantedChips();
+            if (_selectedDeviceId is { } id && _engine?.GetEffect(id) is { } eff) BuildParamPanel(eff);
+        });
+
+    // The footer's status colours are set imperatively (green when connected, themed grey otherwise),
+    // so a theme change leaves them stale or resets them to the themed default. Recompute from the
+    // current connection state using the active theme's brushes.
+    private void RecolorFooter()
+    {
+        bool ok = _sensors is not null || _control is not null;
+        var green = Res("Green");
+        ConnDot.Fill = ok ? green : Res("TextMuted");
+        ConnText.Foreground = ok ? green : Res("TextSecondary");
+        BrokerText.Foreground = ok ? green : Res("TextSecondary");
+        StyleChip(ChipSensors, _sensors?.GrantedScopes.Contains("sensors:read") == true);
+        StyleChip(ChipRgb, _control?.GrantedScopes.Contains("rgb:write") == true);
     }
 }
 

@@ -471,6 +471,213 @@ public sealed class RippleEffect : IEffect
 }
 
 /// <summary>
+/// Scanner — the bouncing "Cylon"/Larson eye. A bright head sweeps from one end of the strip to the
+/// other and back, trailing a soft tail on both sides. Distinct from Comet, which wraps in a single
+/// direction; here the eye eases to a stop, reverses at each end and ping-pongs. (Classic public LED
+/// pattern — the Larson scanner; original implementation.)
+/// </summary>
+public sealed class ScannerEffect : IEffect
+{
+    private readonly EffectParam _color = EffectParam.Color("color", "Colour", "FF0000");
+    private readonly EffectParam _bg = EffectParam.Color("bg", "Background", "000000");
+    private readonly EffectParam _speed = EffectParam.Slider("speed", "Speed (sweeps/s)", 0.05, 4, 0.6, 0.01);
+    private readonly EffectParam _width = EffectParam.Slider("width", "Eye width", 0.5, 12, 2, 0.1);
+    private readonly EffectParam _ease = EffectParam.Toggle("ease", "Ease at ends", true);
+    private readonly EffectParam _bright = EffectParam.Slider("bright", "Brightness", 0, 1, 1, 0.01);
+
+    public string Name => "Scanner";
+    public bool IsAnimated => true;
+    public IReadOnlyList<EffectParam> Parameters => new[] { _color, _bg, _speed, _width, _ease, _bright };
+
+    public void Render(in RenderContext ctx, RgbColor[] leds)
+    {
+        int n = leds.Length;
+        if (n == 0) return;
+
+        // A 0..1 phase drives a triangle wave so the head runs 0→(n-1)→0 each full sweep cycle.
+        double phase = (ctx.Time * _speed.Num * 0.5) % 1.0;       // one cycle = there-and-back
+        if (phase < 0) phase += 1;
+        double tri = phase < 0.5 ? phase * 2 : 2 - phase * 2;     // 0→1→0
+        // Optional cosine ease so the eye decelerates into each end instead of snapping around.
+        if (_ease.Flag) tri = 0.5 - 0.5 * Math.Cos(Math.PI * tri);
+        double head = tri * (n - 1);
+
+        double w = Math.Max(0.1, _width.Num);
+        var bg = _bg.Color_;
+        var fg = _color.Color_.Scale(_bright.Num);
+        for (int i = 0; i < n; i++)
+        {
+            double b = Math.Max(0, 1 - Math.Abs(i - head) / w);
+            b *= b;                                               // square falloff = tight core, soft edge
+            leds[i] = RgbColor.Lerp(bg, fg, b);
+        }
+    }
+}
+
+/// <summary>
+/// Theater chase — evenly spaced lit dots march along the strip over a dark background, like the
+/// bulbs of an old theatre marquee. Spacing and dot width are adjustable; an optional rainbow tints
+/// each step. (Classic public marquee pattern; original implementation.)
+/// </summary>
+public sealed class TheaterChaseEffect : IEffect
+{
+    private readonly EffectParam _color = EffectParam.Color("color", "Colour", "FFAA00");
+    private readonly EffectParam _bg = EffectParam.Color("bg", "Background", "000000");
+    private readonly EffectParam _speed = EffectParam.Slider("speed", "Speed (steps/s)", 0, 30, 8, 0.5);
+    private readonly EffectParam _spacing = EffectParam.Slider("spacing", "Spacing", 2, 12, 3, 1);
+    private readonly EffectParam _dot = EffectParam.Slider("dot", "Dot width", 1, 6, 1, 1);
+    private readonly EffectParam _rainbow = EffectParam.Toggle("rainbow", "Rainbow", false);
+    private readonly EffectParam _bright = EffectParam.Slider("bright", "Brightness", 0, 1, 1, 0.01);
+
+    public string Name => "Theater Chase";
+    public bool IsAnimated => true;
+    public IReadOnlyList<EffectParam> Parameters => new[] { _color, _bg, _speed, _spacing, _dot, _rainbow, _bright };
+
+    public void Render(in RenderContext ctx, RgbColor[] leds)
+    {
+        int n = leds.Length;
+        if (n == 0) return;
+        int spacing = Math.Max(2, (int)Math.Round(_spacing.Num));
+        int dot = Math.Clamp((int)Math.Round(_dot.Num), 1, spacing - 1);
+        // The marquee advances one LED every 1/speed seconds; floor keeps the dots crisp (no smear).
+        int offset = (int)Math.Floor(ctx.Time * _speed.Num);
+        var bg = _bg.Color_;
+        double bf = _bright.Num;
+        for (int i = 0; i < n; i++)
+        {
+            int pos = ((i - offset) % spacing + spacing) % spacing;   // 0 = on a lit slot
+            if (pos >= dot) { leds[i] = bg; continue; }
+            var fg = _rainbow.Flag ? RgbColor.FromHsv((offset * 12.0 + i * 4.0) % 360, 1, 1) : _color.Color_;
+            leds[i] = fg.Scale(bf);
+        }
+    }
+}
+
+/// <summary>
+/// Plasma — a flowing demoscene plasma field. Several sine waves of position and time sum into a
+/// smooth scalar that is mapped through a moving hue ramp, giving liquid, edge-free colour. Unlike
+/// Aurora (which blends a fixed two/three-colour palette by brightness), Plasma sweeps a chosen arc
+/// of the whole hue circle. (Classic public demoscene algorithm; original implementation.)
+/// </summary>
+public sealed class PlasmaEffect : IEffect
+{
+    private readonly EffectParam _speed = EffectParam.Slider("speed", "Speed", 0, 3, 0.6, 0.01);
+    private readonly EffectParam _scale = EffectParam.Slider("scale", "Scale", 0.5, 12, 4, 0.1);
+    private readonly EffectParam _hue = EffectParam.Slider("hue", "Hue offset (°)", 0, 360, 0, 1);
+    private readonly EffectParam _span = EffectParam.Slider("span", "Hue span (°)", 30, 360, 180, 5);
+    private readonly EffectParam _sat = EffectParam.Slider("sat", "Saturation", 0, 1, 1, 0.01);
+    private readonly EffectParam _bright = EffectParam.Slider("bright", "Brightness", 0, 1, 1, 0.01);
+
+    public string Name => "Plasma";
+    public bool IsAnimated => true;
+    public IReadOnlyList<EffectParam> Parameters => new[] { _speed, _scale, _hue, _span, _sat, _bright };
+
+    public void Render(in RenderContext ctx, RgbColor[] leds)
+    {
+        int n = Math.Max(1, leds.Length);
+        double t = ctx.Time * _speed.Num;
+        double k = _scale.Num;
+        for (int i = 0; i < leds.Length; i++)
+        {
+            double x = i / (double)n;
+            // Three out-of-phase sine waves at different spatial/temporal scales sum into the field.
+            double v = Math.Sin(2 * Math.PI * (x * k + t))
+                     + Math.Sin(2 * Math.PI * (x * k * 0.5 - t * 0.7) + 1.3)
+                     + Math.Sin(2 * Math.PI * (x * k * 1.7 + t * 0.4) + 2.6);
+            double f = (v + 3) / 6.0;                              // normalise the −3..3 sum to 0..1
+            double hue = (_hue.Num + f * _span.Num) % 360;
+            leds[i] = RgbColor.FromHsv(hue, _sat.Num, _bright.Num);
+        }
+    }
+}
+
+/// <summary>
+/// Juggle — several colour dots weave back and forth along the strip at different rates, crossing
+/// and overlapping over a fading trail. Each dot follows its own sine so they continuously braid;
+/// crossings add together and brighten. (Adapted from the well-known FastLED "juggle" demo pattern;
+/// original implementation.)
+/// </summary>
+public sealed class JuggleEffect : IEffect
+{
+    private readonly EffectParam _dots = EffectParam.Slider("dots", "Dots", 1, 8, 3, 1);
+    private readonly EffectParam _speed = EffectParam.Slider("speed", "Speed", 0.1, 4, 1, 0.05);
+    private readonly EffectParam _fade = EffectParam.Slider("fade", "Trail fade (per s)", 1, 20, 6, 0.5);
+    private readonly EffectParam _rainbow = EffectParam.Toggle("rainbow", "Rainbow dots", true);
+    private readonly EffectParam _color = EffectParam.Color("color", "Dot colour", "00FFFF");
+    private readonly EffectParam _bright = EffectParam.Slider("bright", "Brightness", 0, 1, 1, 0.01);
+
+    private RgbColor[] _buf = Array.Empty<RgbColor>();
+
+    public string Name => "Juggle";
+    public bool IsAnimated => true;
+    public IReadOnlyList<EffectParam> Parameters => new[] { _dots, _speed, _fade, _rainbow, _color, _bright };
+
+    public void Render(in RenderContext ctx, RgbColor[] leds)
+    {
+        int n = leds.Length;
+        if (n == 0) return;
+        if (_buf.Length != n) _buf = new RgbColor[n];
+
+        // Fade the persistent trail toward black, then stamp each dot at its current position.
+        double keep = Math.Clamp(1 - _fade.Num * Math.Clamp(ctx.Dt, 0, 0.1), 0, 1);
+        for (int i = 0; i < n; i++) _buf[i] = _buf[i].Scale(keep);
+
+        int dots = Math.Max(1, (int)Math.Round(_dots.Num));
+        double bf = _bright.Num;
+        for (int d = 0; d < dots; d++)
+        {
+            double rate = _speed.Num * (d + 1) * 0.37 + 0.2;      // each dot a distinct weave rate
+            double s = 0.5 + 0.5 * Math.Sin(2 * Math.PI * rate * ctx.Time + d);
+            int pos = (int)Math.Round(s * (n - 1));
+            var add = (_rainbow.Flag ? RgbColor.FromHsv((d * 360.0 / dots + ctx.Time * 40) % 360, 1, 1)
+                                     : _color.Color_).Scale(bf);
+            var cur = _buf[pos];                                  // additive so overlaps brighten
+            _buf[pos] = new RgbColor(
+                (byte)Math.Min(255, cur.R + add.R),
+                (byte)Math.Min(255, cur.G + add.G),
+                (byte)Math.Min(255, cur.B + add.B));
+        }
+        Array.Copy(_buf, leds, n);
+    }
+}
+
+/// <summary>
+/// Heartbeat — a realistic "lub-dub" double pulse. Each beat fires two quick brightness bumps close
+/// together, then rests until the next beat, at a configurable BPM. Distinct from Breathing's single
+/// smooth sine. (Original implementation.)
+/// </summary>
+public sealed class HeartbeatEffect : IEffect
+{
+    private readonly EffectParam _color = EffectParam.Color("color", "Colour", "FF0030");
+    private readonly EffectParam _bpm = EffectParam.Slider("bpm", "BPM", 20, 180, 60, 1);
+    private readonly EffectParam _min = EffectParam.Slider("min", "Min brightness", 0, 1, 0.04, 0.01);
+    private readonly EffectParam _max = EffectParam.Slider("max", "Max brightness", 0, 1, 1, 0.01);
+
+    public string Name => "Heartbeat";
+    public bool IsAnimated => true;
+    public IReadOnlyList<EffectParam> Parameters => new[] { _color, _bpm, _min, _max };
+
+    public void Render(in RenderContext ctx, RgbColor[] leds)
+    {
+        double period = 60.0 / Math.Max(1, _bpm.Num);
+        double p = (ctx.Time % period) / period;                 // 0..1 within one beat
+        // Two gaussian thumps — "lub" at phase 0, a softer "dub" just after — then quiet to the next beat.
+        double b = Math.Min(1, Bump(p, 0.00, 0.045) + 0.75 * Bump(p, 0.22, 0.05));
+        double br = _min.Num + (_max.Num - _min.Num) * b;
+        var c = _color.Color_.Scale(br);
+        for (int i = 0; i < leds.Length; i++) leds[i] = c;
+    }
+
+    // Gaussian bump centred on a phase, wrapped so a thump at 0 is symmetric across the beat boundary.
+    private static double Bump(double p, double center, double width)
+    {
+        double d = p - center;
+        if (d > 0.5) d -= 1; else if (d < -0.5) d += 1;
+        return Math.Exp(-(d * d) / (2 * width * width));
+    }
+}
+
+/// <summary>
 /// Audio-reactive spectrum. Loopback band energy → per-LED colour/brightness.
 /// "Reactive factor" (gain) and "Smoothing" are live params — exactly the knobs
 /// you tweaked last night, now first-class and adjustable while it runs.

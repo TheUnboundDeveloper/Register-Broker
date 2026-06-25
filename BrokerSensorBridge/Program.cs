@@ -42,6 +42,15 @@ internal static class Program
 
         if (args.Any(a => a.Equals("--mystic-perled", StringComparison.OrdinalIgnoreCase)))
             return RunMysticPerLedProbe(args);
+
+        if (args.Any(a => a.Equals("--gpu-pmlog-dump", StringComparison.OrdinalIgnoreCase)))
+            return RunGpuPmLogDump(args);
+
+        if (args.Any(a => a.Equals("--ups-dump", StringComparison.OrdinalIgnoreCase)))
+            return RunUpsDump(args);
+
+        if (args.Any(a => a.Equals("--ups-read", StringComparison.OrdinalIgnoreCase)))
+            return RunUpsRead(args);
 #endif
 
         if (args.Any(a => a.Equals("--client", StringComparison.OrdinalIgnoreCase)))
@@ -301,6 +310,16 @@ internal static class Program
                     : "Aqua sensors: enabled (AllowAquaSensors) but no supported controller detected — aqua.* stay absent.");
             }
 
+            /* UPS telemetry: another opt-in, removable, user-mode USB-HID source (HID Power Device,
+               usage page 0x84). Same reduced-assurance / hot-plug posture as the Aqua provider. */
+            if (Config.AllowUpsSensors)
+            {
+                UpsSensorProvider.Current = UpsSensorProvider.TryCreate(Log);
+                Log(UpsSensorProvider.Current is { IsAvailable: true } ups
+                    ? $"UPS sensors: {ups.Name} via USB-HID — read-only, removable, reduced assurance (user-mode, no kernel guard)."
+                    : "UPS sensors: enabled (AllowUpsSensors) but no HID Power Device detected — ups.* stay absent.");
+            }
+
             /*-----------------------------------------------------------*\
             | One-shot mode: print a single named-catalog snapshot, read  |
             | straight from the driver, and exit. Useful for diagnostics. |
@@ -346,6 +365,8 @@ internal static class Program
             GpuSensorProvider.Current = null;
             (AquaSensorProvider.Current as IDisposable)?.Dispose();
             AquaSensorProvider.Current = null;
+            (UpsSensorProvider.Current as IDisposable)?.Dispose();
+            UpsSensorProvider.Current = null;
             smbus?.Dispose();
             Log("BrokerSensorBridge exiting.");
         }
@@ -732,6 +753,86 @@ internal static class Program
         return setPl ? 0 : 1;
     }
 
+    /* GPU PMLog ground-truth dump (USER-MODE, non-admin, READ-ONLY — no driver, no pipe).
+       Loads ADL, queries the whole PMLogDataOutput block, and prints every supported sensor
+       index with its raw value. Used to ANCHOR new gpu.* PMLOG indices against a known card by
+       cross-referencing the raw values with a labeled reference (e.g. HWiNFO) — never guess an
+       index. WinExe: redirect output (`--gpu-pmlog-dump > pmlog.txt`). */
+    private static int RunGpuPmLogDump(string[] args)
+    {
+        AdlInterop? adl = AdlInterop.TryCreate(Console.WriteLine);
+        if (adl is null) { Console.WriteLine("No AMD ADL GPU available — nothing to dump."); return 1; }
+        try
+        {
+            Console.WriteLine($"Adapter: {adl.AdapterName} (ADL index {adl.AdapterIndex})");
+            var supported = new int[256];
+            var value = new int[256];
+            if (!adl.TryQueryPmLog(supported, value)) { Console.WriteLine("PMLog query failed."); return 1; }
+            Console.WriteLine("idx\tvalue\t(supported sensors only — raw PMLog units)");
+            for (int i = 0; i < 256; i++)
+                if (supported[i] != 0) Console.WriteLine($"{i}\t{value[i]}");
+            return 0;
+        }
+        finally { adl.Dispose(); }
+    }
+
+    /* UPS / HID Power Device ground-truth dump (USER-MODE, non-admin, READ-ONLY — no driver, no pipe).
+       Enumerates HID interfaces whose top-level collection is the Power Device page (0x84), then for
+       the first match prints every FEATURE value cap (page/usage/report-id/bits/exp) with the raw and
+       exponent-scaled value read back. Used to ANCHOR the ups.* usage map + scaling against a labeled
+       reference (e.g. HWiNFO's UPS readings) — never guess. WinExe: redirect (`--ups-dump > ups.txt`). */
+    private static int RunUpsDump(string[] args)
+    {
+        IReadOnlyList<HidDevice> devs = HidDevice.OpenByUsagePage(0x84, Console.WriteLine);
+        Console.WriteLine($"HID Power Device (usage page 0x84) interfaces: {devs.Count}");
+        foreach (HidDevice d in devs)
+            Console.WriteLine($"  VID 0x{d.VendorId:X4} PID 0x{d.ProductId:X4}  usage={d.UsagePage:X2}:{d.Usage:X2}  featLen={d.FeatureReportByteLength} inputLen={d.InputReportByteLength}");
+
+        HidDevice? ups = devs.FirstOrDefault(d => d.FeatureReportByteLength > 0) ?? devs.FirstOrDefault();
+        if (ups is null) { Console.WriteLine("No HID Power Device found."); return 1; }
+
+        Console.WriteLine($"\nUsing VID 0x{ups.VendorId:X4} PID 0x{ups.ProductId:X4}. Feature value caps:");
+        IReadOnlyList<HidDevice.HidValueCap> caps = ups.GetValueCaps(feature: true);
+        Console.WriteLine("page usage rid bits exp   raw      scaled");
+        /* Cache one GetFeature per report id, then extract every usage in it. */
+        var byReport = new Dictionary<byte, byte[]>();
+        foreach (HidDevice.HidValueCap c in caps.OrderBy(c => c.ReportId).ThenBy(c => c.UsagePage).ThenBy(c => c.Usage))
+        {
+            if (!byReport.TryGetValue(c.ReportId, out byte[]? rep))
+            {
+                rep = new byte[Math.Max(ups.FeatureReportByteLength, 2)];
+                rep[0] = c.ReportId;
+                if (!ups.GetFeature(rep)) rep = Array.Empty<byte>();
+                byReport[c.ReportId] = rep;
+            }
+            string raw = "—", scaled = "—";
+            if (rep.Length > 0 && ups.TryGetUsageValue(rep, c.UsagePage, c.LinkCollection, c.Usage, out uint v))
+            {
+                raw = v.ToString();
+                scaled = (v * Math.Pow(10, c.UnitsExp)).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+            }
+            Console.WriteLine($"0x{c.UsagePage:X2} 0x{c.Usage:X2} {c.ReportId,3} {c.BitSize,4} {c.UnitsExp,3}  {raw,8}  {scaled,8}  (lc={c.LinkCollection})");
+        }
+        foreach (HidDevice d in devs) d.Dispose();
+        return 0;
+    }
+
+    /* End-to-end check of the real UpsSensorProvider (USER-MODE, non-admin, READ-ONLY): create it,
+       wait for a sample, and print every ups.* metric exactly as the broker would resolve it — so the
+       usage map + voltage in/out selection + poller can be validated before an elevated deploy. */
+    private static int RunUpsRead(string[] args)
+    {
+        UpsSensorProvider.Current = UpsSensorProvider.TryCreate(Console.WriteLine);
+        if (UpsSensorProvider.Current is not { } p) { Console.WriteLine("No UPS provider created."); return 1; }
+        System.Threading.Thread.Sleep(2500);   // let the poller take a first sample
+        Console.WriteLine($"Provider: {p.Name}  available={p.IsAvailable}");
+        foreach (UpsMetric m in Enum.GetValues<UpsMetric>())
+            Console.WriteLine($"  {m,-14} {(p.TryRead(m, out double v) ? v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) : "n/a")}");
+        (UpsSensorProvider.Current as IDisposable)?.Dispose();
+        UpsSensorProvider.Current = null;
+        return 0;
+    }
+
     private static double ProbeArgDouble(string[] args, string prefix, double fallback)
     {
         string s = ProbeArgStr(args, prefix, "");
@@ -856,6 +957,11 @@ internal static class Program
               available + decode (temps/flow/fan RPM) with one, gate out a disconnected probe, are
               flagged Removable, and never light a CPU/board family. Also checks the raw decode. --*/
         failures += SelfTestAquaSensors();
+
+        /*-- UPS sensors: the removable user-mode ups.* channels are absent without a provider,
+              available + decode with one, gate out an unsupplied metric, are flagged Removable, and
+              never light a CPU/board family. --*/
+        failures += SelfTestUpsSensors();
 
         /*-- RGB catalog: board-aware zone profiles validate, the MSI profile resolves the full
               zone vocabulary, the generic fallback is DRAM-only, and label overrides + transport
@@ -1193,6 +1299,8 @@ internal static class Program
             {
                 [GpuMetric.TempEdge]   = 61.0,
                 [GpuMetric.PowerW]     = 120.0,
+                [GpuMetric.UtilMem]    = 44.0,
+                [GpuMetric.MemUsedMb]  = 2048.0,
                 [GpuMetric.VoltageGfx] = 0.727,
             });
             Check("gpu.temp available with provider", gpuTemp.IsAvailable(anyBackend));
@@ -1202,6 +1310,10 @@ internal static class Program
             Check("gpu.power reads 120 W", p.Ok && p.Unit == "W" && Math.Abs(p.Value - 120.0) < 1e-9);
             SensorCatalogEntry? gpuVolt = SensorCatalog.Find("gpu.voltage");
             Check("gpu.voltage reads 0.727 V", gpuVolt != null && gpuVolt.Read(anyBackend) is { Ok: true, Unit: "V" } gv && Math.Abs(gv.Value - 0.727) < 1e-9);
+            SensorCatalogEntry? gpuMemUtil = SensorCatalog.Find("gpu.usage.mem");
+            Check("gpu.usage.mem reads 44 %", gpuMemUtil != null && gpuMemUtil.Read(anyBackend) is { Ok: true, Unit: "%" } gm && Math.Abs(gm.Value - 44.0) < 1e-9);
+            SensorCatalogEntry? gpuMemUsed = SensorCatalog.Find("gpu.mem.used");
+            Check("gpu.mem.used reads 2048 MB", gpuMemUsed != null && gpuMemUsed.Read(anyBackend) is { Ok: true, Unit: "MB" } gmu && Math.Abs(gmu.Value - 2048.0) < 1e-9);
 
             /* A metric the provider does not expose reports not-available, not a bogus zero. */
             Check("unsupplied gpu metric -> not ok", !gpuMem.Read(anyBackend).Ok);
@@ -1302,6 +1414,70 @@ internal static class Program
         finally
         {
             AquaSensorProvider.Current = null;   // leave the catalog Aqua-free for the later server cases
+        }
+
+        return failures;
+    }
+
+    /*-----------------------------------------------------------*\
+    | UPS sensors (removable, user-mode HID Power Device). Asserts |
+    | catalog presence, removable flag, absent-without-provider,   |
+    | value/unit decode with a fixed provider, per-metric gating,  |
+    | and cross-source isolation.                                  |
+    \*-----------------------------------------------------------*/
+    private static int SelfTestUpsSensors()
+    {
+        int failures = 0;
+        void Check(string name, bool ok)
+        {
+            Console.WriteLine($"  [{(ok ? "PASS" : "FAIL")}] ups: {name}");
+            if (!ok) failures++;
+        }
+
+        var anyBackend = new MockSmbusBackend(available: true);   // ups.* ignore the backend
+        try
+        {
+            SensorCatalogEntry? charge  = SensorCatalog.Find("ups.charge");
+            SensorCatalogEntry? runtime = SensorCatalog.Find("ups.runtime");
+            SensorCatalogEntry? vin     = SensorCatalog.Find("ups.voltage.in");
+            Check("catalog has ups.charge + runtime + voltage.in", charge != null && runtime != null && vin != null);
+            if (charge == null || runtime == null || vin == null) return failures + 1;
+
+            Check("ups.* flagged removable", charge.Removable && runtime.Removable && vin.Removable);
+
+            /* No provider -> ups.* absent; CPU/board sensors unaffected. */
+            UpsSensorProvider.Current = null;
+            Check("ups.* absent without a provider", !charge.IsAvailable(anyBackend) && !vin.IsAvailable(anyBackend));
+
+            /* A fixed provider lights the channels it supplies and decodes their value/unit. */
+            UpsSensorProvider.Current = new FixedUpsProvider("Test UPS", new Dictionary<UpsMetric, double>
+            {
+                [UpsMetric.ChargePercent] = 100.0,
+                [UpsMetric.RuntimeMin]    = 24.0,
+                [UpsMetric.VoltageIn]     = 121.0,
+            });
+            Check("ups.charge available with provider", charge.IsAvailable(anyBackend));
+            SensorReading c = charge.Read(anyBackend);
+            Check("ups.charge reads 100 %", c.Ok && c.Unit == "%" && Math.Abs(c.Value - 100.0) < 1e-9);
+            SensorReading rt = runtime.Read(anyBackend);
+            Check("ups.runtime reads 24 min", rt.Ok && rt.Unit == "min" && Math.Abs(rt.Value - 24.0) < 1e-9);
+            SensorReading v = vin.Read(anyBackend);
+            Check("ups.voltage.in reads 121 V", v.Ok && v.Unit == "V" && Math.Abs(v.Value - 121.0) < 1e-9);
+
+            /* A metric the provider does not supply reports not-available, not a bogus zero. */
+            Check("unsupplied ups metric (load) -> not ok", !SensorCatalog.Find("ups.load")!.Read(anyBackend).Ok);
+
+            /* UPS presence must not light a CPU/board family (cross-source isolation). */
+            Check("UPS provider does not light smu.cpu.temp", !SensorCatalog.Find("smu.cpu.temp")!.IsAvailable(anyBackend));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  [FAIL] ups: threw {ex.Message}");
+            failures++;
+        }
+        finally
+        {
+            UpsSensorProvider.Current = null;   // leave the catalog UPS-free for the later server cases
         }
 
         return failures;
@@ -2003,6 +2179,15 @@ internal sealed class BridgeConfig
     \*-----------------------------------------------------------*/
     public bool AllowAquaSensors { get; set; } = false;
 
+    /*-----------------------------------------------------------*\
+    | UPS sensors (read-only) via USB-HID (HID Power Device,       |
+    | usage page 0x84). OFF by default, same reduced-assurance     |
+    | posture as Aqua: a user-mode HID device, no kernel guard, no |
+    | write path. REMOVABLE — hot-plug aware. Set true in          |
+    | appsettings.json (server-side) or --allow-ups-sensors.       |
+    \*-----------------------------------------------------------*/
+    public bool AllowUpsSensors { get; set; } = false;
+
     [JsonIgnore]
     public string LogFileExpanded => Environment.ExpandEnvironmentVariables(LogFile);
     [JsonIgnore]
@@ -2043,6 +2228,10 @@ internal sealed class BridgeConfig
         /* CLI override: --allow-aqua-sensors forces the read-only Aquacomputer (USB-HID) source on. */
         if (args.Any(a => a.Equals("--allow-aqua-sensors", StringComparison.OrdinalIgnoreCase)))
             cfg.AllowAquaSensors = true;
+
+        /* CLI override: --allow-ups-sensors forces the read-only UPS (HID Power Device) source on. */
+        if (args.Any(a => a.Equals("--allow-ups-sensors", StringComparison.OrdinalIgnoreCase)))
+            cfg.AllowUpsSensors = true;
 
         return cfg;
     }

@@ -133,9 +133,16 @@ broker acts on.
 | Temperature | colour-by-sensor, with a soft fade between colours (auto-enables Sensors live poll) | sensor picker, temp→colour stops (add/remove, colour quick-picks), brightness, fade |
 | Rainbow | animation | speed, spread, saturation, brightness |
 | Breathing | animation | colour, Hz, min/max brightness |
+| Heartbeat | a "lub-dub" double-pulse beat (distinct from Breathing's single sine) | colour, BPM, min/max brightness |
 | Comet | per-LED chase animation | colour, background, speed, tail |
+| Scanner | bouncing Larson / "Cylon" eye — ping-pongs end to end with a soft tail | colour, background, speed, eye width, ease-at-ends, brightness |
+| Theater Chase | marching marquee dots over a dark background | colour, background, speed, spacing, dot width, rainbow toggle, brightness |
 | Twinkle | random per-LED sparkles igniting and fading over a background | background, twinkle colour, density, fade rate, random-colours toggle |
 | Aurora | an original effect — drifting curtains of light from three blended palette colours | speed, wave scale, brightness, colours A / B / C |
+| Plasma | flowing demoscene plasma field across a chosen hue arc | speed, scale, hue offset / span, saturation, brightness |
+| Fire | upward-climbing flame simulation with a white-hot tip | cooling, sparking, speed, hue shift, brightness |
+| Ripple | expanding raindrop rings that interfere over a background | drop rate, wave speed, ring width, fade, random-colour toggle, colour, background, brightness |
+| Juggle | several colour dots weaving and braiding over a fading trail | dots, speed, trail fade, rainbow toggle, colour, brightness |
 | Manual per-LED | click LEDs to paint individually | brush colour (+ Fill / Clear) |
 | Audio Spectrum | WASAPI loopback → FFT bands (Level mode tracks overall loudness from the same tuned bands) | reactive factor, smoothing, noise floor, low/high colour, Spectrum/Level mode |
 

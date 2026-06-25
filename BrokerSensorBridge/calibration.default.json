@@ -327,6 +327,14 @@
       "label": "GPU Utilization"
     },
     {
+      "rawId": "gpu.usage.mem",
+      "label": "GPU Memory Controller Utilization"
+    },
+    {
+      "rawId": "gpu.mem.used",
+      "label": "GPU Memory Used"
+    },
+    {
       "rawId": "gpu.voltage",
       "label": "GPU Voltage"
     },
@@ -365,6 +373,26 @@
     {
       "rawId": "aqua.fan.3",
       "label": "Aqua Fan 4"
+    },
+    {
+      "rawId": "ups.charge",
+      "label": "UPS Battery Charge"
+    },
+    {
+      "rawId": "ups.runtime",
+      "label": "UPS Runtime Remaining"
+    },
+    {
+      "rawId": "ups.load",
+      "label": "UPS Load"
+    },
+    {
+      "rawId": "ups.voltage.in",
+      "label": "UPS Input Voltage"
+    },
+    {
+      "rawId": "ups.voltage.out",
+      "label": "UPS Output Voltage"
     }
   ],
   "boards": [

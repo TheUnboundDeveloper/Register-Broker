@@ -61,7 +61,7 @@
                      FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
         </Border>
         <TextBlock Grid.Column="2" Text="{Binding Message}" Foreground="{DynamicResource TextSecondary}"
-                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                   FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
         <Border Grid.Column="3" Background="{DynamicResource SurfaceAlt}" BorderBrush="{DynamicResource Border0}"
                 BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center"
                 IsVisible="{Binding HasTag}">
@@ -176,9 +176,11 @@
             <Button x:Name="NavDashboard" Classes="nav active" Click="OnNavDashboard" Content="◧   Dashboard"/>
             <Button x:Name="NavSensors"   Classes="nav" Click="OnNavSensors"   Content="∿   Sensors"/>
             <Button x:Name="NavRgb"       Classes="nav" Click="OnNavRgb"       Content="◉   RGB"/>
-            <Button x:Name="NavActivity"  Classes="nav" Click="OnNavActivity"  Content="≣   Activity"/>
-            <Button x:Name="NavSecurity"  Classes="nav" Click="OnNavSecurity"  Content="🛡   Security"/>
-            <Button x:Name="NavSettings"  Classes="nav" Click="OnNavSettings"  Content="⚙   Settings"/>
+            <!-- User-created sections live at the bottom, just above "Add Section" (the fixed pages
+                 above aren't reorderable, so new boards collect here and can be drag-reordered). -->
+            <StackPanel x:Name="SectionNavHost" Spacing="3"/>
+            <Button x:Name="AddSectionButton" Classes="nav" Click="OnAddSection" Content="＋   Add Section"
+                    ToolTip.Tip="Create a new, empty dashboard section you can fill with cards"/>
           </StackPanel>
 
           <StackPanel Grid.Row="1" Spacing="8">
@@ -186,6 +188,8 @@
                     Content="⧉  GitHub" Click="OnOpenGitHub"/>
             <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Content="ⓘ  About" Click="OnAbout"/>
+            <Button x:Name="NavSettings" Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Content="⚙  Settings" Click="OnNavSettings"/>
             <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Content="✉  Send feedback" Click="OnSendFeedback"/>
           </StackPanel>
@@ -193,7 +197,7 @@
       </Border>
 
       <!-- ===== content host ===== -->
-      <Panel Grid.Column="1">
+      <Panel Grid.Column="1" x:Name="ContentHost">
 
         <!-- ============ DASHBOARD PAGE ============ -->
         <!-- Fixed containment box: a toolbar row + a fill row that holds the card canvas. The fill
@@ -212,6 +216,10 @@
                         ToolTip.Tip="Free placement: drag boxes anywhere on the canvas"/>
                 <Button x:Name="AddBoxButton" Classes="ghost" Content="＋ Add Card" Click="OnAddBox"/>
                 <Button Classes="ghost" Content="↺ Reset layout" Click="OnResetLayout"/>
+                <TextBlock Text="🔒 Lock cards" Classes="sub" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                <ToggleSwitch x:Name="DashLockToggle" OnContent="" OffContent="" MinWidth="0"
+                              VerticalAlignment="Center" Click="OnDashLockToggle"
+                              ToolTip.Tip="Freeze the dashboard cards — when on, cards can't be moved or resized"/>
               </StackPanel>
             </Grid>
 
@@ -415,7 +423,7 @@
                     <TextBlock Grid.Column="0" Classes="handle" Text="⠿" Margin="0,0,8,0"
                                Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="1" Text="Security / Permissions" Classes="h2" VerticalAlignment="Center"/>
-                    <Button Grid.Column="2" Content="Details" Classes="ghost" Click="OnNavSecurity" Margin="0,0,6,0"/>
+                    <Button Grid.Column="2" Content="Details" Classes="ghost" Click="OnNavSettings" Margin="0,0,6,0"/>
                     <Button Grid.Column="3" Classes="iconbtn" Content="✕" Click="OnBoxRemove"/>
                   </Grid>
                   <StackPanel Spacing="6">
@@ -549,39 +557,165 @@
           </Border>
         </Grid>
 
-        <!-- ============ ACTIVITY PAGE ============ -->
-        <Grid x:Name="PageActivity" IsVisible="False" Margin="16">
-          <Border Classes="card">
-            <Grid RowDefinitions="Auto,*,Auto">
-              <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
-                <TextBlock Grid.Column="0" Text="Activity Feed" Classes="h1" VerticalAlignment="Center"/>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                  <Button Content="Ping broker" Classes="ghost" Click="OnPing"/>
-                  <Button Content="Clear" Classes="ghost" Click="OnClearActivity"/>
+        <!-- ============ SETTINGS PAGE ============ -->
+        <!-- The single hub: connection, startup, render knobs, the activity feed, and the
+             security/permissions panels (the former Activity + Security pages folded in here).
+             The cards live on a Canvas and are drag-movable + resizable like the dashboard; the
+             "Lock cards" toggle freezes them in place (see SetupSettingsCards in code-behind). -->
+        <Grid x:Name="PageSettings" IsVisible="False" Margin="16" RowDefinitions="Auto,*">
+
+          <!-- toolbar -->
+          <Grid Grid.Row="0" ColumnDefinitions="Auto,*" Margin="0,0,0,12">
+            <TextBlock Grid.Column="0" Text="Settings" Classes="h1" VerticalAlignment="Center"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right"
+                        VerticalAlignment="Center">
+              <TextBlock Text="🔒 Lock cards" Classes="sub" VerticalAlignment="Center"/>
+              <ToggleSwitch x:Name="SettingsLockToggle" OnContent="" OffContent="" MinWidth="0"
+                            VerticalAlignment="Center" Click="OnSettingsLockToggle"
+                            ToolTip.Tip="Freeze the settings cards — when on, cards can't be moved or resized"/>
+              <Button Classes="ghost" Content="↺ Reset layout" Click="OnResetSettingsLayout"
+                      ToolTip.Tip="Restore the default settings card arrangement"/>
+            </StackPanel>
+          </Grid>
+
+          <!-- card canvas (vertical scroll for overflow; cards are absolute-positioned) -->
+          <ScrollViewer Grid.Row="1" x:Name="SettingsScroll" HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Auto">
+            <!-- Top/left anchored: a Canvas with an explicit Height would otherwise be CENTERED in the
+                 viewport, pushing its Y=0 origin to mid-page so the top half couldn't be reached. -->
+            <Canvas x:Name="SettingsCanvas" VerticalAlignment="Top" HorizontalAlignment="Stretch">
+
+              <Border Classes="card" Tag="connection" Width="540">
+                <StackPanel Spacing="12">
+                  <StackPanel Classes="sdragbar" Orientation="Horizontal" Spacing="8" Background="Transparent">
+                    <TextBlock Classes="handle" Text="⠿" VerticalAlignment="Center" Foreground="{DynamicResource TextMuted}"/>
+                    <TextBlock Text="Connection" Classes="h2" VerticalAlignment="Center"/>
+                  </StackPanel>
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Button x:Name="ConnectButton" Content="Connect" Classes="primary" Click="OnConnectClick"/>
+                    <Button Content="Ping broker" Classes="ghost" Click="OnPing"/>
+                    <TextBlock x:Name="EngineStatus" Text="Connect to drive devices." Classes="sub"
+                               VerticalAlignment="Center" TextWrapping="Wrap"/>
+                  </StackPanel>
                 </StackPanel>
-              </Grid>
-              <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
-                <ItemsControl x:Name="ActivityListPage" ItemTemplate="{StaticResource ActivityTemplate}"/>
-              </ScrollViewer>
-              <Expander Grid.Row="2" Header="Raw diagnostics log" Margin="0,8,0,0">
-                <ScrollViewer MaxHeight="160">
-                  <SelectableTextBlock x:Name="LogBox" Classes="mono" FontSize="12" Margin="4"
-                                       Foreground="{DynamicResource TextSecondary}"/>
-                </ScrollViewer>
-              </Expander>
-            </Grid>
-          </Border>
-        </Grid>
+              </Border>
 
-        <!-- ============ SECURITY PAGE ============ -->
-        <ScrollViewer x:Name="PageSecurity" IsVisible="False" Padding="16" HorizontalScrollBarVisibility="Disabled">
-          <StackPanel Spacing="14">
-            <TextBlock Text="Security &amp; Permissions" Classes="h1"/>
-            <Grid ColumnDefinitions="*,*" ColumnSpacing="14">
+              <!-- ===== Startup ===== -->
+              <Border Classes="card" Tag="startup" Width="540">
+                <StackPanel Spacing="12">
+                  <StackPanel Classes="sdragbar" Orientation="Horizontal" Spacing="8" Background="Transparent">
+                    <TextBlock Classes="handle" Text="⠿" VerticalAlignment="Center" Foreground="{DynamicResource TextMuted}"/>
+                    <TextBlock Text="Startup" Classes="h2" VerticalAlignment="Center"/>
+                  </StackPanel>
+                  <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" RowSpacing="12">
+                    <StackPanel Grid.Row="0" Grid.Column="0" Spacing="2" Margin="0,0,24,0">
+                      <TextBlock Text="Start console on login" Classes="sub"/>
+                      <TextBlock Text="Launch this reference console automatically when you sign in to Windows."
+                                 Classes="muted" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <ToggleSwitch Grid.Row="0" Grid.Column="1" x:Name="AutoStartGuiToggle" OnContent="" OffContent=""
+                                  MinWidth="0" VerticalAlignment="Center" Click="OnAutoStartGuiToggle"/>
+                    <StackPanel Grid.Row="1" Grid.Column="0" Spacing="2" Margin="0,0,24,0">
+                      <TextBlock Text="Start broker services on login" Classes="sub"/>
+                      <TextBlock Text="Set the Register Broker services to start with Windows. Applying this needs administrator rights — the preference is saved and applied on the next elevated start if it can't be set now."
+                                 Classes="muted" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <ToggleSwitch Grid.Row="1" Grid.Column="1" x:Name="AutoStartServicesToggle" OnContent="" OffContent=""
+                                  MinWidth="0" VerticalAlignment="Center" Click="OnAutoStartServicesToggle"/>
+                  </Grid>
+                </StackPanel>
+              </Border>
 
-              <Border Grid.Column="0" Classes="card">
+              <Border Classes="card" Tag="render" Width="540">
+                <StackPanel Spacing="12">
+                  <StackPanel Classes="sdragbar" Orientation="Horizontal" Spacing="8" Background="Transparent">
+                    <TextBlock Classes="handle" Text="⠿" VerticalAlignment="Center" Foreground="{DynamicResource TextMuted}"/>
+                    <TextBlock Text="Render &amp; polling" Classes="h2" VerticalAlignment="Center"/>
+                  </StackPanel>
+                  <Grid ColumnDefinitions="*,160" RowDefinitions="Auto,Auto,Auto" RowSpacing="10">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="RGB frame rate (FPS)" Classes="sub" VerticalAlignment="Center"/>
+                    <NumericUpDown Grid.Row="0" Grid.Column="1" x:Name="FpsBox" Minimum="1" Maximum="60" Increment="1"
+                                   Value="20" FormatString="0" ValueChanged="OnFpsChanged"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Sensor refresh (ms)" Classes="sub" VerticalAlignment="Center"/>
+                    <NumericUpDown Grid.Row="1" Grid.Column="1" x:Name="RefreshMsBox" Minimum="100" Maximum="10000"
+                                   Increment="50" Value="750" FormatString="0" ValueChanged="OnRefreshMsChanged"/>
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Minimize to" Classes="sub" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Row="2" Grid.Column="1" x:Name="MinimizeTargetCombo" HorizontalAlignment="Stretch"
+                              SelectionChanged="OnMinimizeTargetChanged">
+                      <ComboBoxItem>Taskbar</ComboBoxItem>
+                      <ComboBoxItem>Tray</ComboBoxItem>
+                    </ComboBox>
+                  </Grid>
+                </StackPanel>
+              </Border>
+
+              <Border Classes="card" Tag="rgbengine" Width="540">
+                <StackPanel Spacing="8">
+                  <StackPanel Classes="sdragbar" Orientation="Horizontal" Spacing="8" Background="Transparent">
+                    <TextBlock Classes="handle" Text="⠿" VerticalAlignment="Center" Foreground="{DynamicResource TextMuted}"/>
+                    <TextBlock Text="RGB engine" Classes="h2" VerticalAlignment="Center"/>
+                  </StackPanel>
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Button Content="Refresh devices" Classes="ghost" Click="OnRgbRefresh"/>
+                    <Button Content="Stop all devices" Classes="ghost" Click="OnStopAll"/>
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+
+              <Border Classes="card" Tag="dashlayout" Width="540">
+                <StackPanel Spacing="8">
+                  <StackPanel Classes="sdragbar" Orientation="Horizontal" Spacing="8" Background="Transparent">
+                    <TextBlock Classes="handle" Text="⠿" VerticalAlignment="Center" Foreground="{DynamicResource TextMuted}"/>
+                    <TextBlock Text="Dashboard layout" Classes="h2" VerticalAlignment="Center"/>
+                  </StackPanel>
+                  <TextBlock Text="Drag a box by its title bar to reorder it. Use the ✕ on a box to remove it, and “Add box” on the Dashboard to bring it back." Classes="sub" TextWrapping="Wrap"/>
+                  <Button Content="Reset dashboard layout" Classes="ghost" Click="OnResetLayout" HorizontalAlignment="Left"/>
+                </StackPanel>
+              </Border>
+
+              <!-- ===== Activity (the former Activity page, folded into Settings) ===== -->
+              <!-- "Raw log" swaps the structured feed for the raw diagnostics text in place, so the
+                   card keeps a single fixed footprint instead of an oversized expander. -->
+              <!-- Height drives the feed/raw fill: the content row is "*", so both views grow and
+                   shrink with the card (resize the card → more rows visible) instead of a fixed cap. -->
+              <Border Classes="card" Tag="activity" Width="540" Height="340">
+                <Grid RowDefinitions="Auto,*">
+                  <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+                    <StackPanel Grid.Column="0" Classes="sdragbar" Orientation="Horizontal" Spacing="8"
+                                Background="Transparent" VerticalAlignment="Center">
+                      <TextBlock Classes="handle" Text="⠿" VerticalAlignment="Center" Foreground="{DynamicResource TextMuted}"/>
+                      <TextBlock Text="Activity" Classes="h2" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                      <TextBlock Text="Raw log" Classes="sub" VerticalAlignment="Center"/>
+                      <ToggleSwitch x:Name="RawLogToggle" OnContent="" OffContent="" MinWidth="0"
+                                    VerticalAlignment="Center" Click="OnRawLogToggle"/>
+                      <Button Content="Ping broker" Classes="ghost" Click="OnPing"/>
+                      <Button Content="Clear" Classes="ghost" Click="OnClearActivity"/>
+                    </StackPanel>
+                  </Grid>
+                  <!-- Both views share the same row, font size, and right margin so toggling Raw log
+                       keeps the text the same size and the card filled identically. -->
+                  <Panel Grid.Row="1">
+                    <ScrollViewer x:Name="ActivityFeedScroll" HorizontalScrollBarVisibility="Disabled">
+                      <ItemsControl x:Name="ActivityListPage" ItemTemplate="{StaticResource ActivityTemplate}"/>
+                    </ScrollViewer>
+                    <ScrollViewer x:Name="RawLogScroll" HorizontalScrollBarVisibility="Disabled"
+                                  IsVisible="False">
+                      <SelectableTextBlock x:Name="LogBox" Classes="mono" FontSize="13" LineHeight="22"
+                                           Margin="0,3,14,3" Foreground="{DynamicResource TextSecondary}"/>
+                    </ScrollViewer>
+                  </Panel>
+                </Grid>
+              </Border>
+
+              <!-- ===== Security / Permissions — Scopes (folded in from the Security page) ===== -->
+              <Border Classes="card" Tag="security" Width="540">
                 <StackPanel Spacing="10">
-                  <TextBlock Text="Scopes" Classes="h2"/>
+                  <StackPanel Classes="sdragbar" Orientation="Horizontal" Spacing="8" Background="Transparent">
+                    <TextBlock Classes="handle" Text="⠿" VerticalAlignment="Center" Foreground="{DynamicResource TextMuted}"/>
+                    <TextBlock Text="Security &amp; Permissions" Classes="h2" VerticalAlignment="Center"/>
+                  </StackPanel>
                   <TextBlock Text="The broker grants only the scopes this client requested and is authorized for. Everything else is refused in-kernel." Classes="sub" TextWrapping="Wrap"/>
                   <TextBlock Text="Granted" Classes="muted" Margin="0,6,0,0"/>
                   <WrapPanel x:Name="GrantedChipsPage"/>
@@ -603,12 +737,16 @@
                 </StackPanel>
               </Border>
 
-              <Border Grid.Column="1" Classes="card">
+              <!-- ===== Security / Permissions — Client Identity ===== -->
+              <Border Classes="card" Tag="identity" Width="540">
                 <StackPanel Spacing="10">
-                  <TextBlock Text="Client Identity" Classes="h2"/>
+                  <StackPanel Classes="sdragbar" Orientation="Horizontal" Spacing="8" Background="Transparent">
+                    <TextBlock Classes="handle" Text="⠿" VerticalAlignment="Center" Foreground="{DynamicResource TextMuted}"/>
+                    <TextBlock Text="Client Identity" Classes="h2" VerticalAlignment="Center"/>
+                  </StackPanel>
                   <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="8">
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Client" Classes="sub"/>
-                    <TextBlock Grid.Row="0" Grid.Column="1" Text="Register Broker Reference Console" Foreground="{DynamicResource TextPrimary}"/>
+                    <TextBlock Grid.Row="0" Grid.Column="1" Text="Register Broker Reference Console" Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap"/>
                     <TextBlock Grid.Row="1" Grid.Column="0" Text="User" Classes="sub"/>
                     <TextBlock Grid.Row="1" Grid.Column="1" x:Name="SecUser" Text="—" Foreground="{DynamicResource TextPrimary}"/>
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Integrity" Classes="sub"/>
@@ -620,73 +758,19 @@
                   </Grid>
                   <Border Background="{DynamicResource GreenSoft}" BorderBrush="{DynamicResource Green}"
                           BorderThickness="1" CornerRadius="10" Padding="12" Margin="0,6,0,0">
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                      <TextBlock Text="🛡" FontSize="22" Foreground="{DynamicResource Green}" VerticalAlignment="Center"/>
-                      <TextBlock Text="Hardware access is brokered, scoped, and audited — no admin or kernel rights are granted to this client." Classes="sub" TextWrapping="Wrap" VerticalAlignment="Center"/>
-                    </StackPanel>
+                    <Grid ColumnDefinitions="Auto,*">
+                      <TextBlock Grid.Column="0" Text="🛡" FontSize="22" Foreground="{DynamicResource Green}"
+                                 VerticalAlignment="Center" Margin="0,0,10,0"/>
+                      <TextBlock Grid.Column="1" Text="Hardware access is brokered, scoped, and audited — no admin or kernel rights are granted to this client."
+                                 Classes="sub" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                    </Grid>
                   </Border>
                 </StackPanel>
               </Border>
-            </Grid>
-          </StackPanel>
-        </ScrollViewer>
 
-        <!-- ============ SETTINGS PAGE ============ -->
-        <ScrollViewer x:Name="PageSettings" IsVisible="False" Padding="16" HorizontalScrollBarVisibility="Disabled">
-          <StackPanel Spacing="14" MaxWidth="640" HorizontalAlignment="Left">
-            <TextBlock Text="Settings" Classes="h1"/>
-
-            <Border Classes="card">
-              <StackPanel Spacing="12">
-                <TextBlock Text="Connection" Classes="h2"/>
-                <StackPanel Orientation="Horizontal" Spacing="10">
-                  <Button x:Name="ConnectButton" Content="Connect" Classes="primary" Click="OnConnectClick"/>
-                  <Button Content="Ping broker" Classes="ghost" Click="OnPing"/>
-                  <TextBlock x:Name="EngineStatus" Text="Connect to drive devices." Classes="sub"
-                             VerticalAlignment="Center"/>
-                </StackPanel>
-              </StackPanel>
-            </Border>
-
-            <Border Classes="card">
-              <StackPanel Spacing="12">
-                <TextBlock Text="Render &amp; polling" Classes="h2"/>
-                <Grid ColumnDefinitions="180,160" RowDefinitions="Auto,Auto,Auto" RowSpacing="10">
-                  <TextBlock Grid.Row="0" Grid.Column="0" Text="RGB frame rate (FPS)" Classes="sub" VerticalAlignment="Center"/>
-                  <NumericUpDown Grid.Row="0" Grid.Column="1" x:Name="FpsBox" Minimum="1" Maximum="60" Increment="1"
-                                 Value="20" FormatString="0" ValueChanged="OnFpsChanged"/>
-                  <TextBlock Grid.Row="1" Grid.Column="0" Text="Sensor refresh (ms)" Classes="sub" VerticalAlignment="Center"/>
-                  <NumericUpDown Grid.Row="1" Grid.Column="1" x:Name="RefreshMsBox" Minimum="100" Maximum="10000"
-                                 Increment="50" Value="750" FormatString="0" ValueChanged="OnRefreshMsChanged"/>
-                  <TextBlock Grid.Row="2" Grid.Column="0" Text="Minimize to" Classes="sub" VerticalAlignment="Center"/>
-                  <ComboBox Grid.Row="2" Grid.Column="1" x:Name="MinimizeTargetCombo" HorizontalAlignment="Stretch"
-                            SelectionChanged="OnMinimizeTargetChanged">
-                    <ComboBoxItem>Taskbar</ComboBoxItem>
-                    <ComboBoxItem>Tray</ComboBoxItem>
-                  </ComboBox>
-                </Grid>
-              </StackPanel>
-            </Border>
-
-            <Border Classes="card">
-              <StackPanel Spacing="8">
-                <TextBlock Text="RGB engine" Classes="h2"/>
-                <StackPanel Orientation="Horizontal" Spacing="10">
-                  <Button Content="Refresh devices" Classes="ghost" Click="OnRgbRefresh"/>
-                  <Button Content="Stop all devices" Classes="ghost" Click="OnStopAll"/>
-                </StackPanel>
-              </StackPanel>
-            </Border>
-
-            <Border Classes="card">
-              <StackPanel Spacing="8">
-                <TextBlock Text="Dashboard layout" Classes="h2"/>
-                <TextBlock Text="Drag a box by its title bar to reorder it. Use the ✕ on a box to remove it, and “Add box” on the Dashboard to bring it back." Classes="sub" TextWrapping="Wrap"/>
-                <Button Content="Reset dashboard layout" Classes="ghost" Click="OnResetLayout" HorizontalAlignment="Left"/>
-              </StackPanel>
-            </Border>
-          </StackPanel>
-        </ScrollViewer>
+            </Canvas>
+          </ScrollViewer>
+        </Grid>
       </Panel>
     </Grid>
 
