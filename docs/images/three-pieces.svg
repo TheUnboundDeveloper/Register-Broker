@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="500" viewBox="0 0 760 500" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0b1220" flood-opacity="0.25"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f8fafc"/><stop offset="100%" stop-color="#eef2f7"/>
+    </linearGradient>
+  </defs>
+  <rect width="760" height="500" fill="url(#bgGrad)"/>
+  <text x="380" y="40" text-anchor="middle" font-size="23" font-weight="700" fill="#0f172a">The Three Pieces</text>
+
+  <!-- client -->
+  <g filter="url(#shadow)">
+    <rect x="150" y="66" width="460" height="64" rx="11" fill="#eff6ff" stroke="#93c5fd" stroke-width="1.5"/>
+    <text x="380" y="94" text-anchor="middle" font-size="15" font-weight="600" fill="#1e3a8a">Your app / any client</text>
+    <text x="380" y="116" text-anchor="middle" font-size="12" fill="#475569">non-admin — speaks the authenticated pipe protocol</text>
+  </g>
+  <line x1="380" y1="130" x2="380" y2="168" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="392" y="153" font-size="11" fill="#475569">named pipe (authenticated, scoped)</text>
+
+  <!-- broker -->
+  <g filter="url(#shadow)">
+    <rect x="150" y="172" width="460" height="64" rx="11" fill="#f0fdfa" stroke="#5eead4" stroke-width="1.5"/>
+    <text x="380" y="200" text-anchor="middle" font-size="15" font-weight="600" fill="#115e59">SensorBroker / BrokerControl</text>
+    <text x="380" y="222" text-anchor="middle" font-size="12" fill="#475569">the broker — runs as a Windows service</text>
+  </g>
+  <line x1="380" y1="236" x2="380" y2="274" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="392" y="259" font-size="11" fill="#475569">narrow IOCTLs (bounded transactions only)</text>
+
+  <!-- driver -->
+  <g filter="url(#shadow)">
+    <rect x="150" y="278" width="460" height="64" rx="11" fill="#fff1f2" stroke="#fb7185" stroke-width="1.5"/>
+    <text x="380" y="306" text-anchor="middle" font-size="15" font-weight="600" fill="#9f1239">BrokerSmbus</text>
+    <text x="380" y="328" text-anchor="middle" font-size="12" fill="#475569">the kernel driver — the only Ring-0 surface</text>
+  </g>
+  <line x1="380" y1="342" x2="380" y2="380" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- hardware -->
+  <g filter="url(#shadow)">
+    <rect x="150" y="384" width="460" height="64" rx="11" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+    <text x="380" y="412" text-anchor="middle" font-size="15" font-weight="600" fill="#334155">Hardware</text>
+    <text x="380" y="434" text-anchor="middle" font-size="12" fill="#475569">CPU SMU · Super-I/O · SMBus (RAM / board RGB)</text>
+  </g>
+
+  <text x="380" y="478" text-anchor="middle" font-size="11" fill="#94a3b8">Not WinRing0: no arbitrary memory / MSR / port I/O — clients name ids, never addresses.</text>
+</svg>

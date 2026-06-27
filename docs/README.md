@@ -39,18 +39,7 @@ back to the community, but commercial use is available under a separate license.
 
 ## The three pieces
 
-```
-  Your app / any client   (non-admin)
-            │  named pipe (authenticated, scoped)
-            ▼
-  SensorBroker / BrokerControl (the broker — runs as a service)
-            │  narrow IOCTLs (bounded transactions only)
-            ▼
-  BrokerSmbus (the kernel driver — the only Ring-0 surface)
-            │
-            ▼
-  CPU SMU · Super-I/O · SMBus (RAM/board RGB)
-```
+![The three pieces: a non-admin client over an authenticated named pipe to the broker service, which calls the narrow BrokerSmbus kernel driver, which reads CPU SMU / Super-I/O / SMBus hardware](images/three-pieces.svg)
 
 1. **`BrokerSmbus`** — a minimal kernel driver exposing *only* bounded, validated sensor
    reads and brick-guarded RGB writes. Not WinRing0: no arbitrary memory/MSR/port I/O.

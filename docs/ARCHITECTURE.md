@@ -32,44 +32,7 @@ Ring-0 surface is a tiny, reviewable IOCTL set instead of "give me any memory."
 
 ## 2. The layers
 
-```
- ┌──────────────────────────────────────────────────────────────────────────┐
- │ LAYER 4 — Consumers (non-admin, medium integrity)                        │
- │   • any tool speaking the client protocol                                │
- │   • BrokerSensorBridge.exe --client   (the reference CLI consumer)       │
- │   • Reference Console GUI (.NET 10/Avalonia — docs/REFERENCE-CONSOLE.md) │
- └───────────────┬──────────────────────────────────────────────────────────┘
-                 │  named pipe, length-prefixed JSON, scoped + authenticated
-                 │  (sensors:read / smbus:read on SensorBroker;
-                 │   rgb:write on BrokerControl)
-   ══════════════╪═══════════════ PRIVILEGE BOUNDARY ═══════════════════════════
-                 ▼
- ┌──────────────────────────────────────────────────────────────────────────┐
- │ LAYER 3 — Broker (BrokerSensorBridge, elevated / LocalSystem service)    │
- │   • the ONLY holder of the driver handle                                 │
- │   • authenticates peers, enforces scopes, rate-limits, audits            │
- │   • named catalogs: SensorCatalog (reads), RgbCatalog (writes)           │
- │   • user-mode decode of raw register values (k10temp, nct6683/nct6775,   │
- │     JEDEC JC42) + data-driven board calibration (labels/scales, no addrs)│
- └───────────────┬──────────────────────────────────────────────────────────┘
-                 │  DeviceIoControl — bounded IOCTLs only (INFO/XFER/SMU/SUPERIO/WRITE)
-                 ▼
- ┌──────────────────────────────────────────────────────────────────────────┐
- │ LAYER 2 — Kernel driver (BrokerSmbus, non-PnP KMDF, SYSTEM+Admins device)│
- │   • validates every IOCTL field; bakes hardware addresses in-kernel      │
- │   • SMBus XFER, SMU read, Super-I/O read, brick-guarded SMBus write      │
- │   • NO physical-memory map, NO MSR, NO arbitrary port I/O                │
- └───────────────┬──────────────────────────────────────────────────────────┘
-                 ▼
- ┌──────────────────────────────────────────────────────────────────────────┐
- │ LAYER 1 — Hardware                                                       │
- │   • AMD SMU (SMN via PCI cfg) — CPU temperature (Tctl + per-CCD) +       │
- │     core/SoC voltage (SVI2, Matisse/Vermeer)                            │
- │   • Nuvoton Super-I/O (LPC/EC) — board temps + fans + voltages           │
- │     (NCT668x EC family; NCT6775 bank-select family)                      │
- │   • SMBus host controller (AMD FCH / Intel i801) — RAM/board RGB + SPD   │
- └──────────────────────────────────────────────────────────────────────────┘
-```
+![Register Broker — the four layers: non-admin consumers, the named-pipe privilege boundary, the elevated broker, the narrow kernel driver, and the hardware it reads](images/architecture-layers.svg)
 
 ---
 
@@ -131,14 +94,7 @@ repo on 2026-06-11 — the framework itself is standalone and consumer-agnostic.
 
 ## 4. The trust boundary
 
-```
-   non-admin / medium integrity         │        elevated / LocalSystem
-   ─────────────────────────────────────┼───────────────────────────────────
-   consumers                            │   broker  ──IOCTL──▶  kernel driver
-        │  connect to a named pipe      │
-        └──────────────────────────────▶│  pipe DACL + peer identity + signer pin
-                                        │  scope check → op → rate-limit → audit
-```
+![The trust boundary: untrusted non-admin consumers on the left, the elevated broker and kernel driver on the right, separated by the authenticated named pipe](images/trust-boundary.svg)
 
 Everything to the **left** is unprivileged and untrusted. The boundary is the named pipe.
 Crossing it requires, in order: (1) passing the pipe **DACL**, (2) passing the broker's
@@ -158,23 +114,7 @@ The trust boundary — and the attack surface each layer defends — is summariz
 
 ## 5. Request flow — `sensor.read cpu.temp`
 
-```
-client                 broker                        driver               hardware
-  │ hello(sensors:read)   │                             │                    │
-  │─────────────────────▶│ auth(peer id/signer)        │                     │
-  │ ok(token)             │ (DACL already passed)       │                    │
-  │◀─────────────────────│                             │                     │
-  │ read(token,cpu.temp)  │                             │                    │
-  │─────────────────────▶│ token? scope? rate-limit?   │                     │
-  │                       │ catalog: cpu.temp→SMU_READ  │                    │
-  │                       │────── IOCTL_SMU_READ ─────▶│ bake SMN addr       │
-  │                       │                             │─ PCI cfg 0x60/64 ─▶│
-  │                       │                             │◀─ raw 0x69BB0000 ──│
-  │                       │◀──────── raw 32-bit ───────│                     │
-  │                       │ k10temp decode → 56.6 °C    │                    │
-  │ data(56.6,°C)         │ audit(op→result)            │                    │
-  │◀─────────────────────│                             │                     │
-```
+![Request flow for sensor.read cpu.temp — client to broker (auth, scope, rate-limit, catalog lookup) to driver (IOCTL_SMU_READ, bake SMN address) to hardware and back, decoded to 56.6 C](images/request-flow.svg)
 
 The client named `cpu.temp` (a legacy alias the broker resolves to the stable raw id
 `smu.cpu.temp` via the calibration alias map). The address (`SMN 0x00059800` via PCI config
