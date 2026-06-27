@@ -17,32 +17,14 @@ kernel-enforced map.
 > catalog while driving RAM, a motherboard ARGB header, and Razer peripherals together
 > through the broker. That's the whole thesis in one window.
 
-```
- non-admin clients (any app speaking the pipe protocol)
-        │  \\.\pipe\SensorBroker        \\.\pipe\BrokerControl
-        │  sensor.list / read / readall  rgb.list / rgb.set
-        ▼                                      ▼
- ┌──────────────────────────┐   ┌──────────────────────────────┐
- │ SensorBroker service     │   │ BrokerControl service        │
- │ (LocalSystem)            │   │ (LocalSystem, write-only)    │
- │  auth: DACL + peer       │   │  same gate + rgb:write scope │
- │  identity + signer pin   │   │                              │
- │  rate limit · sessions   │   │  per-LED atomic block frames │
- │  audit log · catalog +   │   │                              │
- │  calibration data        │   │                              │
- └────────────┬─────────────┘   └──────────────┬───────────────┘
-              │        \\.\BrokerSmbus (SYSTEM+Admins only)
-              ▼                                ▼
- ┌──────────────────────────────────────────────────────────────┐
- │ BrokerSmbus kernel driver (non-PnP KMDF, sequential, narrow) │
- │  bounded reads: SMBus · AMD SMU · Super-I/O (named registers)│
- │  bounded writes: SMBus block ≤32 B, in-kernel address        │
- │  allow-list ("brick guard": RGB windows only, never SPD)     │
- └──────────────────────────────────────────────────────────────┘
-              │ SMBus / SMN / LPC port I/O
-              ▼
-         hardware (CPU SMU · Super-I/O EC · DIMMs · RGB controllers)
-```
+![Register Broker architecture overview — non-admin clients call the broker over authenticated named pipes; the broker reads hardware through driver-backed, user-mode vendor, and USB-HID backends; the signed BrokerSmbus kernel driver mediates SMBus/SMU/Super-I/O access behind an in-kernel brick-guard](docs/images/architecture-overview.svg)
+
+> Non-admin clients name logical ids over two authenticated named pipes
+> (`\\.\pipe\SensorBroker`, `\\.\pipe\BrokerControl`). The broker reads hardware once —
+> kernel-mediated paths (SMBus · AMD SMU · Super-I/O) run behind the signed `BrokerSmbus`
+> driver's in-kernel brick-guard; opt-in user-mode backends (GPU vendor APIs, USB-HID RGB)
+> trade that assurance for breadth. No client can scan, probe, or write outside the baked,
+> kernel-enforced map.
 
 ## Why
 

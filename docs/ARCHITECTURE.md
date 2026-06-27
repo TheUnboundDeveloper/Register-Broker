@@ -5,6 +5,8 @@ a non-admin app to the hardware and back. For the line-level "how does this actu
 see [IMPLEMENTATION.md](IMPLEMENTATION.md); for the trust boundary and what counts as a
 vulnerability, see [`SECURITY.md`](../SECURITY.md).
 
+![Register Broker architecture overview — non-admin clients call the broker over authenticated named pipes; the broker reads hardware through driver-backed, user-mode vendor, and USB-HID backends; the signed BrokerSmbus kernel driver mediates SMBus/SMU/Super-I/O access behind an in-kernel brick-guard](images/architecture-overview.svg)
+
 ---
 
 ## 1. The core idea
