@@ -184,6 +184,12 @@
           </StackPanel>
 
           <StackPanel Grid.Row="1" Spacing="8">
+            <Button x:Name="NavSensorPause" Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Content="⏸  Pause Sensors" Click="OnSensorPauseNav"
+                    ToolTip.Tip="Pause the live sensor readout (RGB effects keep their own feed)"/>
+            <Button x:Name="NavRgbPower" Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Content="◉  RGB: On" Click="OnRgbPowerNav"
+                    ToolTip.Tip="Turn all RGB devices off"/>
             <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Content="⧉  GitHub" Click="OnOpenGitHub"/>
             <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"

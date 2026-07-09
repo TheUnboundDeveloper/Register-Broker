@@ -77,6 +77,20 @@ public sealed class EffectEngine
         return ok;
     }
 
+    /// <summary>Push an all-black frame to one device (the RGB master-off switch). Works for
+    /// devices that never had an effect assigned; when a slot exists the black frame is recorded
+    /// as LastPushed so the loop re-sends the first real frame after re-enable instead of
+    /// deduping it away.</summary>
+    public async Task<bool> BlackoutAsync(string deviceId, int ledCount, CancellationToken ct = default)
+    {
+        Slot? slot;
+        lock (_gate) { _slots.TryGetValue(deviceId, out slot); }
+        var black = new RgbColor[slot?.LedCount ?? ledCount];
+        bool ok = await _control.RgbSetLedsAsync(deviceId, black, ct);
+        if (ok && slot != null) slot.LastPushed = black;
+        return ok;
+    }
+
     public void AssignEffect(string deviceId, int ledCount, IEffect? effect)
     {
         lock (_gate)

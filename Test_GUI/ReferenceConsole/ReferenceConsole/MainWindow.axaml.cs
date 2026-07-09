@@ -74,6 +74,9 @@ public partial class MainWindow : Window
     private bool _suppressEffectCombo;
     private DateTime _lastPreview = DateTime.MinValue;
 
+    private bool _rgbOff;                                  // sidebar RGB master switch (transient — not persisted)
+    private readonly HashSet<string> _rgbResume = new();   // devices live-driving when RGB was switched off
+
     private readonly ConsoleSettings _settings;
     private DispatcherTimer? _deviceSaveTimer;   // debounced flush of per-device effect/param state
     private (PixelPoint Pos, double W, double H)? _normalBounds;   // last Normal-state window placement
@@ -2349,13 +2352,14 @@ public partial class MainWindow : Window
 
     private void StartPolling()
     {
-        if (_sensors is null) { SensorPollToggle.IsChecked = false; Log("Not connected."); return; }
+        if (_sensors is null) { SensorPollToggle.IsChecked = false; UpdateSensorPauseNav(false); Log("Not connected."); return; }
         _pollTimer?.Stop();
         var ms = (int)(PollInterval.Value ?? 1000);
         _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) };
         _pollTimer.Tick += async (_, _) => await ReadSensorsOnce();
         _pollTimer.Start();
         PollText.Text = $"{ms} ms";
+        UpdateSensorPauseNav(true);
         LogEvent("INFO", $"Live poll started ({ms} ms)", null);
     }
 
@@ -2366,7 +2370,24 @@ public partial class MainWindow : Window
         _pollTimer = null;
         SensorPollToggle.IsChecked = false;
         PollText.Text = "— ms";
+        UpdateSensorPauseNav(false);
         Log("Live poll stopped.");
+    }
+
+    // Sidebar pause/resume button — same poll timer the Sensors-page toggle drives, so the
+    // two controls stay in sync through the Start/StopPolling funnels.
+    private void OnSensorPauseNav(object? sender, RoutedEventArgs e)
+    {
+        if (_pollTimer is not null) StopPolling();
+        else { SensorPollToggle.IsChecked = true; StartPolling(); }
+    }
+
+    private void UpdateSensorPauseNav(bool polling)
+    {
+        NavSensorPause.Content = polling ? "⏸  Pause Sensors" : "▶  Resume Sensors";
+        ToolTip.SetTip(NavSensorPause, polling
+            ? "Pause the live sensor readout (RGB effects keep their own feed)"
+            : "Resume the live sensor readout");
     }
 
     private void SetShowOrigins(bool on)
@@ -2550,6 +2571,7 @@ public partial class MainWindow : Window
             r.SetEnabled(true);
         }
         DriveCheck.IsChecked = true;
+        ExitRgbOff();
         if (src is TemperatureEffect) EnsureSensorPoll();
         LogEvent("APPLY", $"{src.Name} applied to {_rgbRows.Count} device(s)", "RGB");
         ScheduleDeviceSave();
@@ -2562,6 +2584,70 @@ public partial class MainWindow : Window
         DriveCheck.IsChecked = false;
         LogEvent("INFO", "Stopped driving all devices", null);
         ScheduleDeviceSave();
+    }
+
+    // Sidebar RGB master switch. Off = remember which devices were live-driving, stop them all
+    // and push an all-black frame to every device; On = resume the remembered devices with the
+    // effects still assigned in the engine, and re-paint the last static frame on devices that
+    // had an effect applied once but weren't live. Deliberately NOT persisted (ScheduleDeviceSave
+    // is not called) so an app restart while "off" comes back with the user's saved drive state.
+    private async void OnRgbPowerNav(object? sender, RoutedEventArgs e)
+    {
+        if (_engine is null) { Log("Not connected."); return; }
+        NavRgbPower.IsEnabled = false;   // no re-entry while frames are in flight
+        try
+        {
+            if (!_rgbOff)
+            {
+                _rgbOff = true;
+                _rgbResume.Clear();
+                foreach (var r in _rgbRows)
+                {
+                    if (_engine.IsEnabled(r.Id)) _rgbResume.Add(r.Id);
+                    _engine.SetEnabled(r.Id, false);
+                    r.SetEnabled(false);
+                }
+                foreach (var r in _rgbRows) await _engine.BlackoutAsync(r.Id, r.LedCount);
+                LogEvent("INFO", "RGB off — all devices dark", null);
+            }
+            else
+            {
+                _rgbOff = false;
+                foreach (var r in _rgbRows)
+                {
+                    if (_rgbResume.Contains(r.Id))
+                    {
+                        _engine.SetEnabled(r.Id, true);
+                        r.SetEnabled(true);
+                    }
+                    else if (_engine.GetEffect(r.Id) is not null)
+                    {
+                        await _engine.RenderOnceAsync(r.Id);
+                    }
+                }
+                LogEvent("APPLY", $"RGB on — resumed {_rgbResume.Count} live device(s)", "RGB");
+                _rgbResume.Clear();
+            }
+            if (SelectedRow is { } row) DriveCheck.IsChecked = _engine.IsEnabled(row.Id);
+            UpdateRgbPowerNav();
+        }
+        finally { NavRgbPower.IsEnabled = true; }
+    }
+
+    private void UpdateRgbPowerNav()
+    {
+        NavRgbPower.Content = _rgbOff ? "○  RGB: Off" : "◉  RGB: On";
+        ToolTip.SetTip(NavRgbPower, _rgbOff ? "Turn RGB back on (resumes the last effects)" : "Turn all RGB devices off");
+    }
+
+    // Manually lighting a device while the master switch says "off" means the user changed their
+    // mind — flip the switch back so the sidebar never claims Off while LEDs are being driven.
+    private void ExitRgbOff()
+    {
+        if (!_rgbOff) return;
+        _rgbOff = false;
+        _rgbResume.Clear();
+        UpdateRgbPowerNav();
     }
 
     private IEffect? CloneEffect(IEffect src)
@@ -2600,6 +2686,7 @@ public partial class MainWindow : Window
         }
         _engine.SetEnabled(row.Id, on);
         row.SetEnabled(on);
+        if (on) ExitRgbOff();
         LogEvent(on ? "APPLY" : "INFO", $"[{row.Id}] live control {(on ? "ON" : "off")}", on ? "RGB" : null);
         ScheduleDeviceSave();
     }
@@ -2609,6 +2696,7 @@ public partial class MainWindow : Window
         if (_engine is null || SelectedRow is not { } row) return;
         if (_engine.GetEffect(row.Id) is null) { Log("Pick an effect first."); return; }
         bool ok = await _engine.RenderOnceAsync(row.Id);
+        if (ok) ExitRgbOff();
         LogEvent(ok ? "APPLY" : "ERROR", $"[{row.Id}] apply once → {(ok ? "OK" : "failed")}", ok ? "RGB" : null);
     }
 
