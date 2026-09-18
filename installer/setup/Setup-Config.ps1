@@ -17,6 +17,14 @@
   learned the hard way.
 
   Run by a deferred, no-impersonate custom action as LocalSystem.
+
+  MUST SURVIVE ConstrainedLanguage MODE. A host with WDAC or AppLocker in force
+  runs PowerShell constrained, where creating or calling .NET types throws. Stick
+  to cmdlets; no [Type]::Method(), no New-Object on anything but core types.
+  Test it with:
+      powershell -NoProfile -Command "$ExecutionContext.SessionState.LanguageMode =
+        'ConstrainedLanguage'; & .\Setup-Config.ps1 -Root '<root>.' -Flags 1000"
+
   Windows PowerShell 5.1 compatible, ASCII only.
 #>
 [CmdletBinding()]
@@ -88,13 +96,21 @@ try {
     $cfg | Add-Member -NotePropertyName AllowAquaSensors -NotePropertyValue ($AquaSensors -eq '1') -Force
     $cfg | Add-Member -NotePropertyName AllowUpsSensors  -NotePropertyValue ($UpsSensors  -eq '1') -Force
 
-    # Write BOM-less UTF-8: PowerShell 5.1's Set-Content -Encoding UTF8 emits a
-    # BOM, which .NET tolerates but which makes the file differ byte-for-byte
-    # between shells. Depth 32 so no nested section is truncated to a string.
-    [System.IO.File]::WriteAllText(
-        $AppSettings,
-        ($cfg | ConvertTo-Json -Depth 32),
-        (New-Object System.Text.UTF8Encoding($false)))
+    # Set-Content, NOT [System.IO.File]::WriteAllText with a constructed
+    # UTF8Encoding. This script runs as an MSI custom action, and a host with
+    # WDAC or AppLocker in force runs PowerShell in ConstrainedLanguage mode,
+    # where creating a .NET type throws "Only core types are supported in this
+    # language mode". That failure used to roll the entire install back, which
+    # looks from the outside exactly like an installer that does nothing: no
+    # files, no services, no Add/Remove Programs entry.
+    #
+    # The cost is that PowerShell 5.1's -Encoding UTF8 writes a BOM, so the file
+    # is no longer byte-identical to a hand-edited one. .NET's configuration
+    # binder reads a BOM without complaining, and surviving a hardened host is
+    # worth more than identical bytes. Depth 32 so no nested section is
+    # truncated to a string.
+    $json = $cfg | ConvertTo-Json -Depth 32
+    Set-Content -Path $AppSettings -Value $json -Encoding UTF8
 
     Write-Log "appsettings.json updated: $AppSettings"
 

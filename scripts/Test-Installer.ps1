@@ -316,6 +316,72 @@ foreach ($id in @('InstallDriver', 'RemoveDriver', 'ConfigureBroker')) {
     }
 }
 
+# Bit 64 (msidbCustomActionTypeContinue) = "ignore the exit code". Which actions
+# may fail the install is a deliberate split:
+#
+#   ConfigureBroker MUST be able to fail harmlessly. It writes the Allow*Sensors
+#   flags and sets the control service's start type - recoverable state. When it
+#   was fatal, a host running PowerShell in ConstrainedLanguage mode rolled the
+#   entire install back, which presents as an installer that does nothing: no
+#   files, no services, no Add/Remove Programs entry. A Microsoft Store
+#   validator reported exactly that.
+#
+#   InstallDriver must STAY fatal. A kernel service that was half-created is not
+#   something to shrug at, and the rollback action exists to undo it.
+$cfgRow = $cas | Where-Object { $_.Action -eq 'ConfigureBroker' }
+if ($cfgRow) {
+    Gate "ConfigureBroker cannot fail the install" ((([int]$cfgRow.Type) -band 64) -ne 0) `
+         "type=$($cfgRow.Type) - configuration is recoverable; a rolled-back install is not"
+}
+$drvRow = $cas | Where-Object { $_.Action -eq 'InstallDriver' }
+if ($drvRow) {
+    Gate "InstallDriver still fails the install" ((([int]$drvRow.Type) -band 64) -eq 0) `
+         "type=$($drvRow.Type) - a failed kernel service registration must roll back"
+}
+
+#--------------------------------------------------------------------------
+# The custom-action scripts must survive ConstrainedLanguage mode.
+#
+# WDAC or AppLocker in force runs PowerShell constrained, where creating or
+# calling a .NET type throws "Only core types are supported in this language
+# mode". Setup-Config.ps1 did exactly that to write BOM-less UTF-8; the script
+# exited non-zero and took the whole install down with it. Both scripts are
+# cmdlet-only now, and this is what keeps them that way.
+#
+# These are the same files Payload.wxs harvests into the package.
+#--------------------------------------------------------------------------
+Write-Host ""
+Write-Host "Custom-action scripts (ConstrainedLanguage safety)"
+$setupScripts = @(Get-ChildItem (Join-Path $RepoRoot 'installer\setup') -Filter *.ps1 -ErrorAction SilentlyContinue)
+Gate "setup scripts found" ($setupScripts.Count -gt 0)
+foreach ($s in $setupScripts) {
+    $bad = New-Object System.Collections.ArrayList
+    $n = 0
+    $inBlock = $false
+    foreach ($line in (Get-Content $s.FullName)) {
+        $n++
+
+        # Skip comments, or the scripts' own prose about what not to do trips
+        # this gate - which it did on the first run. Block comments (<# .. #>)
+        # need real tracking; after that, everything from the first '#' is a
+        # line comment. Neither script has a '#' inside a string literal.
+        if ($inBlock) {
+            if ($line -match '#>') { $inBlock = $false }
+            continue
+        }
+        if ($line -match '<#') {
+            if ($line -notmatch '#>') { $inBlock = $true }
+            continue
+        }
+        $hash = $line.IndexOf('#')
+        $code = if ($hash -ge 0) { $line.Substring(0, $hash) } else { $line }
+
+        if ($code -match '\]::' -or $code -match 'New-Object') { [void]$bad.Add("line $n") }
+    }
+    Gate "$($s.Name) is cmdlet-only" ($bad.Count -eq 0) `
+         ("uses a .NET type at " + ($bad -join ', ') + " - throws in ConstrainedLanguage mode")
+}
+
 #--------------------------------------------------------------------------
 # Sequencing
 #--------------------------------------------------------------------------

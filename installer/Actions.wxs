@@ -91,8 +91,18 @@
          aqua, UPS) to stay inside the 255-character Target column. -->
     <CustomAction Id="SetConfigureBroker" Property="ConfigureBroker" Execute="immediate"
                   Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[SETUPDIR]Setup-Config.ps1&quot; -Root &quot;[INSTALLFOLDER].&quot; -Flags [CFG_RGBCONTROL][CFG_GPUSENSORS][CFG_AQUASENSORS][CFG_UPSSENSORS]" />
+    <!-- Return="ignore", deliberately. This action writes the Allow*Sensors
+         flags and sets the control service's start type: if it fails, the
+         product is INSTALLED but not fully configured, which the user can fix
+         by repairing or by toggling the backends. Rolling the whole install
+         back instead turns a configuration hiccup into a package that appears
+         to do nothing at all - no files, no services, no Add/Remove Programs
+         entry. That is exactly what a Microsoft Store validator reported, and
+         the cause was this action failing on a host that runs PowerShell in
+         ConstrainedLanguage mode. The script logs its own failures to
+         setup\config-setup.log either way. -->
     <CustomAction Id="ConfigureBroker" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
-                  Execute="deferred" Impersonate="no" Return="check" />
+                  Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!--=================================================================
         Silent-install guard. In the UI the warning dialog blocks Next until

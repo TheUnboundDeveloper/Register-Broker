@@ -349,6 +349,21 @@ if ($KeepInstalled) {
         $svcLeft = @(@('SensorBroker', 'BrokerControl', 'BrokerSmbus') |
                      Where-Object { Get-Service -Name $_ -ErrorAction SilentlyContinue })
         Gate "uninstall removes the services" ($svcLeft.Count -eq 0) ($svcLeft -join ', ')
+
+        # MSI removes only what MSI created, and the setup scripts write logs
+        # and registry values of their own. An uninstall that leaves those
+        # behind keeps the whole install directory alive - it has happened
+        # twice now, most recently because a RemoveFile op is scheduled before
+        # the custom action that creates the file.
+        $installDir = Join-Path ${env:ProgramFiles} 'Register Broker'
+        $filesLeft = @()
+        if (Test-Path $installDir) {
+            $filesLeft = @(Get-ChildItem $installDir -Recurse -File -Force -ErrorAction SilentlyContinue)
+        }
+        Gate "uninstall removes the install directory" (-not (Test-Path $installDir)) `
+             ("$installDir survives with " + $filesLeft.Count + " file(s): " +
+              (($filesLeft | Select-Object -First 5 | ForEach-Object { $_.Name }) -join ', '))
+        Gate "uninstall removes HKLM\SOFTWARE\RegisterBroker" (-not (Test-Path 'HKLM:\SOFTWARE\RegisterBroker'))
     }
 }
 

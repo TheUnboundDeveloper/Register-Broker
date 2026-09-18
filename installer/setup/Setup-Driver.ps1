@@ -113,6 +113,18 @@ try {
             }
         } catch { }
         Write-Log "Driver service removed."
+
+        # Delete our own log last. MSI's RemoveFile rows for this file are
+        # scheduled when the execute script is generated, which is BEFORE this
+        # action runs - so a log created here is only cleaned up if it already
+        # existed, and otherwise it survives and keeps setup\ and the whole
+        # install directory alive. The lines above still reach the MSI verbose
+        # log through WixQuietExec's stdout capture, which is the right place
+        # for uninstall-time diagnostics anyway.
+        if ($LogPath -and (Test-Path $LogPath)) {
+            Write-Output "Removing $LogPath (uninstall diagnostics remain in the MSI log)."
+            Remove-Item $LogPath -Force -ErrorAction SilentlyContinue
+        }
         exit 0
     }
 

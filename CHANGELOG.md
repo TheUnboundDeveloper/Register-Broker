@@ -97,6 +97,48 @@ install did not fail — it hung, which is why all three checks came back unansw
 failed. `/qn` is therefore the safe value for Partner Center's required Installer-parameters field:
 harmless if the Store appends it to its own switch, correct if it replaces it.
 
+### Fixed — the install no longer depends on a permissive host, and an uninstall leftover
+
+Found by re-running the Store submission after the publisher fix and getting the *same* three
+inconclusive results, with the malware and code-signing checks still passing. That split — static
+checks fine, every install-dependent check unanswered — says the install is not completing in the
+validator's environment. Two independent causes were reproduced locally, one ours and one not:
+
+- **`Setup-Config.ps1` died under ConstrainedLanguage mode, and took the whole install with it.**
+  It wrote BOM-less UTF-8 via `[System.IO.File]::WriteAllText` with a constructed `UTF8Encoding`;
+  creating a .NET type throws *"Only core types are supported in this language mode"* on any host
+  where WDAC or AppLocker constrains PowerShell. The script exited non-zero and its custom action
+  was `Return="check"`, so MSI rolled back: **no files, no services, no Add/Remove Programs entry**
+  — indistinguishable from an installer that does nothing, and the exact symptom Partner Center
+  reported. Reproduced by running the script with `LanguageMode = 'ConstrainedLanguage'`, which
+  fails on the old script and passes on the new one. The script is now cmdlet-only (`Set-Content`;
+  the BOM it writes is read fine by .NET's configuration binder), and **`ConfigureBroker` is now
+  `Return="ignore"`**: it writes the `Allow*Sensors` flags and the control service's start type,
+  which is recoverable state, and it must never again be able to decide whether the product
+  installs at all. `InstallDriver` deliberately stays fatal. Two gates lock both halves in, plus a
+  third asserting neither setup script constructs or calls a .NET type.
+- **An uninstall could leave the install directory behind.** `RemoveDriver` writes
+  `setup\driver-setup.log` *during* the uninstall, but MSI decides which `RemoveFile` operations to
+  schedule when it generates the execute script — before that action runs. So the cleanup fired
+  only when the log happened to exist already: two consecutive uninstalls of the same package, one
+  clean, one leaving `setup\driver-setup.log` and therefore `setup\` and the install root. (Same
+  class of bug as the 2026-09-17 one, different trigger.) The Remove branch now deletes its own
+  log; its diagnostics still reach the MSI verbose log through `WixQuietExec`'s stdout capture,
+  which is where uninstall-time logging belongs. `Test-StoreValidation.ps1` gained gates for the
+  install directory and the `HKLM\SOFTWARE\RegisterBroker` key — it had asserted the ARP entry and
+  the services were gone, and so passed while leaving a folder behind.
+
+**The cause we cannot fix, measured:** a per-machine MSI run `/qn` from a **non-elevated** context
+returns `1603` with *"Error 1925. You do not have sufficient privileges to complete this
+installation for all users of the machine"*, installing nothing and writing no ARP row. Microsoft's
+requirements say a UAC dialog is allowed, which is only meaningful if their runner can elevate; if
+it cannot, no per-machine installer can clear those three checks, and the documented route is the
+manual verification `Test-StoreValidation.ps1` produces evidence for. Converting to MSIX, which
+Microsoft support suggests for this symptom, cannot host this product: MSIX installs neither kernel
+drivers nor LocalSystem services.
+
+Gate count 75 → 80. Both configurations still build 0-error and the live validation still passes.
+
 ### Added — Windows installer: MSI + bootstrapper EXE (packaging only; no code change)
 
 - **New `installer\` tree and `scripts\Build-Installer.ps1`** produce

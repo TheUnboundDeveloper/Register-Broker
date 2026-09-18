@@ -594,8 +594,8 @@ if ($Store) {
     Write-Host "Store submission build." -ForegroundColor Cyan
     Write-Host "  Verify it the way Microsoft does before submitting (ELEVATED, installs and uninstalls):"
     Write-Host "    .\scripts\Test-StoreValidation.ps1 -ExpectPublisher '$Manufacturer'"
-    Write-Host "  Partner Center: app type MSI needs NO installer parameters (the Store uses /qn);"
-    Write-Host "  app type EXE takes /quiet. Never put a documentation URL in that field."
+    Write-Host "  Partner Center installer parameters: /qn for app type MSI, /quiet for EXE."
+    Write-Host "  The field will not save empty, and a URL there hangs the install - see the doc."
 }
 if (-not $EvThumbprint) {
     Write-Host ""
