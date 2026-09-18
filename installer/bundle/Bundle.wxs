@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ===========================================================================
+  Register Broker - bootstrapper bundle (the .exe)
+  ===========================================================================
+  A single self-extracting executable wrapping the MSI. Because both payloads
+  are published self-contained there is no .NET runtime to chain: the bundle
+  exists to give people one file to double-click, one artifact to sign, and a
+  single ARP entry.
+
+  The MSI is chained with DisplayInternalUI="yes" so the feature tree and the
+  driver-signature warning appear from the .exe exactly as they do when the
+  .msi is run directly. Nothing about the install differs between the two
+  artifacts, which is the point - the .exe is packaging, not a second product.
+
+  Scripted installs:
+      RegisterBroker-x.y.z-x64.exe /quiet
+      RegisterBroker-x.y.z-x64.exe /quiet ACCEPTTESTSIGNEDDRIVER=1
+      RegisterBroker-x.y.z-x64.exe /uninstall /quiet
+  ===========================================================================
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+
+  <Bundle Name="Register Broker"
+          Version="$(var.ProductVersion)"
+          Manufacturer="$(var.Manufacturer)"
+          UpgradeCode="7B5B9CCA-A8F6-4398-9474-5F29654D4C93"
+          IconSourceFile="..\..\Test_GUI\ReferenceConsole\ReferenceConsole\Assets\rc-logo.ico"
+          AboutUrl="https://github.com/TheUnboundDeveloper/Register-Broker"
+          Compressed="yes">
+
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+          Theme="hyperlinkLicense"
+          LicenseUrl="https://www.gnu.org/licenses/agpl-3.0.html"
+          LogoFile="..\..\Test_GUI\ReferenceConsole\ReferenceConsole\Assets\rc-logo.png"
+          SuppressOptionsUI="yes" />
+    </BootstrapperApplication>
+
+    <!-- Overridable so a scripted install can accept the test-signed driver
+         without the dialog. Passed straight through to the MSI. -->
+    <Variable Name="ACCEPTTESTSIGNEDDRIVER" Value="" bal:Overridable="yes" />
+
+    <Chain>
+      <!-- bal:DisplayInternalUICondition replaced MsiPackage/@DisplayInternalUI
+           in WiX 4: the standard bootstrapper evaluates it and, when true, lets
+           the MSI show its own dialogs instead of driving it silently. "1" =
+           always, so the .exe and the .msi present an identical install. -->
+      <MsiPackage Id="RegisterBrokerMsi"
+                  SourceFile="$(var.MsiPath)"
+                  bal:DisplayInternalUICondition="1"
+                  Vital="yes"
+                  Compressed="yes">
+        <MsiProperty Name="ACCEPTTESTSIGNEDDRIVER" Value="[ACCEPTTESTSIGNEDDRIVER]" />
+      </MsiPackage>
+    </Chain>
+
+  </Bundle>
+</Wix>

@@ -8,11 +8,16 @@
 # To cut a release: bump <Version> in BrokerSensorBridge/BrokerSensorBridge.csproj, add a
 # CHANGELOG entry, and push to main. (workflow_dispatch is also available for a manual run.)
 #
-# PACKAGING IS INTENTIONALLY EMPTY. No binary artifacts are attached until the kernel
-# driver is PRODUCTION-signed (EV + attestation). A test-signed .sys - or a bridge that
+# PACKAGING: the installer (MSI + bundle EXE) is BUILT on every release, so a release can
+# never silently ship broken packaging - but it is ATTACHED only when the package contains a
+# PRODUCTION-signed kernel driver (EV + attestation). A test-signed .sys - or a bridge that
 # requires one - must not be distributed; shipping it would be worse than shipping none.
-# When production signing lands, re-enable the commented publish/zip/attach steps below
-# and add `files:` back to the release step.
+#
+# The decision is read back out of the built MSI's DRIVERSIGNSTATE property rather than
+# assumed, so it is the package itself that decides. Hosted runners have no WDK and hence no
+# driver, so today this always resolves to "unsigned" and nothing is attached. Once an
+# attested driver is available to this workflow the same condition flips on its own, with no
+# edit here. See installer/README.md.
 
 name: Release
 
@@ -73,6 +78,39 @@ jobs:
           Get-Content selftest.txt
           if ($code -ne 0) { throw "Selftest FAILED (exit $code) - refusing to release." }
 
+      - name: Build the installer (MSI + bundle) and run the packaging gates
+        if: steps.check.outputs.new == 'true'
+        shell: pwsh
+        run: |
+          .\scripts\Build-Installer.ps1
+          .\scripts\Test-Installer.ps1
+
+      - name: Decide whether the package may be attached
+        id: pkg
+        if: steps.check.outputs.new == 'true'
+        shell: pwsh
+        # Ask the built package what driver it actually contains. Only a driver signed by
+        # Microsoft's attestation service ("production") may be distributed.
+        run: |
+          $msi = Get-ChildItem dist -Filter '*.msi' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $installer = New-Object -ComObject WindowsInstaller.Installer
+          $db = $installer.GetType().InvokeMember('OpenDatabase','InvokeMethod',$null,$installer,@($msi.FullName,0))
+          $view = $db.GetType().InvokeMember('OpenView','InvokeMethod',$null,$db,@('SELECT `Value` FROM `Property` WHERE `Property`=''DRIVERSIGNSTATE'''))
+          [void]$view.GetType().InvokeMember('Execute','InvokeMethod',$null,$view,$null)
+          $rec = $view.GetType().InvokeMember('Fetch','InvokeMethod',$null,$view,$null)
+          $state = if ($rec) { $rec.GetType().InvokeMember('StringData','GetProperty',$null,$rec,1) } else { 'unknown' }
+          Write-Host "Packaged driver signature state: $state"
+          # Multi-line step outputs need the delimiter form; a bare newline in a
+          # "name=value" line is rejected.
+          "files<<RBEOF" >> $env:GITHUB_OUTPUT
+          if ($state -eq 'production') {
+            Write-Host "Production-signed driver - attaching the installer to the release."
+            Get-ChildItem dist -Include *.msi,*.exe -Recurse | ForEach-Object { "dist/$($_.Name)" >> $env:GITHUB_OUTPUT }
+          } else {
+            Write-Host "Driver is '$state', not production-signed - NOT attaching any binaries (packaging gate)."
+          }
+          "RBEOF" >> $env:GITHUB_OUTPUT
+
       - name: Create and push annotated tag
         if: steps.check.outputs.new == 'true'
         shell: pwsh
@@ -82,7 +120,7 @@ jobs:
           git tag -a "${{ steps.ver.outputs.tag }}" -m "Register Broker ${{ steps.ver.outputs.tag }} (auto)"
           git push origin "${{ steps.ver.outputs.tag }}"
 
-      - name: Draft GitHub release (NO binaries - see header)
+      - name: Draft GitHub release (binaries only if production-signed - see header)
         if: steps.check.outputs.new == 'true'
         # Pinned to a full commit SHA (immutable) instead of the mutable @v3 tag, so a retag or
         # compromise of this third-party action can't inject code into the release pipeline
@@ -92,28 +130,14 @@ jobs:
           tag_name: ${{ steps.ver.outputs.tag }}
           draft: true
           generate_release_notes: true
+          # Empty when the packaged driver is not production-signed, which attaches nothing.
+          files: ${{ steps.pkg.outputs.files }}
+          fail_on_unmatched_files: false
           body: |
             See `CHANGELOG.md` for what changed in this release.
 
-            **No binaries are attached.** The kernel driver is test-signed until production
-            signing (EV + attestation) lands; until then it must be built and signed on the
-            target machine per `docs/TESTING.md` / `docs/SIGNING-AND-DEPLOYMENT.md`.
-            Distributable packages will be added to releases once a production-signed driver
-            exists.
-
-      # ---------------------------------------------------------------------------
-      # WHEN PRODUCTION SIGNING LANDS, re-enable packaging (and add `files:` above):
-      #
-      #   - name: Stage docs + scripts a deployer needs
-      #     if: steps.check.outputs.new == 'true'
-      #     shell: pwsh
-      #     run: |
-      #       Copy-Item LICENSE, THIRD-PARTY-NOTICES.md, CHANGELOG.md, SECURITY.md stage\
-      #       Copy-Item -Recurse docs stage\docs
-      #       Copy-Item -Recurse scripts stage\scripts
-      #   - name: Zip
-      #     if: steps.check.outputs.new == 'true'
-      #     shell: pwsh
-      #     run: Compress-Archive -Path stage\* -DestinationPath "RegisterBroker-${{ steps.ver.outputs.tag }}-win-x64.zip"
-      #   then add to the release step:  files: RegisterBroker-${{ steps.ver.outputs.tag }}-win-x64.zip
-      # ---------------------------------------------------------------------------
+            Binaries are attached only when the installer was built with a **production-signed**
+            kernel driver (EV + Microsoft attestation). Until that lands, the driver must be
+            built and signed on the target machine per `docs/TESTING.md` /
+            `docs/SIGNING-AND-DEPLOYMENT.md`; the installer itself is built and gated on every
+            release, it is simply not published. See `installer/README.md`.

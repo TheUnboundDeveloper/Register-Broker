@@ -1,0 +1,31 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+
+  <!--
+    Builds RegisterBroker-<version>-x64.exe around the MSI that
+    ..\RegisterBroker.wixproj produced. Driven by scripts\Build-Installer.ps1,
+    which builds the MSI first and passes its path in MsiPath.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Bundle</OutputType>
+    <Platforms>x64</Platforms>
+    <Platform>x64</Platform>
+    <OutputName>RegisterBroker-$(ProductVersion)-x64</OutputName>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
+    <Manufacturer Condition="'$(Manufacturer)' == ''">nvaitehiarna</Manufacturer>
+    <MsiPath Condition="'$(MsiPath)' == ''">..\bin\x64\Release\RegisterBroker-$(ProductVersion)-x64.msi</MsiPath>
+    <DefineConstants>
+      ProductVersion=$(ProductVersion);
+      Manufacturer=$(Manufacturer);
+      MsiPath=$(MsiPath)
+    </DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Bal.wixext" Version="5.0.2" />
+  </ItemGroup>
+
+</Project>

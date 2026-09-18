@@ -1,0 +1,77 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+
+  <!--
+    Builds RegisterBroker-<version>-x64.msi.
+
+    Build it through scripts\Build-Installer.ps1, which publishes and stages the
+    payload first - a bare "dotnet build" here compiles whatever happens to be
+    in stage\ already (and fails outright if nothing has been staged).
+
+    WiX 5 rather than 6/7 on purpose: v6 introduced the Open Source Maintenance
+    Fee, whose EULA has to be accepted before the toolset will build. v5 is the
+    last MIT-licensed line, which keeps this repo's own AGPL + commercial
+    exception free of a third-party build-time licensing obligation.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <Platforms>x64</Platforms>
+    <Platform>x64</Platform>
+    <OutputName>RegisterBroker-$(ProductVersion)-x64</OutputName>
+    <!-- Cabinet building is the slow part of a ~190 MB payload, so cache the cabs
+         across rebuilds. An explicit obj\ path, not $(IntermediateOutputPath):
+         that property is not set yet this early, so it evaluated to empty and
+         dropped a 40 MB cache directly in the project folder. -->
+    <CabinetCachePath>obj\cabcache</CabinetCachePath>
+
+    <!-- ICE61: fired by MajorUpgrade/@AllowSameVersionUpgrades, which is
+              deliberate so a rebuilt 1.6.0 can replace an installed 1.6.0
+              during development instead of erroring out.
+         ICE90: the Start Menu and Desktop shortcut directories are public
+              properties under a profile path. The warning is about ALLUSERS
+              changing mid-UI, which cannot happen here: the package is
+              Scope="perMachine", so ALLUSERS is fixed at 1. -->
+    <SuppressIces>ICE61;ICE90</SuppressIces>
+  </PropertyGroup>
+
+  <!-- Defaults so the project is buildable/inspectable on its own; the build
+       script overrides all of them on the command line. -->
+  <PropertyGroup>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
+    <Manufacturer Condition="'$(Manufacturer)' == ''">nvaitehiarna</Manufacturer>
+    <!-- production | test | unsigned - what the staged .sys actually is. -->
+    <DriverSignState Condition="'$(DriverSignState)' == ''">unsigned</DriverSignState>
+    <!-- 1 = kernel driver selected by default (only ever for a production-signed
+         build); 1000 = present in the feature tree but off by default. -->
+    <DriverFeatureLevel Condition="'$(DriverFeatureLevel)' == ''">1000</DriverFeatureLevel>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <DefineConstants>
+      ProductVersion=$(ProductVersion);
+      Manufacturer=$(Manufacturer);
+      DriverSignState=$(DriverSignState);
+      DriverFeatureLevel=$(DriverFeatureLevel);
+      ConsoleIcon=..\Test_GUI\ReferenceConsole\ReferenceConsole\Assets\rc-logo.ico;
+      LicenseRtf=License.rtf
+    </DefineConstants>
+  </PropertyGroup>
+
+  <!-- List the sources explicitly: the bundle lives under bundle\ and must not
+       be pulled into the MSI build by the SDK's default .wxs glob. -->
+  <PropertyGroup>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Package.wxs" />
+    <Compile Include="Payload.wxs" />
+    <Compile Include="Actions.wxs" />
+    <Compile Include="DriverWarn.wxs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.2" />
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
+  </ItemGroup>
+
+</Project>

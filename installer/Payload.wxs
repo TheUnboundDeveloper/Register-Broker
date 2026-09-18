@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ===========================================================================
+  Payload: the staged file trees
+  ===========================================================================
+  Build-Installer.ps1 stages everything under installer\stage\ before the build:
+
+      stage\app\      dotnet publish of BrokerSensorBridge (self-contained)
+      stage\console\  dotnet publish of ReferenceConsole   (self-contained)
+      stage\driver\   BrokerSmbus.sys (+ .inf/.cat when present)
+
+  The <Files> harvesting element only resolves paths RELATIVE to this project
+  directory - an absolute path silently harvests nothing - which is why the
+  staging directory lives next to the .wixproj rather than in the scratch tree.
+
+  The two executables are authored by hand rather than harvested: the broker exe
+  because MSI takes a service's image path from its component's key-path file,
+  and the console exe because the shortcuts and the "launch on finish" action
+  need a stable File id to reference. <Files> has no exclusion attribute, so
+  Build-Installer.ps1 stages those two into stage\exe\ instead and the globs
+  below simply never see them. Where a file is installed comes from its
+  component's Directory, not from where it was staged.
+  ===========================================================================
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Fragment>
+    <ComponentGroup Id="CG_BridgeFiles" Directory="BINDIR">
+      <Files Include="stage\app\**" />
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="CG_DriverFiles" Directory="DRIVERDIR">
+      <Files Include="stage\driver\**" />
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="CG_ConsoleFiles" Directory="CONSOLEDIR">
+      <Files Include="stage\console\**" />
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <Component Id="C_ConsoleExe" Directory="CONSOLEDIR" Guid="*">
+      <File Id="F_ConsoleExe" Source="stage\exe\ReferenceConsole.exe" KeyPath="yes" />
+    </Component>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="CG_SetupScripts" Directory="SETUPDIR">
+      <Files Include="setup\*.ps1" />
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>

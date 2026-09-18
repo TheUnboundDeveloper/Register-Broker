@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ===========================================================================
+  Driver signature warning dialog
+  ===========================================================================
+  Spliced between CustomizeDlg and VerifyReadyDlg, and shown ONLY when the
+  kernel driver feature is selected AND the packaged .sys is not
+  production-signed (DRIVERSIGNSTATE is stamped at build time).
+
+  Ordering is load-bearing. WixUI_FeatureTree publishes
+  CustomizeDlg/Next -> VerifyReadyDlg at Ordering 1 with condition "1", and
+  VerifyReadyDlg/Back -> CustomizeDlg at Ordering 1. MSI evaluates a control's
+  events in ascending Ordering and the first NewDialog whose condition is true
+  wins, so these publishes sit at Ordering 0: when the condition holds they
+  take precedence, and when it does not the built-in path is unchanged.
+
+  Next stays disabled until the box is ticked - that tick is the explicit
+  opt-in. A silent install has no dialog, so Actions.wxs refuses there instead
+  (ErrDriverNotAccepted) unless ACCEPTTESTSIGNEDDRIVER=1 was passed.
+  ===========================================================================
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <UI Id="DriverWarnUI">
+
+      <Dialog Id="DriverWarnDlg" Width="370" Height="270" Title="[ProductName] Setup">
+
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44"
+                 TabSkip="no" Text="WixUI_Bmp_Banner" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes"
+                 Text="{\WixUI_Font_Title}Kernel driver is not production-signed" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="330" Height="15" Transparent="yes" NoPrefix="yes"
+                 Text="Read this before installing the BrokerSmbus kernel driver." />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+
+        <Control Id="WarnText" Type="Text" X="20" Y="60" Width="330" Height="130" NoPrefix="yes" Text=
+"The BrokerSmbus driver in this package is [DRIVERSIGNSTATE]-signed, not production-signed by Microsoft attestation.
+
+Windows will refuse to load it unless the machine is running in test-signing mode (bcdedit /set testsigning on, a reboot, and usually Secure Boot disabled). That is a system-wide reduction in this computer's security posture, and it affects every driver on it - not just this one.
+
+If you continue, Setup registers the kernel service but Windows may still refuse to start it. Without the driver the broker services and the Reference Console install and run, they simply report no hardware.
+
+If you do not want this, click Back and clear the &quot;Kernel driver&quot; feature." />
+
+        <Control Id="AcceptCheckBox" Type="CheckBox" X="20" Y="196" Width="330" Height="18"
+                 Property="ACCEPTTESTSIGNEDDRIVER" CheckBoxValue="1"
+                 Text="I understand, and I want to install the test-signed kernel driver anyway" />
+
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+        <!-- Next stays greyed out until the acknowledgement is ticked. -->
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)"
+                 DisableCondition="ACCEPTTESTSIGNEDDRIVER &lt;&gt; &quot;1&quot;"
+                 EnableCondition="ACCEPTTESTSIGNEDDRIVER = &quot;1&quot;" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+
+      <!-- Show the warning instead of going straight to VerifyReadyDlg. -->
+      <Publish Dialog="CustomizeDlg" Control="Next" Event="NewDialog" Value="DriverWarnDlg" Order="0"
+               Condition="(&amp;FeatureDriver=3) AND (DRIVERSIGNSTATE &lt;&gt; &quot;production&quot;)" />
+
+      <Publish Dialog="DriverWarnDlg" Control="Back" Event="NewDialog" Value="CustomizeDlg" Order="0" />
+      <Publish Dialog="DriverWarnDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="0" />
+
+      <!-- Keep Back symmetric: return to the warning the user just acknowledged. -->
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="DriverWarnDlg" Order="0"
+               Condition="(&amp;FeatureDriver=3) AND (DRIVERSIGNSTATE &lt;&gt; &quot;production&quot;) AND (NOT Installed OR WixUI_InstallMode = &quot;Change&quot;)" />
+
+    </UI>
+  </Fragment>
+</Wix>

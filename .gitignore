@@ -50,3 +50,15 @@ SHA256SUMS.local.txt
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# --- Installer build artifacts (scripts/Build-Installer.ps1) ---
+# The staged payload is a republished copy of bin output; License.rtf is
+# generated from LICENSE at build time. Only the authoring is committed.
+/installer/stage/
+/installer/License.rtf
+/installer/bin/
+/installer/obj/
+/installer/bundle/bin/
+/installer/bundle/obj/
+/dist/
+/installer/cabcache/

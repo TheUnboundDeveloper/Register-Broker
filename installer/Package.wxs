@@ -1,0 +1,256 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ===========================================================================
+  Register Broker - Windows Installer package (MSI)
+  ===========================================================================
+  Installs the whole stack, per-machine, elevated:
+
+      bin\      self-contained BrokerSensorBridge (no .NET prerequisite)
+      driver\   BrokerSmbus.sys (+ .inf/.cat when a production package exists)
+      console\  self-contained Reference Console (Avalonia GUI)
+      setup\    the PowerShell helpers the custom actions run
+
+  Services:
+      SensorBroker   LocalSystem, \\.\pipe\SensorBroker   (auto start)
+      BrokerControl  LocalSystem, \\.\pipe\BrokerControl  (enabled by feature)
+      BrokerSmbus    kernel driver service - NOT installed through the MSI
+                     service table (MSI cannot install kernel drivers); a
+                     deferred custom action calls sc.exe via Setup-Driver.ps1.
+
+  DRIVER SIGNATURE GATE: the kernel feature refuses to register the driver
+  service unless the .sys is production-signed, OR the user explicitly accepts
+  a test-signed driver (checkbox in the UI, ACCEPTTESTSIGNEDDRIVER=1 for a
+  silent install). See docs/SIGNING-AND-DEPLOYMENT.md.
+  ===========================================================================
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Package Name="Register Broker"
+           Manufacturer="$(var.Manufacturer)"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="FEA52BA8-AF6C-4FC2-BFE8-A8C70A9E2FEF"
+           Scope="perMachine"
+           Compressed="yes"
+           InstallerVersion="500">
+
+    <SummaryInformation Description="Register Broker - universal low-level hardware access framework"
+                        Manufacturer="$(var.Manufacturer)" />
+
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of [ProductName] is already installed. Uninstall it first." />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- x64 only: the driver, the broker and every hardware path are win-x64. -->
+    <Launch Condition="VersionNT64" Message="[ProductName] requires 64-bit Windows." />
+
+    <!-- Pulls in Actions.wxs. WiX links only fragments something references, and
+         a property named inside a condition string is NOT a reference - without
+         this the driver and configuration custom actions compile happily and
+         are then silently dropped from the package. -->
+    <PropertyRef Id="DRIVERSIGNSTATE" />
+
+    <Icon Id="RegisterBroker.ico" SourceFile="$(var.ConsoleIcon)" />
+    <Property Id="ARPPRODUCTICON" Value="RegisterBroker.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/TheUnboundDeveloper/Register-Broker" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+
+    <!--===================================================================
+        Directory layout
+        ===================================================================-->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Register Broker">
+        <Directory Id="BINDIR"     Name="bin" />
+        <Directory Id="DRIVERDIR"  Name="driver" />
+        <Directory Id="CONSOLEDIR" Name="console" />
+        <Directory Id="SETUPDIR"   Name="setup" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="APPSHORTCUTDIR" Name="Register Broker" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder" />
+
+    <!--===================================================================
+        Features
+        ===================================================================-->
+    <Feature Id="FeatureCore" Title="Broker services" AllowAbsent="no" Level="1"
+             Description="The sensor broker and RGB control services plus the command-line client. Required.">
+      <ComponentGroupRef Id="CG_BridgeFiles" />
+      <ComponentRef Id="C_BridgeExe" />
+      <ComponentGroupRef Id="CG_SetupScripts" />
+      <ComponentRef Id="C_InstallRegistry" />
+    </Feature>
+
+    <!-- Default selection follows the signature: a production-signed build ships
+         DriverFeatureLevel=1 (on by default), anything else 1000 (listed, off by
+         default) so that neither a silent install nor a click-through ever
+         registers an unloadable kernel service by accident. Accepting the
+         warning explicitly pulls it back to level 1. -->
+    <Feature Id="FeatureDriver" Title="Kernel driver (BrokerSmbus)" Level="$(var.DriverFeatureLevel)"
+             Description="The narrow signed kernel driver that gives the broker its hardware access. Without it the services and console still install, they just report no hardware.">
+      <Level Value="1" Condition="ACCEPTTESTSIGNEDDRIVER = &quot;1&quot;" />
+      <ComponentGroupRef Id="CG_DriverFiles" />
+    </Feature>
+
+    <Feature Id="FeatureRgbControl" Title="RGB control service" Level="1"
+             Description="Enable the write-only RGB control service on \\.\pipe\BrokerControl. Leave this out for a read-only, sensors-only install.">
+      <ComponentRef Id="C_FeatureMarkerRgb" />
+    </Feature>
+
+    <Feature Id="FeatureConsole" Title="Reference Console (GUI)" Level="1"
+             Description="The first-party Avalonia dashboard for viewing sensors and driving RGB.">
+      <ComponentGroupRef Id="CG_ConsoleFiles" />
+      <ComponentRef Id="C_ConsoleExe" />
+      <ComponentRef Id="C_ConsoleShortcut" />
+      <Feature Id="FeatureDesktopShortcut" Title="Desktop shortcut" Level="1"
+               Description="Put a Reference Console shortcut on the desktop.">
+        <ComponentRef Id="C_DesktopShortcut" />
+      </Feature>
+    </Feature>
+
+    <Feature Id="FeatureOptionalSensors" Title="Optional sensor sources" Level="1"
+             Description="Extra read-only sensor backends that run in user mode rather than behind the kernel driver's brick-guard (reduced assurance, still strictly read-only). Off by default.">
+      <Feature Id="FeatureGpuSensors" Title="GPU sensors (gpu.*)" Level="1000"
+               Description="Read-only GPU temperature, fan, clock, power and voltage via the vendor API (AMD ADL, NVIDIA NVML, Intel Level Zero).">
+        <ComponentRef Id="C_FeatureMarkerGpu" />
+      </Feature>
+      <Feature Id="FeatureAquaSensors" Title="Aquacomputer sensors (aqua.*)" Level="1000"
+               Description="Read-only Aquacomputer Quadro temperatures, fans and flow over USB-HID (removable device).">
+        <ComponentRef Id="C_FeatureMarkerAqua" />
+      </Feature>
+      <Feature Id="FeatureUpsSensors" Title="UPS sensors (ups.*)" Level="1000"
+               Description="Read-only USB HID Power Device (UPS) battery and load telemetry (removable device).">
+        <ComponentRef Id="C_FeatureMarkerUps" />
+      </Feature>
+    </Feature>
+
+    <!--===================================================================
+        Hand-authored components
+        ===================================================================-->
+
+    <!-- The broker executable carries BOTH Win32 services: MSI derives a
+         ServiceInstall's image path from its component's key-path file, so both
+         service rows have to live in this one component. BrokerControl is
+         created but NOT started here - the configure custom action enables or
+         disables it according to the FeatureRgbControl selection. -->
+    <Component Id="C_BridgeExe" Directory="BINDIR" Guid="6E8DEC8A-DC6D-43B3-86DE-2ECC6E9580A8">
+      <File Id="F_BridgeExe" Source="stage\exe\BrokerSensorBridge.exe" KeyPath="yes" />
+
+      <ServiceInstall Id="SI_SensorBroker"
+                      Name="SensorBroker"
+                      DisplayName="Register Broker Sensor Service"
+                      Description="Brokers PC sensor reads to non-admin clients over \\.\pipe\SensorBroker (no WinRing0)."
+                      Type="ownProcess"
+                      Start="auto"
+                      ErrorControl="normal"
+                      Account="LocalSystem"
+                      Arguments="--service"
+                      Vital="yes">
+        <util:ServiceConfig FirstFailureActionType="restart"
+                            SecondFailureActionType="restart"
+                            ThirdFailureActionType="restart"
+                            RestartServiceDelayInSeconds="5"
+                            ResetPeriodInDays="1" />
+      </ServiceInstall>
+
+      <ServiceInstall Id="SI_BrokerControl"
+                      Name="BrokerControl"
+                      DisplayName="Register Broker RGB Control"
+                      Description="Write-only RGB control for non-admin clients (rgb:write) on \\.\pipe\BrokerControl."
+                      Type="ownProcess"
+                      Start="demand"
+                      ErrorControl="normal"
+                      Account="LocalSystem"
+                      Arguments="--control --service"
+                      Vital="no" />
+
+      <!-- Stop both on uninstall/upgrade so their files unlock; start only the
+           sensor service here (the control service is feature-gated below). -->
+      <ServiceControl Id="SC_SensorBroker" Name="SensorBroker"
+                      Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+      <ServiceControl Id="SC_BrokerControl" Name="BrokerControl"
+                      Stop="both" Remove="uninstall" Wait="yes" />
+    </Component>
+
+    <!-- Install location + state, for upgrades, the console and support.
+
+         The cleanup below exists because MSI only removes what MSI created. The
+         setup scripts write their own logs and a DriverStatus value at install
+         time; without these, an uninstall leaves the log files behind (which in
+         turn keeps setup\ and the install root alive) and an empty
+         HKLM\SOFTWARE\RegisterBroker key. RemoveRegistryKey takes the whole key,
+         including the values the scripts wrote. -->
+    <Component Id="C_InstallRegistry" Directory="INSTALLFOLDER" Guid="7B25BE93-6F6D-414E-821E-E1D14BF5DE95">
+      <RegistryKey Root="HKLM" Key="SOFTWARE\RegisterBroker">
+        <RegistryValue Name="InstallDir"  Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+        <RegistryValue Name="Version"     Type="string" Value="$(var.ProductVersion)" />
+        <RegistryValue Name="ConsolePath" Type="string" Value="[CONSOLEDIR]ReferenceConsole.exe" />
+      </RegistryKey>
+      <RemoveRegistryKey Root="HKLM" Key="SOFTWARE\RegisterBroker" Action="removeOnUninstall" />
+
+      <RemoveFile   Id="RF_DriverLog" Directory="SETUPDIR" Name="driver-setup.log" On="uninstall" />
+      <RemoveFile   Id="RF_ConfigLog" Directory="SETUPDIR" Name="config-setup.log" On="uninstall" />
+      <RemoveFolder Id="RF_SetupDir"  Directory="SETUPDIR" On="uninstall" />
+    </Component>
+
+    <!-- Feature markers: these carry no payload. They exist so the optional,
+         configuration-only choices appear as checkboxes in the feature tree and
+         so the configure custom action can read their selected state. -->
+    <Component Id="C_FeatureMarkerRgb" Directory="INSTALLFOLDER" Guid="*">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\RegisterBroker\Features" Name="RgbControl" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+    <Component Id="C_FeatureMarkerGpu" Directory="INSTALLFOLDER" Guid="*">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\RegisterBroker\Features" Name="GpuSensors" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+    <Component Id="C_FeatureMarkerAqua" Directory="INSTALLFOLDER" Guid="*">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\RegisterBroker\Features" Name="AquaSensors" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+    <Component Id="C_FeatureMarkerUps" Directory="INSTALLFOLDER" Guid="*">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\RegisterBroker\Features" Name="UpsSensors" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <!-- Shortcut components key off HKCU and target the path rather than the
+         file id: a shortcut lands in a profile folder, so ICE38/43/57 require an
+         HKCU key path even in a per-machine package, and a [#file] target would
+         tie the desktop shortcut to a file in a different feature (ICE69). -->
+    <Component Id="C_ConsoleShortcut" Directory="APPSHORTCUTDIR" Guid="*">
+      <Shortcut Id="SC_Console" Name="Reference Console"
+                Description="Register Broker Reference Console"
+                Target="[CONSOLEDIR]ReferenceConsole.exe"
+                WorkingDirectory="CONSOLEDIR" />
+      <RemoveFolder Id="RF_AppShortcutDir" Directory="APPSHORTCUTDIR" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="SOFTWARE\RegisterBroker\Shortcuts" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Component Id="C_DesktopShortcut" Directory="DesktopFolder" Guid="*">
+      <Shortcut Id="SC_ConsoleDesktop" Name="Register Broker Console"
+                Description="Register Broker Reference Console"
+                Target="[CONSOLEDIR]ReferenceConsole.exe"
+                WorkingDirectory="CONSOLEDIR" />
+      <RegistryValue Root="HKCU" Key="SOFTWARE\RegisterBroker\Shortcuts" Name="Desktop" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <!--===================================================================
+        UI. WixUI_FeatureTree gives the feature checkboxes for free; the driver
+        signature warning is spliced in after it (DriverWarn.wxs).
+        ===================================================================-->
+    <ui:WixUI Id="WixUI_FeatureTree" InstallDirectory="INSTALLFOLDER" />
+    <UIRef Id="DriverWarnUI" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch the Reference Console" />
+    <Property Id="WixShellExecTarget" Value="[#F_ConsoleExe]" />
+    <CustomAction Id="LaunchConsole" BinaryRef="Wix4UtilCA_X64" DllEntry="WixShellExec"
+                  Impersonate="yes" Return="ignore" />
+    <UI>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchConsole"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed AND &amp;FeatureConsole = 3" />
+    </UI>
+
+  </Package>
+</Wix>

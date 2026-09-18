@@ -1,0 +1,339 @@
+<#
+  Test-Installer.ps1
+
+  Static gates over a built installer, in the spirit of the broker's own
+  --selftest: open the MSI's tables and assert that the package actually says
+  what the authoring meant. Everything here is read-only - nothing is installed.
+
+  These gates exist because the failure modes they cover are all SILENT:
+
+    * A WiX fragment that nothing references is dropped at link time. The build
+      succeeds and the custom actions are simply absent from the package.
+    * CustomAction.Target is a 255-character column. MSI truncates a longer
+      command line instead of erroring, producing a half-written command.
+    * ConfigureBroker has exactly one correct window (after InstallServices,
+      before StartServices). Outside it the package still installs; the RGB
+      service just never gets enabled, or the sensor service reads
+      appsettings.json before the selected backends were written to it.
+    * The driver warning dialog only appears if its publish sorts ahead of the
+      built-in CustomizeDlg -> VerifyReadyDlg publish.
+
+  Usage:
+      .\scripts\Test-Installer.ps1
+      .\scripts\Test-Installer.ps1 -Msi <path> -ExpectSignState production
+
+  Windows PowerShell 5.1 compatible, ASCII only.
+#>
+[CmdletBinding()]
+param(
+    [string]$Msi = '',
+    [string]$Exe = '',
+    [ValidateSet('', 'production', 'test', 'unsigned')]
+    [string]$ExpectSignState = ''
+)
+
+$ErrorActionPreference = 'Stop'
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+
+if (-not $Msi) {
+    $Msi = Get-ChildItem (Join-Path $RepoRoot 'dist') -Filter 'RegisterBroker-*-x64.msi' -ErrorAction SilentlyContinue |
+           Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
+}
+if (-not $Msi -or -not (Test-Path $Msi)) { throw "No MSI found. Build one first: .\scripts\Build-Installer.ps1" }
+$Msi = (Resolve-Path $Msi).Path
+
+if (-not $Exe) {
+    $Exe = Get-ChildItem (Join-Path $RepoRoot 'dist') -Filter 'RegisterBroker-*-x64.exe' -ErrorAction SilentlyContinue |
+           Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
+}
+
+#--------------------------------------------------------------------------
+# MSI table access. Uses the Windows Installer COM API rather than any WiX
+# tooling, so this runs on a machine with no SDK installed.
+#
+# Rows come back as objects with named columns on purpose: MSI tables are
+# read positionally, and PowerShell unrolls nested arrays at pipeline and
+# assignment boundaries, so a single-row result silently turns into its own
+# columns and every index then reads characters out of a string.
+#--------------------------------------------------------------------------
+$installer = New-Object -ComObject WindowsInstaller.Installer
+$db = $installer.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $installer, @($Msi, 0))
+
+function Get-MsiRows([string]$Table, [string[]]$Columns) {
+    $select = ($Columns | ForEach-Object { '`' + $_ + '`' }) -join ','
+    $sql = "SELECT $select FROM ``$Table``"
+
+    # A table that does not exist throws from OpenView. Report it as "no rows" so
+    # the gate that cares fails with its own message instead of an MSI SQL error.
+    try {
+        $view = $db.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $db, @($sql))
+    } catch {
+        return , @()
+    }
+    # [void]: InvokeMember writes its return value to the output stream.
+    [void]$view.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $view, $null)
+
+    $rows = New-Object System.Collections.ArrayList
+    while ($true) {
+        $rec = $view.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $view, $null)
+        if (-not $rec) { break }
+        $obj = New-Object psobject
+        for ($c = 0; $c -lt $Columns.Count; $c++) {
+            $value = $rec.GetType().InvokeMember('StringData', 'GetProperty', $null, $rec, ($c + 1))
+            Add-Member -InputObject $obj -NotePropertyName $Columns[$c] -NotePropertyValue $value
+        }
+        [void]$rows.Add($obj)
+    }
+    return $rows.ToArray()
+}
+
+$script:Pass = 0
+$script:Fail = 0
+function Gate([string]$Name, [bool]$Ok, [string]$Detail = '') {
+    if ($Ok) {
+        $script:Pass++
+        Write-Host ("  [ok]   {0}" -f $Name)
+    } else {
+        $script:Fail++
+        Write-Host ("  [FAIL] {0}{1}" -f $Name, $(if ($Detail) { " - $Detail" } else { '' })) -ForegroundColor Red
+    }
+}
+
+Write-Host ""
+Write-Host "Register Broker installer selftest" -ForegroundColor Cyan
+Write-Host "  MSI: $Msi"
+if ($Exe) { Write-Host "  EXE: $Exe" }
+Write-Host ""
+
+#--------------------------------------------------------------------------
+# Payload
+#--------------------------------------------------------------------------
+Write-Host "Payload"
+$files = Get-MsiRows 'File' @('File', 'FileName', 'Component_')
+# FileName is "short|long" when a short name was generated.
+$names = $files | ForEach-Object { ($_.FileName -split '\|')[-1] }
+
+Gate "file table is populated ($($files.Count) files)" ($files.Count -gt 400) "only $($files.Count) files - did staging run?"
+Gate "broker executable present"         ($names -contains 'BrokerSensorBridge.exe')
+Gate "console executable present"        ($names -contains 'ReferenceConsole.exe')
+Gate "appsettings.json present"          ($names -contains 'appsettings.json')
+Gate "calibration.default.json present"  ($names -contains 'calibration.default.json')
+Gate "Setup-Driver.ps1 present"          ($names -contains 'Setup-Driver.ps1')
+Gate "Setup-Config.ps1 present"          ($names -contains 'Setup-Config.ps1')
+# Self-contained: the payload carries its own runtime, so there is no .NET
+# prerequisite for the installer to chain or warn about.
+Gate "self-contained runtime bundled" (($names -contains 'hostfxr.dll') -and ($names -contains 'coreclr.dll')) `
+     "missing runtime - was --self-contained dropped?"
+Gate "no debug symbols shipped" (-not ($names | Where-Object { $_ -like '*.pdb' }))
+
+#--------------------------------------------------------------------------
+# Features
+#--------------------------------------------------------------------------
+Write-Host ""
+Write-Host "Features"
+$features = @{}
+foreach ($f in (Get-MsiRows 'Feature' @('Feature', 'Level'))) { $features[$f.Feature] = [int]$f.Level }
+
+foreach ($id in @('FeatureCore', 'FeatureDriver', 'FeatureRgbControl', 'FeatureConsole',
+                  'FeatureGpuSensors', 'FeatureAquaSensors', 'FeatureUpsSensors')) {
+    Gate "feature $id exists" ($features.ContainsKey($id))
+}
+Gate "core feature is on by default" ($features['FeatureCore'] -eq 1)
+# The reduced-assurance user-mode backends stay opt-in, matching the broker's
+# own defaults (AllowGpuSensors / AllowAquaSensors / AllowUpsSensors are false).
+Gate "gpu/aqua/ups sensors are opt-in" (
+    $features['FeatureGpuSensors']  -ge 1000 -and
+    $features['FeatureAquaSensors'] -ge 1000 -and
+    $features['FeatureUpsSensors']  -ge 1000)
+
+#--------------------------------------------------------------------------
+# Driver signature gate
+#--------------------------------------------------------------------------
+Write-Host ""
+Write-Host "Driver signature gate"
+$props = @{}
+foreach ($p in (Get-MsiRows 'Property' @('Property', 'Value'))) { $props[$p.Property] = $p.Value }
+$signState = $props['DRIVERSIGNSTATE']
+
+Gate "DRIVERSIGNSTATE is stamped" (@('production', 'test', 'unsigned') -contains $signState) "got '$signState'"
+if ($ExpectSignState) {
+    Gate "DRIVERSIGNSTATE is '$ExpectSignState'" ($signState -eq $ExpectSignState) "got '$signState'"
+}
+
+if ($signState -eq 'production') {
+    Gate "production driver is selected by default" ($features['FeatureDriver'] -eq 1)
+} else {
+    Gate "non-production driver is OFF by default" ($features['FeatureDriver'] -ge 1000) `
+         "a $signState-signed driver must not install without an explicit opt-in"
+}
+
+# ACCEPTTESTSIGNEDDRIVER must have no default value, or the acceptance checkbox
+# renders pre-ticked (MSI shows a checkbox as checked for any non-empty value).
+Gate "ACCEPTTESTSIGNEDDRIVER has no default" (-not $props.ContainsKey('ACCEPTTESTSIGNEDDRIVER'))
+
+$accept = Get-MsiRows 'Condition' @('Feature_', 'Level', 'Condition') |
+          Where-Object { $_.Feature_ -eq 'FeatureDriver' -and $_.Condition -match 'ACCEPTTESTSIGNEDDRIVER' }
+Gate "accepting the warning re-enables the driver feature" ($accept -and ([int]$accept.Level) -eq 1)
+
+#--------------------------------------------------------------------------
+# Services
+#--------------------------------------------------------------------------
+Write-Host ""
+Write-Host "Services"
+$svcInstall = Get-MsiRows 'ServiceInstall' @('ServiceInstall', 'Name', 'StartType', 'Arguments', 'Component_')
+$sensor  = $svcInstall | Where-Object { $_.Name -eq 'SensorBroker' }
+$control = $svcInstall | Where-Object { $_.Name -eq 'BrokerControl' }
+
+Gate "SensorBroker installed"  ([bool]$sensor)
+Gate "BrokerControl installed" ([bool]$control)
+if ($sensor) {
+    Gate "SensorBroker starts automatically"  ($sensor.StartType -eq '2') "StartType=$($sensor.StartType)"
+    Gate "SensorBroker runs with --service"   ($sensor.Arguments -eq '--service') "args=$($sensor.Arguments)"
+}
+if ($control) {
+    Gate "BrokerControl runs with --control --service" ($control.Arguments -eq '--control --service') "args=$($control.Arguments)"
+    # Feature-gated: created demand-start, then enabled by Setup-Config.ps1 only
+    # when the RGB feature was selected.
+    Gate "BrokerControl is demand-start (feature-gated)" ($control.StartType -eq '3') "StartType=$($control.StartType)"
+}
+if ($sensor -and $control) {
+    Gate "both services share the broker component" ($sensor.Component_ -eq $control.Component_) `
+         "MSI takes a service's image path from its component's key path"
+}
+
+$svcControl = Get-MsiRows 'ServiceControl' @('ServiceControl', 'Name')
+Gate "SensorBroker has a ServiceControl row"  ([bool]($svcControl | Where-Object { $_.Name -eq 'SensorBroker' }))
+Gate "BrokerControl has a ServiceControl row" ([bool]($svcControl | Where-Object { $_.Name -eq 'BrokerControl' }))
+
+#--------------------------------------------------------------------------
+# Uninstall cleanliness. MSI removes only what MSI created, and the setup
+# scripts write logs and a DriverStatus value of their own - which otherwise
+# survive an uninstall and keep the install directory and registry key alive.
+#--------------------------------------------------------------------------
+Write-Host ""
+Write-Host "Uninstall cleanup"
+$removeFiles = Get-MsiRows 'RemoveFile' @('FileKey', 'FileName', 'DirProperty')
+foreach ($log in @('driver-setup.log', 'config-setup.log')) {
+    Gate "uninstall removes $log" ([bool]($removeFiles | Where-Object { $_.FileName -like "*$log" })) `
+         "a script-written file MSI does not track would keep the install folder behind"
+}
+# "Delete this key on uninstall" is a Registry row whose Name is "-", not a
+# RemoveRegistry row (that table is for removals at INSTALL time).
+$regRows = Get-MsiRows 'Registry' @('Registry', 'Root', 'Key', 'Name')
+Gate "uninstall removes the HKLM key" ([bool]($regRows | Where-Object { $_.Key -match 'RegisterBroker' -and $_.Name -eq '-' })) `
+     "the scripts write DriverStatus there, so the key outlives the values MSI created"
+
+#--------------------------------------------------------------------------
+# Custom actions
+#--------------------------------------------------------------------------
+Write-Host ""
+Write-Host "Custom actions"
+$cas = Get-MsiRows 'CustomAction' @('Action', 'Type', 'Source', 'Target')
+$caIds = $cas | ForEach-Object { $_.Action }
+
+foreach ($id in @('SetInstallDriver', 'InstallDriver', 'SetRemoveDriver', 'RemoveDriver',
+                  'SetRollbackDriver', 'RollbackDriver', 'SetConfigureBroker', 'ConfigureBroker',
+                  'ErrDriverNotAccepted')) {
+    Gate "custom action $id linked" ($caIds -contains $id) `
+         "unreferenced fragments are dropped at link time without a warning"
+}
+
+# The 255-character trap: MSI truncates, it does not complain.
+$tooLong = $cas | Where-Object { $_.Target -and $_.Target.Length -gt 255 }
+Gate "no custom action command line exceeds 255 chars" (-not $tooLong) `
+     (($tooLong | ForEach-Object { "$($_.Action)=$($_.Target.Length)" }) -join ', ')
+
+# A backslash immediately before a closing quote escapes that quote under the
+# standard command-line parser, and the argument then swallows the rest of the
+# line. MSI directory properties always end in a backslash, so "[INSTALLFOLDER]"
+# is exactly this bug - hence the trailing "." in Actions.wxs.
+$badQuote = $cas | Where-Object { $_.Target -and $_.Target -match '\\"' }
+Gate "no quoted argument ends in a backslash" (-not $badQuote) `
+     (($badQuote | ForEach-Object { $_.Action }) -join ', ')
+
+# Deferred system-context actions: bit 1024 (deferred) + 2048 (no impersonate).
+foreach ($id in @('InstallDriver', 'RemoveDriver', 'ConfigureBroker')) {
+    $row = $cas | Where-Object { $_.Action -eq $id }
+    if ($row) {
+        $type = [int]$row.Type
+        Gate "$id is deferred, no-impersonate" ((($type -band 1024) -ne 0) -and (($type -band 2048) -ne 0)) "type=$type"
+    }
+}
+
+#--------------------------------------------------------------------------
+# Sequencing
+#--------------------------------------------------------------------------
+Write-Host ""
+Write-Host "Sequencing"
+$seqRows = Get-MsiRows 'InstallExecuteSequence' @('Action', 'Sequence', 'Condition')
+$seq = @{}
+foreach ($s in $seqRows) { if ($s.Sequence) { $seq[$s.Action] = [int]$s.Sequence } }
+
+function Test-Between([string]$Action, [string]$After, [string]$Before) {
+    return ($seq.ContainsKey($Action) -and $seq.ContainsKey($After) -and $seq.ContainsKey($Before) -and
+            $seq[$Action] -gt $seq[$After] -and $seq[$Action] -lt $seq[$Before])
+}
+
+Gate "driver is registered after its files land" (Test-Between 'InstallDriver' 'InstallFiles' 'InstallServices') `
+     "InstallDriver=$($seq['InstallDriver']) InstallFiles=$($seq['InstallFiles'])"
+Gate "driver is removed before its files go" (Test-Between 'RemoveDriver' 'InstallInitialize' 'RemoveFiles') `
+     "RemoveDriver=$($seq['RemoveDriver']) RemoveFiles=$($seq['RemoveFiles'])"
+Gate "rollback is scheduled ahead of the install it undoes" ($seq['RollbackDriver'] -lt $seq['InstallDriver'])
+# The one correct window - see the header note.
+Gate "ConfigureBroker runs between InstallServices and StartServices" (Test-Between 'ConfigureBroker' 'InstallServices' 'StartServices') `
+     "ConfigureBroker=$($seq['ConfigureBroker']) InstallServices=$($seq['InstallServices']) StartServices=$($seq['StartServices'])"
+Gate "silent-install guard runs early" ($seq.ContainsKey('ErrDriverNotAccepted') -and $seq['ErrDriverNotAccepted'] -lt $seq['InstallFiles'])
+
+$guard = $seqRows | Where-Object { $_.Action -eq 'ErrDriverNotAccepted' }
+Gate "silent-install guard only fires without full UI" ([bool]$guard -and $guard.Condition -match 'UILevel') `
+     "the guard must not fire in the UI path, where the dialog handles acceptance"
+
+#--------------------------------------------------------------------------
+# UI splice
+#--------------------------------------------------------------------------
+Write-Host ""
+Write-Host "Driver warning dialog"
+$dialogs = Get-MsiRows 'Dialog' @('Dialog') | ForEach-Object { $_.Dialog }
+Gate "DriverWarnDlg exists" ($dialogs -contains 'DriverWarnDlg')
+
+$events  = Get-MsiRows 'ControlEvent' @('Dialog_', 'Control_', 'Event', 'Argument', 'Condition', 'Ordering')
+$mine    = $events | Where-Object { $_.Dialog_ -eq 'CustomizeDlg' -and $_.Control_ -eq 'Next' -and $_.Argument -eq 'DriverWarnDlg' }
+$builtin = $events | Where-Object { $_.Dialog_ -eq 'CustomizeDlg' -and $_.Control_ -eq 'Next' -and $_.Argument -eq 'VerifyReadyDlg' }
+
+Gate "warning is published from CustomizeDlg" ([bool]$mine)
+# MSI evaluates a control's events in ascending Ordering and takes the first
+# NewDialog whose condition is true; ours must sort first or it never shows.
+if ($mine -and $builtin) {
+    Gate "warning sorts ahead of the built-in Next" ([int]$mine.Ordering -lt [int]$builtin.Ordering) `
+         "ours=$($mine.Ordering) built-in=$($builtin.Ordering)"
+}
+if ($mine) {
+    Gate "warning is conditional on driver + signature" (
+        $mine.Condition -match 'FeatureDriver' -and $mine.Condition -match 'DRIVERSIGNSTATE') "condition=$($mine.Condition)"
+}
+
+$checkbox = Get-MsiRows 'Control' @('Dialog_', 'Control', 'Property') |
+            Where-Object { $_.Dialog_ -eq 'DriverWarnDlg' -and $_.Property -eq 'ACCEPTTESTSIGNEDDRIVER' }
+Gate "acceptance checkbox is bound to ACCEPTTESTSIGNEDDRIVER" ([bool]$checkbox)
+
+#--------------------------------------------------------------------------
+# Bundle
+#--------------------------------------------------------------------------
+if ($Exe) {
+    Write-Host ""
+    Write-Host "Bundle"
+    $info = (Get-Item $Exe).VersionInfo
+    Gate "bundle carries a version"      ([bool]$info.FileVersion)
+    Gate "bundle is larger than the MSI" ((Get-Item $Exe).Length -ge (Get-Item $Msi).Length) `
+         "the MSI should be embedded in the bundle"
+}
+
+#--------------------------------------------------------------------------
+Write-Host ""
+if ($script:Fail -eq 0) {
+    Write-Host "INSTALLER SELFTEST PASS ($($script:Pass) checks)" -ForegroundColor Green
+    exit 0
+} else {
+    Write-Host "INSTALLER SELFTEST FAIL ($($script:Fail) failed, $($script:Pass) passed)" -ForegroundColor Red
+    exit 1
+}

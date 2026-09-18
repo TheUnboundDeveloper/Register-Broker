@@ -7,6 +7,15 @@
 #                     cases all run on a bare runner.
 #   * ps51-parse    — every .ps1 must parse under Windows PowerShell 5.1 (project rule:
 #                     scripts support 5.1; GitHub's `powershell` shell IS 5.1).
+#   * installer     — build the MSI + bundle and run the packaging gates. Worth the few
+#                     minutes because the failure modes it covers are all SILENT: an
+#                     unreferenced WiX fragment is dropped at link time, an over-long
+#                     custom-action command line is truncated rather than rejected, and a
+#                     mis-sequenced action still installs — it just does nothing useful.
+#                     Runners have no WDK and therefore no driver binary, so the package
+#                     builds with an empty driver feature and DRIVERSIGNSTATE=unsigned;
+#                     the gates assert exactly that, which also proves the signature gate
+#                     refuses to pre-select a driver it cannot vouch for.
 #
 # Deliberately NOT here (yet):
 #   * Kernel driver compile — needs the WDK (~GBs, not on hosted runners). Driver changes
@@ -65,6 +74,36 @@ jobs:
           name: selftest-log
           path: selftest.txt
           if-no-files-found: ignore
+
+  installer:
+    name: Installer build + packaging gates
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      # No -EvThumbprint: CI has no signing material, and the artifacts produced
+      # here are never distributed. WixToolset.Sdk restores through dotnet build,
+      # so there is no toolset to install.
+      - name: Build the MSI + bundle
+        shell: pwsh
+        run: .\scripts\Build-Installer.ps1
+
+      # The runner has no driver, so the package must come out "unsigned" with the
+      # kernel feature off by default. Asserting the expected state (rather than
+      # whatever it happens to be) is what makes this a gate.
+      - name: Packaging gates
+        shell: pwsh
+        run: .\scripts\Test-Installer.ps1 -ExpectSignState unsigned
+
+      # Deliberately NOT uploading the package as an artifact. It carries no driver
+      # and so cannot touch hardware, but the project's packaging gate is that no
+      # installable build leaves this repo until the kernel driver is production-signed
+      # (EV + attestation). Building it here proves packaging works; publishing it is a
+      # separate decision. See installer/README.md and .github/workflows/release.yml.
 
   ps51-parse:
     name: PowerShell 5.1 parse check

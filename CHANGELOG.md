@@ -11,6 +11,63 @@ and additive ops do not bump the protocol version.
 
 ## [Unreleased]
 
+### Added — Windows installer: MSI + bootstrapper EXE (packaging only; no code change)
+
+- **New `installer\` tree and `scripts\Build-Installer.ps1`** produce
+  `dist\RegisterBroker-<version>-x64.msi` (per-machine, feature tree, `msiexec`/GPO/Intune
+  friendly) and `dist\RegisterBroker-<version>-x64.exe` (a WiX Burn bundle wrapping that exact
+  MSI). The bundle chains the MSI with `bal:DisplayInternalUICondition="1"`, so both artifacts
+  present the same install — the `.exe` is packaging, not a second product.
+- **Self-contained payloads**: the broker and the Reference Console are published with
+  `--self-contained`, so the installer has **no .NET prerequisite** and works on a clean Windows
+  box. ~186 MB staged compresses to a ~40 MB package; `.pdb` files (100 MB, mostly
+  `libSkiaSharp.pdb`) are dropped during staging.
+- Installs to `C:\Program Files\Register Broker\{bin,driver,console,setup}`; registers
+  `SensorBroker` (auto-start, restart-on-crash) and `BrokerControl` (enabled only when the RGB
+  feature is selected, otherwise stopped and disabled). Features cover the kernel driver, the RGB
+  control service, the Reference Console + shortcuts, and the three opt-in read-only backends
+  (`gpu.*`, `aqua.*`, `ups.*`), which stay **off by default**, matching the broker's own
+  `Allow*Sensors` defaults. Selections are applied to the deployed `appsettings.json` by
+  `Setup-Config.ps1` — server-side, which is the only side that counts.
+- **The packaging gate is now enforced by the build, not by a README note.** The build inspects
+  the `.sys` and stamps `DRIVERSIGNSTATE` into the package: `production` (signed by *Microsoft
+  Windows Hardware Compatibility Publisher*) selects the kernel feature by default; `test` or
+  `unsigned` lists it but leaves it **off**, and selecting it raises a warning dialog whose Next
+  button stays disabled until the acknowledgement is ticked. A silent install has no dialog, so
+  it refuses unless `ACCEPTTESTSIGNEDDRIVER=1` is passed. Signer identity decides this, not
+  signature *status* — the dev test certificate reports `Valid` on the dev box only because its
+  root was imported there. When attestation lands, packaging the attested binary flips the state
+  and the warning path disappears with no authoring change.
+- The kernel service is created by a deferred custom action (`Setup-Driver.ps1`), since MSI's
+  `ServiceInstall` table supports only Win32 services. A driver that registers but will not start
+  (expected for a test-signed `.sys` outside test-signing mode) is recorded in
+  `HKLM\SOFTWARE\RegisterBroker\DriverStatus` and in `setup\driver-setup.log` rather than failing
+  the install — the broker and console are still worth having. Only a failure to *create* the
+  service rolls back.
+- **New `scripts\Test-Installer.ps1`**: 61 read-only gates over the built MSI's tables (payload,
+  feature levels, signature gate, both services, custom-action linkage, the 255-character
+  `CustomAction.Target` limit, quoted arguments that end in a backslash, execute-sequence
+  windows, uninstall cleanup, and the warning dialog's publish ordering). Covers failure modes
+  that are otherwise silent — an unreferenced WiX fragment is dropped at link time, and a
+  too-long command line is truncated rather than rejected.
+- **CI**: `ci.yml` gained an `installer` job that builds the MSI + bundle and runs the packaging
+  gates on every push/PR (runners have no WDK, so the package comes out `unsigned` with the
+  kernel feature off — the gates assert exactly that). `release.yml` now builds the installer on
+  every release and attaches it **only** if the built package reports a production-signed driver,
+  reading `DRIVERSIGNSTATE` back out of the MSI rather than assuming; the condition flips on its
+  own once an attested driver is available, with no workflow edit.
+- **Validated end to end on the dev box**: both artifacts EV-signed (DigiCert KeyLocker, Burn
+  engine detached/signed/reattached) and chain-verified, then installed, uninstalled and
+  reinstalled silently. Install leaves the services running and the non-admin client authorized;
+  uninstall leaves no files, services or registry keys. With test-signing mode off the driver
+  registers but does not start (Windows error 577) and is reported as such — the install still
+  succeeds, exactly as intended.
+- Toolchain: WiX 5 via `WixToolset.Sdk` (`dotnet build` restores it; no global tool needed to
+  build). WiX 6+ was declined deliberately — it introduced the Open Source Maintenance Fee, whose
+  EULA must be accepted before the toolset runs, and v5 is the last MIT-licensed line.
+- No broker, driver, protocol or version change. `installer\stage\`, `installer\License.rtf`
+  (generated from `LICENSE` each build), the WiX `bin\`/`obj\` trees and `dist\` are gitignored.
+
 ### Added — UPS / battery monitoring via USB HID Power Device (broker-only, opt-in, removable)
 
 - **New `ups.*` sensors** from any standard USB **HID Power Device** (UPS): `ups.charge` (battery %),

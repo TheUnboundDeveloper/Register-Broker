@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ===========================================================================
+  Custom actions
+  ===========================================================================
+  Two things the MSI tables cannot express on their own:
+
+    1. The kernel driver service. MSI's ServiceInstall table supports only
+       Win32 services (msidbServiceInstallOwnProcess / ShareProcess) - kernel
+       and file-system drivers are explicitly unsupported. BrokerSmbus is a
+       non-PnP legacy kernel service, so it is created with sc.exe through
+       Setup-Driver.ps1.
+
+    2. The opt-in backend flags, which live inside the broker's appsettings.json
+       rather than in files or registry keys. Setup-Config.ps1 writes them from
+       the feature selections and enables/disables the RGB control service.
+
+  Both run deferred + no-impersonate (LocalSystem) with a matching rollback,
+  via WixQuietExec64 from the Util extension: the property named the same as
+  the deferred action becomes its CustomActionData, which QuietExec runs as a
+  command line.
+
+  DRIVERSIGNSTATE is baked in at BUILD time by Build-Installer.ps1 (the package
+  knows what it shipped) - it is not sniffed on the target machine.
+  ===========================================================================
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+
+    <!-- production | test | unsigned, stamped by the build script. -->
+    <Property Id="DRIVERSIGNSTATE" Value="$(var.DriverSignState)" Secure="yes" />
+    <!-- Set to 1 by the warning dialog, or on a silent install command line.
+         Deliberately has NO default value: an MSI CheckBox renders as ticked
+         whenever its property is set to anything non-empty, so a "0" default
+         would show the acceptance box pre-checked. -->
+    <Property Id="ACCEPTTESTSIGNEDDRIVER" Secure="yes" />
+
+    <!-- Feature-derived configuration, defaulted off and raised by SetProperty. -->
+    <Property Id="CFG_RGBCONTROL" Value="0" />
+    <Property Id="CFG_GPUSENSORS" Value="0" />
+    <Property Id="CFG_AQUASENSORS" Value="0" />
+    <Property Id="CFG_UPSSENSORS" Value="0" />
+
+    <!-- The driver may be installed: either it is production-signed, or the
+         user explicitly accepted a test-signed one. -->
+    <PropertyRef Id="DRIVEROK" />
+
+    <!--=================================================================
+        Driver: create + start the kernel service
+
+        Command lines are kept deliberately terse: CustomAction.Target is a
+        255-character column, and MSI truncates rather than complains. The
+        scripts take an install root and derive their own paths instead of
+        having every path spelled out here.
+
+        Note the "." after [INSTALLFOLDER] in every quoted root below. An MSI
+        directory property always ends in a backslash, so "[INSTALLFOLDER]"
+        expands to "C:\Program Files\Register Broker\" - and a backslash
+        directly before a closing quote ESCAPES that quote under the standard
+        command-line parser. The argument then swallows the rest of the line
+        (observed: -Root became 'C:\Program Files\Register Broker" -SignState
+        test'). The trailing "." keeps the path valid and the quote intact.
+        =================================================================-->
+    <CustomAction Id="SetInstallDriver" Property="InstallDriver" Execute="immediate"
+                  Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[SETUPDIR]Setup-Driver.ps1&quot; -Action Install -Root &quot;[INSTALLFOLDER].&quot; -SignState [DRIVERSIGNSTATE]" />
+    <CustomAction Id="InstallDriver" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="deferred" Impersonate="no" Return="check" />
+
+    <!-- Rollback: if the transaction fails after the service was created, drop
+         it again so a failed install does not leave a kernel service behind.
+         This one deliberately calls sc.exe rather than Setup-Driver.ps1: by the
+         time a rollback runs the installed files may already be gone, and
+         sc.exe is always there. -->
+    <CustomAction Id="SetRollbackDriver" Property="RollbackDriver" Execute="immediate"
+                  Value="&quot;[System64Folder]cmd.exe&quot; /c &quot;sc.exe stop BrokerSmbus &amp; sc.exe delete BrokerSmbus&quot;" />
+    <CustomAction Id="RollbackDriver" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="rollback" Impersonate="no" Return="ignore" />
+
+    <!--=================================================================
+        Driver: stop + delete the kernel service (uninstall / feature removal)
+        =================================================================-->
+    <CustomAction Id="SetRemoveDriver" Property="RemoveDriver" Execute="immediate"
+                  Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[SETUPDIR]Setup-Driver.ps1&quot; -Action Remove -Root &quot;[INSTALLFOLDER].&quot;" />
+    <CustomAction Id="RemoveDriver" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <!--=================================================================
+        Broker configuration (appsettings.json + control service state)
+        =================================================================-->
+    <!-- The four selections travel as one positional flag string (RGB, GPU,
+         aqua, UPS) to stay inside the 255-character Target column. -->
+    <CustomAction Id="SetConfigureBroker" Property="ConfigureBroker" Execute="immediate"
+                  Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[SETUPDIR]Setup-Config.ps1&quot; -Root &quot;[INSTALLFOLDER].&quot; -Flags [CFG_RGBCONTROL][CFG_GPUSENSORS][CFG_AQUASENSORS][CFG_UPSSENSORS]" />
+    <CustomAction Id="ConfigureBroker" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="deferred" Impersonate="no" Return="check" />
+
+    <!--=================================================================
+        Silent-install guard. In the UI the warning dialog blocks Next until
+        the box is ticked; a silent install has no dialog, so refuse outright
+        rather than quietly registering an unloadable kernel service.
+        =================================================================-->
+    <CustomAction Id="ErrDriverNotAccepted" Error="The packaged kernel driver is not production-signed. Re-run with ACCEPTTESTSIGNEDDRIVER=1 (test-signing mode must be on), or omit FeatureDriver from ADDLOCAL." />
+
+    <InstallExecuteSequence>
+      <Custom Action="ErrDriverNotAccepted" After="CostFinalize"
+              Condition="(&amp;FeatureDriver=3) AND (DRIVERSIGNSTATE&lt;&gt;&quot;production&quot;) AND (ACCEPTTESTSIGNEDDRIVER&lt;&gt;&quot;1&quot;) AND (UILevel&lt;5)" />
+
+      <Custom Action="SetRemoveDriver"   Before="RemoveDriver" Condition="(&amp;FeatureDriver=2 AND !FeatureDriver=3) OR (REMOVE=&quot;ALL&quot;)" />
+      <Custom Action="RemoveDriver"      Before="RemoveFiles"  Condition="(&amp;FeatureDriver=2 AND !FeatureDriver=3) OR (REMOVE=&quot;ALL&quot;)" />
+
+      <Custom Action="SetRollbackDriver" After="InstallFiles"    Condition="(&amp;FeatureDriver=3) AND DRIVEROK" />
+      <Custom Action="RollbackDriver"    After="SetRollbackDriver" Condition="(&amp;FeatureDriver=3) AND DRIVEROK" />
+      <Custom Action="SetInstallDriver"  After="RollbackDriver"  Condition="(&amp;FeatureDriver=3) AND DRIVEROK" />
+      <Custom Action="InstallDriver"     After="SetInstallDriver" Condition="(&amp;FeatureDriver=3) AND DRIVEROK" />
+
+      <!-- Sequenced into the gap between InstallServices and StartServices, and
+           that window is the only correct place for it:
+             * after InstallServices, or BrokerControl does not exist yet and
+               enabling/disabling it would silently no-op;
+             * before StartServices, or the sensor service has already read
+               appsettings.json and would miss the backends just selected.
+           The driver is registered earlier still (after InstallFiles), so it is
+           present before either service comes up. -->
+      <Custom Action="SetConfigureBroker" After="InstallServices" Condition="NOT REMOVE=&quot;ALL&quot;" />
+      <Custom Action="ConfigureBroker"    After="SetConfigureBroker" Condition="NOT REMOVE=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+
+  </Fragment>
+
+  <!-- Feature-state -> property mapping. Kept in its own fragment so the
+       SetProperty actions sequence cleanly in both the UI and execute passes. -->
+  <Fragment>
+    <Property Id="DRIVEROK" Secure="yes" />
+    <SetProperty Id="DRIVEROK" Value="1" After="CostFinalize" Sequence="both"
+                 Condition="(DRIVERSIGNSTATE=&quot;production&quot;) OR (ACCEPTTESTSIGNEDDRIVER=&quot;1&quot;)" />
+    <SetProperty Id="CFG_RGBCONTROL"  Value="1" After="CostFinalize" Sequence="execute" Condition="&amp;FeatureRgbControl=3" />
+    <SetProperty Id="CFG_GPUSENSORS"  Value="1" After="CostFinalize" Sequence="execute" Condition="&amp;FeatureGpuSensors=3" />
+    <SetProperty Id="CFG_AQUASENSORS" Value="1" After="CostFinalize" Sequence="execute" Condition="&amp;FeatureAquaSensors=3" />
+    <SetProperty Id="CFG_UPSSENSORS"  Value="1" After="CostFinalize" Sequence="execute" Condition="&amp;FeatureUpsSensors=3" />
+  </Fragment>
+</Wix>
