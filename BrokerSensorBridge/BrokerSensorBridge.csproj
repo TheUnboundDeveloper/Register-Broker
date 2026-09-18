@@ -16,6 +16,11 @@
          independently — see docs/CLIENT-PROTOCOL.md §8. -->
     <Version>1.6.0</Version>
     <Product>Register Broker</Product>
+    <!-- CompanyName in the PE version resource: the publishing entity, and the
+         same string the installer advertises as the Add/Remove Programs
+         publisher (installer\RegisterBroker.wixproj). Without it the field
+         defaults to the assembly name. -->
+    <Company>UNBOUNDED ENGINEERING LLC</Company>
     <Authors>nvaitehiarna</Authors>
     <Copyright>Copyright (c) 2026 nvaitehiarna. AGPL-3.0 with Commercial Exception.</Copyright>
   </PropertyGroup>

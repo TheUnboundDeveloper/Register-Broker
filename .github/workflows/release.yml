@@ -15,7 +15,7 @@
 #
 # The decision is read back out of the built MSI's DRIVERSIGNSTATE property rather than
 # assumed, so it is the package itself that decides. Hosted runners have no WDK and hence no
-# driver, so today this always resolves to "unsigned" and nothing is attached. Once an
+# driver, so today this always resolves to "none" and nothing is attached. Once an
 # attested driver is available to this workflow the same condition flips on its own, with no
 # edit here. See installer/README.md.
 

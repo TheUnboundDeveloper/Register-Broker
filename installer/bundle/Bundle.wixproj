@@ -15,7 +15,13 @@
 
   <PropertyGroup>
     <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
-    <Manufacturer Condition="'$(Manufacturer)' == ''">nvaitehiarna</Manufacturer>
+    <!-- The ARP "Publisher" string. It has to match the publisher identity that can
+         be verified elsewhere - the EV code-signing certificate's subject and the
+         Microsoft Store publisher display name. A handle or a nickname here reads as
+         an "unrelated publisher" and fails Store package validation; see
+         docs\STORE-SUBMISSION.md. Build-Installer.ps1 cross-checks this value against
+         the certificate it signs with. -->
+    <Manufacturer Condition="'$(Manufacturer)' == ''">UNBOUNDED ENGINEERING LLC</Manufacturer>
     <MsiPath Condition="'$(MsiPath)' == ''">..\bin\x64\Release\RegisterBroker-$(ProductVersion)-x64.msi</MsiPath>
     <DefineConstants>
       ProductVersion=$(ProductVersion);

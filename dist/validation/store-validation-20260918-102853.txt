@@ -1,0 +1,38 @@
+Register Broker - Microsoft Store package validation
+Date      : 2026-09-18 10:28:52
+Machine   : DESKTOP-OIED9E5 / Microsoft Windows 11 Pro
+Package   : C:\Users\natha\AppData\Roaming\VSC\Register Broker\dist\RegisterBroker-1.6.0-x64.msi
+SHA256    : 0C558C5CDA0ACA0039A58A7548844D66CE7BFC9B2B021A48B24DEAA2623EDF75
+Signature : Valid / CN=UNBOUNDED ENGINEERING LLC, O=UNBOUNDED ENGINEERING LLC, L=Riverview, S=Florida, C=US, SERIALNUMBER=L26000349775, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.2=Florida, OID.1.3.6.1.4.1.311.60.2.1.3=US
+
+Check 1: silent install
+  command : C:\WINDOWS\System32\msiexec.exe /i "C:\Users\natha\AppData\Roaming\VSC\Register Broker\dist\RegisterBroker-1.6.0-x64.msi" /qn /l*v "C:\Users\natha\AppData\Roaming\VSC\Register Broker\dist\store-validation-install-20260918-102853.log"
+  exit    : 0 after 6.5 s
+[ok]   install returns a success code
+[ok]   install needs no reboot
+[ok]   install ran without an installation UI
+  log     : C:\Users\natha\AppData\Roaming\VSC\Register Broker\dist\store-validation-install-20260918-102853.log
+
+Checks 2 and 3: Add/Remove Programs
+  VISIBLE Name='Register Broker' Publisher='UNBOUNDED ENGINEERING LLC' Version='1.6.0' key={D6C77C7D-7C98-46E1-95C2-7B980FFA41A1}
+[ok]   the install added an Add/Remove Programs entry
+[ok]   exactly one visible entry (bundleware check)
+[ok]   entry Name is 'Register Broker'
+[ok]   entry Publisher is 'UNBOUNDED ENGINEERING LLC'
+[ok]   entry Version is '1.6.0'
+[ok]   entry can be uninstalled
+
+Installed state
+  SensorBroker   Running / Automatic
+  BrokerControl  Running / Automatic
+  BrokerSmbus    not present
+  DriverStatus    ()
+
+Uninstall
+  command : C:\WINDOWS\System32\msiexec.exe /x {D6C77C7D-7C98-46E1-95C2-7B980FFA41A1} /qn /l*v "C:\Users\natha\AppData\Roaming\VSC\Register Broker\dist\store-validation-uninstall-20260918-102853.log"
+[ok]   uninstall returns a success code
+  exit    : 0
+[ok]   uninstall removes the Add/Remove Programs entry
+[ok]   uninstall removes the services
+
+RESULT: PASS (12 passed, 0 failed)

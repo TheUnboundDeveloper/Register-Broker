@@ -4,6 +4,14 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <!-- Ships inside the installer, so it carries the same publisher metadata
+         as everything else in the package. -->
+    <Version>1.6.0</Version>
+    <Product>Register Broker</Product>
+    <AssemblyTitle>Register Broker client library</AssemblyTitle>
+    <Company>UNBOUNDED ENGINEERING LLC</Company>
+    <Copyright>Copyright (c) 2026 nvaitehiarna. AGPL-3.0 with Commercial Exception.</Copyright>
   </PropertyGroup>
 
 </Project>

@@ -38,11 +38,19 @@
        script overrides all of them on the command line. -->
   <PropertyGroup>
     <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
-    <Manufacturer Condition="'$(Manufacturer)' == ''">nvaitehiarna</Manufacturer>
-    <!-- production | test | unsigned - what the staged .sys actually is. -->
+    <!-- The ARP "Publisher" string. It has to match the publisher identity that can
+         be verified elsewhere - the EV code-signing certificate's subject and the
+         Microsoft Store publisher display name. A handle or a nickname here reads as
+         an "unrelated publisher" and fails Store package validation; see
+         docs\STORE-SUBMISSION.md. Build-Installer.ps1 cross-checks this value against
+         the certificate it signs with. -->
+    <Manufacturer Condition="'$(Manufacturer)' == ''">UNBOUNDED ENGINEERING LLC</Manufacturer>
+    <!-- production | test | unsigned | none - what the staged .sys actually is,
+         where "none" means the package carries no driver payload at all. -->
     <DriverSignState Condition="'$(DriverSignState)' == ''">unsigned</DriverSignState>
     <!-- 1 = kernel driver selected by default (only ever for a production-signed
-         build); 1000 = present in the feature tree but off by default. -->
+         build); 1000 = present in the feature tree but off by default; 0 = disabled
+         and hidden, which is what a package with no driver payload must use. -->
     <DriverFeatureLevel Condition="'$(DriverFeatureLevel)' == ''">1000</DriverFeatureLevel>
   </PropertyGroup>
 

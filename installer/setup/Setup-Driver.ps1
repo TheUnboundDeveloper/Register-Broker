@@ -21,6 +21,12 @@
   HKLM\SOFTWARE\RegisterBroker\DriverStatus so the installer log, the docs and
   the Reference Console all have one place to look.
 
+  A package with NO driver payload (-Store builds omit the .sys, because a
+  test-signed binary cannot chain to a Microsoft-trusted root) is the same
+  story one step earlier: nothing to register, so record DriverStatus=Absent
+  and succeed. Test-Installer.ps1 is what catches a driver that went missing by
+  accident - a package that claims a sign state must carry the binary.
+
   Windows PowerShell 5.1 compatible, ASCII only.
 #>
 [CmdletBinding()]
@@ -115,9 +121,10 @@ try {
     Write-Log "SignState : $SignState (stamped at package build time)"
 
     if (-not (Test-Path $SysPath)) {
-        Write-Log "FATAL: driver binary not found at '$SysPath'."
-        Set-DriverStatus 'Failed' "Driver binary missing at $SysPath"
-        exit 2
+        Write-Log "No driver binary at '$SysPath' - this package ships without the kernel driver."
+        Write-Log "The broker services and the console still install; the sensor catalog will report no hardware."
+        Set-DriverStatus 'Absent' 'This package contains no kernel driver payload.'
+        exit 0
     }
     $SysPath = (Resolve-Path $SysPath).Path
 

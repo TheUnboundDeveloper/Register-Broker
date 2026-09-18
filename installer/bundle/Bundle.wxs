@@ -8,6 +8,18 @@
   exists to give people one file to double-click, one artifact to sign, and a
   single ARP entry.
 
+  ARP: Burn registers ONE Add/Remove Programs entry, built from Name /
+  Manufacturer / Version / *Url below, and the bundle compiler injects
+  ARPSYSTEMCOMPONENT=1 into the chained MSI so this package does not add a
+  second, duplicate row. Store package validation reads "more than one entry"
+  as bundleware, so that single-entry property is load-bearing - re-verify it
+  with scripts\Test-StoreValidation.ps1 after any packaging change.
+
+  Silent install: /quiet (also /q, /s, /silent) puts the engine in
+  BOOTSTRAPPER_DISPLAY_NONE, and wixstdba only applies
+  DisplayInternalUICondition when the bundle itself is showing full or passive
+  UI - so the condition below cannot leak an MSI dialog into a silent install.
+
   The MSI is chained with DisplayInternalUI="yes" so the feature tree and the
   driver-signature warning appear from the .exe exactly as they do when the
   .msi is run directly. Nothing about the install differs between the two
@@ -28,6 +40,8 @@
           UpgradeCode="7B5B9CCA-A8F6-4398-9474-5F29654D4C93"
           IconSourceFile="..\..\Test_GUI\ReferenceConsole\ReferenceConsole\Assets\rc-logo.ico"
           AboutUrl="https://github.com/TheUnboundDeveloper/Register-Broker"
+          HelpUrl="https://github.com/TheUnboundDeveloper/Register-Broker/issues"
+          UpdateUrl="https://github.com/TheUnboundDeveloper/Register-Broker/releases"
           Compressed="yes">
 
     <BootstrapperApplication>

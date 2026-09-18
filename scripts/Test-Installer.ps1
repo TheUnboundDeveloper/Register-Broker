@@ -17,10 +17,19 @@
       appsettings.json before the selected backends were written to it.
     * The driver warning dialog only appears if its publish sorts ahead of the
       built-in CustomizeDlg -> VerifyReadyDlg publish.
+    * An Add/Remove Programs row whose Publisher is a handle rather than the
+      publisher name looks fine locally and fails Microsoft Store package
+      validation as an "unrelated publisher" (docs\STORE-SUBMISSION.md).
+
+  What these gates cannot cover is the behaviour of a real install - whether it
+  is silent, what it leaves in Add/Remove Programs, whether it leaves exactly
+  one entry. Test-StoreValidation.ps1 does that part, elevated, on a real
+  install/uninstall cycle.
 
   Usage:
       .\scripts\Test-Installer.ps1
       .\scripts\Test-Installer.ps1 -Msi <path> -ExpectSignState production
+      .\scripts\Test-Installer.ps1 -ExpectPublisher 'UNBOUNDED ENGINEERING LLC\'
 
   Windows PowerShell 5.1 compatible, ASCII only.
 #>
@@ -28,8 +37,12 @@
 param(
     [string]$Msi = '',
     [string]$Exe = '',
-    [ValidateSet('', 'production', 'test', 'unsigned')]
-    [string]$ExpectSignState = ''
+    [ValidateSet('', 'production', 'test', 'unsigned', 'none')]
+    [string]$ExpectSignState = '',
+
+    # Assert the exact Publisher string the package advertises. For a Store
+    # submission this must equal the publisher display name on the account.
+    [string]$ExpectPublisher = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -147,24 +160,67 @@ Gate "gpu/aqua/ups sensors are opt-in" (
     $features['FeatureUpsSensors']  -ge 1000)
 
 #--------------------------------------------------------------------------
+# Add/Remove Programs identity
+#
+# Windows builds the ARP row from ProductName / Manufacturer / ProductVersion.
+# Store package validation reads it back and rejects a blank or unrelated Name
+# or Publisher, so these three are a shipping requirement, and the placeholder
+# check exists because the default really was a GitHub handle once.
+#--------------------------------------------------------------------------
+Write-Host ""
+Write-Host "Add/Remove Programs identity"
+$props = @{}
+foreach ($p in (Get-MsiRows 'Property' @('Property', 'Value'))) { $props[$p.Property] = $p.Value }
+
+$productName = $props['ProductName']
+$publisher   = $props['Manufacturer']
+$placeholders = @('nvaitehiarna', 'Manufacturer', 'Publisher', 'Company', 'TODO')
+
+Gate "ProductName is set"      ([bool]$productName) "ARP would show a blank Name"
+Gate "Publisher is set"        ([bool]$publisher)   "ARP would show a blank Publisher"
+Gate "ProductVersion is set"   ([bool]$props['ProductVersion'])
+Gate "Publisher is not a placeholder or handle" (
+    $publisher -and ($placeholders -notcontains $publisher) -and $publisher.Length -gt 3) `
+    "Manufacturer='$publisher' - Store validation reads this as an unrelated publisher"
+if ($ExpectPublisher) {
+    Gate "Publisher is '$ExpectPublisher'" ($publisher -eq $ExpectPublisher) "got '$publisher'"
+}
+# Support links: an entry a person (or a validator) can trace to a publisher.
+foreach ($arp in @('ARPURLINFOABOUT', 'ARPHELPLINK', 'ARPURLUPDATEINFO', 'ARPCONTACT')) {
+    Gate "$arp is set" ([bool]$props[$arp])
+}
+Gate "ARPCONTACT matches the publisher" ($props['ARPCONTACT'] -eq $publisher) `
+     "contact='$($props['ARPCONTACT'])' publisher='$publisher'"
+
+#--------------------------------------------------------------------------
 # Driver signature gate
 #--------------------------------------------------------------------------
 Write-Host ""
 Write-Host "Driver signature gate"
-$props = @{}
-foreach ($p in (Get-MsiRows 'Property' @('Property', 'Value'))) { $props[$p.Property] = $p.Value }
 $signState = $props['DRIVERSIGNSTATE']
 
-Gate "DRIVERSIGNSTATE is stamped" (@('production', 'test', 'unsigned') -contains $signState) "got '$signState'"
+Gate "DRIVERSIGNSTATE is stamped" (@('production', 'test', 'unsigned', 'none') -contains $signState) "got '$signState'"
 if ($ExpectSignState) {
     Gate "DRIVERSIGNSTATE is '$ExpectSignState'" ($signState -eq $ExpectSignState) "got '$signState'"
 }
 
-if ($signState -eq 'production') {
-    Gate "production driver is selected by default" ($features['FeatureDriver'] -eq 1)
+# The state and the payload have to agree. "none" is the Store build, which
+# leaves the driver out because a test-signed .sys cannot chain to a
+# Microsoft-trusted root; anything else claims a binary and must carry it.
+$hasSys = $names -contains 'BrokerSmbus.sys'
+if ($signState -eq 'none') {
+    Gate "no driver payload is packaged" (-not $hasSys) "DRIVERSIGNSTATE=none but BrokerSmbus.sys is in the package"
+    Gate "driver feature is disabled and hidden" ($features['FeatureDriver'] -eq 0) `
+         "Level=$($features['FeatureDriver']) - a feature with no payload must not be offered"
 } else {
-    Gate "non-production driver is OFF by default" ($features['FeatureDriver'] -ge 1000) `
-         "a $signState-signed driver must not install without an explicit opt-in"
+    Gate "the claimed driver is actually packaged" $hasSys `
+         "DRIVERSIGNSTATE=$signState but no BrokerSmbus.sys in the File table"
+    if ($signState -eq 'production') {
+        Gate "production driver is selected by default" ($features['FeatureDriver'] -eq 1)
+    } else {
+        Gate "non-production driver is OFF by default" ($features['FeatureDriver'] -ge 1000) `
+             "a $signState-signed driver must not install without an explicit opt-in"
+    }
 }
 
 # ACCEPTTESTSIGNEDDRIVER must have no default value, or the acceptance checkbox
@@ -326,6 +382,13 @@ if ($Exe) {
     Gate "bundle carries a version"      ([bool]$info.FileVersion)
     Gate "bundle is larger than the MSI" ((Get-Item $Exe).Length -ge (Get-Item $Msi).Length) `
          "the MSI should be embedded in the bundle"
+    # Burn stamps Bundle/@Manufacturer into CompanyName and into its own ARP
+    # row, so a bundle built with a different Manufacturer than the MSI would
+    # advertise two different publishers for one product.
+    Gate "bundle publisher matches the MSI" ($info.CompanyName -eq $publisher) `
+         "bundle='$($info.CompanyName)' msi='$publisher'"
+    Gate "bundle product name matches the MSI" ($info.ProductName -eq $productName) `
+         "bundle='$($info.ProductName)' msi='$productName'"
 }
 
 #--------------------------------------------------------------------------

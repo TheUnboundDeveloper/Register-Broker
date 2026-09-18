@@ -30,6 +30,12 @@
     </ComponentGroup>
   </Fragment>
 
+  <!-- A package built with no driver payload (a Store build, or any build on a
+       machine without the WDK) legitimately harvests nothing here and WiX says
+       so with WIX8600. It is not suppressed: the same warning on the app or
+       console group would be a real bug, and this one is cross-checked instead -
+       Test-Installer.ps1 asserts that the packaged files and DRIVERSIGNSTATE
+       agree, in both directions. -->
   <Fragment>
     <ComponentGroup Id="CG_DriverFiles" Directory="DRIVERDIR">
       <Files Include="stage\driver\**" />

@@ -15,7 +15,9 @@ rather than a second, different UI. The `.exe` is packaging, not a second produc
 .\scripts\Build-Installer.ps1                      # build both
 .\scripts\Build-Installer.ps1 -SkipPublish         # re-package the staged payload
 .\scripts\Build-Installer.ps1 -EvThumbprint <t>    # EV-sign both artifacts
-.\scripts\Test-Installer.ps1                       # 61 static gates over the built MSI
+.\scripts\Build-Installer.ps1 -Store -EvThumbprint <t>   # Microsoft Store submission build
+.\scripts\Test-Installer.ps1                       # 75 static gates over the built MSI
+.\scripts\Test-StoreValidation.ps1                 # ELEVATED: real install/uninstall, Store checks
 ```
 
 Signing the bundle is not just another signtool call: Burn's engine has to be
@@ -53,6 +55,22 @@ service, Reference Console (+ desktop shortcut), and the three opt-in read-only
 sensor backends (`gpu.*`, `aqua.*`, `ups.*`), which stay off by default to match
 the broker's own `Allow*Sensors` defaults.
 
+## Publisher identity
+
+`-Manufacturer` (default `UNBOUNDED ENGINEERING LLC`) is the string Windows
+shows as **Publisher** in Add/Remove Programs, and it is also what the bundle
+stamps into its own ARP row and into the `.exe`'s `CompanyName`. It has to be
+the publisher name that can be verified elsewhere — the signing certificate's
+subject organization, and the Microsoft Store publisher display name. A handle
+there is not cosmetic: Store package validation rejects a "blank or unrelated"
+publisher, and the failure surfaces as an app name and publisher that "could not
+be identified" (`docs\STORE-SUBMISSION.md`).
+
+Two guards keep it from drifting: `Build-Installer.ps1 -EvThumbprint` refuses to
+build when `-Manufacturer` disagrees with the certificate's `O=`, and
+`Test-Installer.ps1 -ExpectPublisher` pins the value in the package (CI passes
+it).
+
 ## The driver signature gate
 
 The package records what it actually contains. `Build-Installer.ps1` inspects the
@@ -65,6 +83,11 @@ The package records what it actually contains. `Build-Installer.ps1` inspects th
   **off by default**, and selecting it puts up a dialog explaining that Windows
   will refuse to load the driver outside test-signing mode. Next stays disabled
   until the acknowledgement is ticked.
+* **`none`** — the package carries no `.sys` at all: no WDK on the build
+  machine, or a `-Store` build, which leaves a non-production driver out because
+  a test-signed binary cannot chain to a Microsoft-trusted root. The feature
+  goes to Level 0, disabled and hidden, and `Setup-Driver.ps1` records
+  `DriverStatus=Absent` rather than failing the install.
 
 Signer identity decides this, not `Get-AuthenticodeSignature` status: the dev
 test certificate reports `Valid` on the dev box because its root was imported
@@ -102,6 +125,12 @@ the warning path disappears on its own; no authoring changes.
 | `setup\Setup-Config.ps1` | Writes the `Allow*Sensors` flags and sets the control service's start type |
 | `RegisterBroker.wixproj` / `bundle\Bundle.wixproj` | Build the MSI and the bundle |
 
+Verification lives in `scripts\`: `Test-Installer.ps1` reads the built package's
+tables (static, read-only), and `Test-StoreValidation.ps1` runs Microsoft's
+manual package-validation procedure for real — silent install, exactly one
+correctly identified Add/Remove Programs entry, silent uninstall — and writes a
+transcript to `dist\`.
+
 `stage\`, `bin\`, `obj\`, `License.rtf` and `dist\` are build outputs and are
 gitignored. `License.rtf` is generated from `LICENSE` on every build so the two
 cannot drift.
@@ -114,6 +143,11 @@ Each of these cost a build here, and each has a gate in `Test-Installer.ps1`.
   condition string is *not* a reference. `Package.wxs` carries an explicit
   `<PropertyRef Id="DRIVERSIGNSTATE" />` purely to pull `Actions.wxs` in;
   without it the package builds clean and every custom action is missing.
+* **A package with no driver payload warns WIX8600** ("zero files harvested")
+  for `CG_DriverFiles`. Expected for a Store build or any build on a machine
+  without the WDK — and deliberately not suppressed, because the same warning
+  on the app or console group would be a real bug. `Test-Installer.ps1` gates
+  the payload against `DRIVERSIGNSTATE` in both directions instead.
 * **`CustomAction.Target` is 255 characters** and MSI truncates rather than
   erroring. The custom actions pass an install root and let the scripts derive
   their own paths; the four backend selections travel as one `0101` flag string.

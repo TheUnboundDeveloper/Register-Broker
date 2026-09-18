@@ -11,6 +11,92 @@ and additive ops do not bump the protocol version.
 
 ## [Unreleased]
 
+### Fixed — Microsoft Store package validation: publisher identity, payload signing, submission fields
+
+A Partner Center MSI/EXE submission came back with three checks *inconclusive* rather than failed
+— "we could not identify if your app is installing silently", and twice "we could not identify the
+app name and the publisher name that your app has added in the add or remove programs". All three
+are decided by installing the package and reading the Add/Remove Programs row it creates, so one
+unreadable row leaves all three unanswered. Two causes, both addressed:
+
+- **The publisher was a GitHub handle.** `Manufacturer` — the string Windows shows as ARP
+  **Publisher** — was `nvaitehiarna`, while both artifacts are EV-signed as
+  `UNBOUNDED ENGINEERING LLC`. Microsoft's criterion is that the entry "should not show a blank or
+  unrelated Name or Publisher", so an unrecognizable publisher *is* an unidentifiable app. The
+  default is now the legal publisher name in both the MSI and the bundle, and
+  `Build-Installer.ps1 -EvThumbprint` **refuses to build** when `-Manufacturer` disagrees with the
+  signing certificate's subject organization — the two identities can no longer drift apart
+  silently. New `-Manufacturer` parameter; `Test-Installer.ps1 -ExpectPublisher` pins the value in
+  the package and CI passes it.
+- **A documentation URL had been entered in Partner Center's "Installer parameters" field.** That
+  field is the literal command line the Store appends when it runs the installer:
+  `msiexec /i <pkg> /qn https://learn...` fails with 1639 (invalid command line), and a Burn `.exe`
+  given an unrecognized argument never goes silent and shows its full UI. Either way the install
+  never lands. The correct values are now written down: **empty for an MSI** (the Store always uses
+  its own `/qn`) and **`/quiet` for the EXE**, with a documentation URL belonging to a return code
+  under *Installer handling* instead. `docs/STORE-SUBMISSION.md` carries the whole field-by-field
+  table, including return codes for every scenario Partner Center asks about.
+
+Nothing about the package's silent-install *mechanism* was broken, and that was verified rather
+than assumed: `wixstdba` only applies `bal:DisplayInternalUICondition` when the bundle itself is
+displaying full or passive UI, so the chained MSI's dialogs cannot leak into `/quiet`.
+
+### Added — Store submission support
+
+- **`docs/STORE-SUBMISSION.md`**: the exact Partner Center Packages-page values, what each
+  validation check requires (quoting Microsoft), how this package satisfies it, the remaining
+  requirements, and a pre-submission checklist.
+- **`scripts\Test-StoreValidation.ps1`** runs Microsoft's documented *manual package validation*
+  for real, elevated: snapshots Add/Remove Programs, installs with the Store's own switch under a
+  timeout (a silent install that waits on a dialog never returns — which is the finding), asserts a
+  documented success exit code, asserts **exactly one** new visible entry with the expected Name,
+  Publisher and Version, then uninstalls silently and asserts nothing is left behind. Writes a
+  transcript (machine, package hash, signature, every command line and result) to `dist\` to keep
+  as evidence if Partner Center asks for manual verification.
+- **`-SignPayload` (implied by `-Store`)** signs every PE in the staged payload that carries no
+  signature — this repo's managed assemblies, Avalonia and NAudio, about three dozen files — before
+  the MSI is built, because the package stores file hashes. The Store requires the installer *and
+  every PE file it carries* to chain to a Microsoft-trusted root, which previously only the two
+  artifacts did. Microsoft-signed runtime files are deliberately left alone: re-signing them would
+  replace Microsoft's signature with ours. The step re-scans afterwards and fails if anything is
+  still unsigned.
+- **`-Store`** builds the submission artifact: requires `-EvThumbprint`, implies `-SignPayload`,
+  and leaves a non-production driver **out of the package** rather than shipping a `.sys` that
+  cannot chain to a Microsoft-trusted root.
+- **New `none` driver sign state** for a package with no `.sys` at all (a `-Store` build, or any
+  build on a machine without the WDK — which is what CI does). The kernel feature drops to Level 0,
+  disabled and hidden, instead of being offered with nothing behind it, and `Setup-Driver.ps1`
+  records `DriverStatus=Absent` and succeeds instead of rolling the install back over a payload
+  that was never meant to be there. Replaces the old behaviour of calling an absent driver
+  "unsigned".
+- **ARP metadata**: `ARPHELPLINK`, `ARPURLUPDATEINFO`, `ARPCONTACT` and `ARPCOMMENTS` alongside the
+  existing `ARPURLINFOABOUT`/`ARPPRODUCTICON`, plus `HelpUrl`/`UpdateUrl` on the bundle — an entry
+  a person, or a validator, can trace back to a real publisher.
+- **Assembly publisher metadata**: `<Company>` on the broker, the Reference Console, the client
+  library and the audio tool. The console and client library shipped with *no* assembly metadata
+  at all, so `ReferenceConsole.exe` — the GUI a user actually launches — reported a `CompanyName`
+  of "ReferenceConsole" and no version.
+- `Test-Installer.ps1`: 61 → 75 gates. New ones cover the ARP identity (name, publisher, version,
+  support links, publisher-is-not-a-placeholder, optional exact match), that the packaged driver
+  and `DRIVERSIGNSTATE` agree **in both directions**, and that the bundle advertises the same
+  publisher and product name as the MSI it wraps.
+
+**Verified end to end on the dev box.** A `-Store -EvThumbprint` build produced both artifacts
+EV-signed as `UNBOUNDED ENGINEERING LLC`, RFC3161 timestamped and `signtool verify /pa` clean, with
+**zero unsigned PE files left in the payload** (36 signed; the 409 Microsoft-signed runtime files
+untouched). All 75 static gates pass. `Test-StoreValidation.ps1` then passed all 12 live checks
+against that MSI: silent `/qn` install returned 0 in 6.5 s with no UI, Add/Remove Programs showed
+**exactly one** visible entry reading `Register Broker` / `UNBOUNDED ENGINEERING LLC` / `1.6.0`, and
+the silent uninstall left no entry, services, install directory or registry key behind. `-Store`
+without `-EvThumbprint` refuses as intended.
+
+One measurement worth recording, because it identifies the original failure precisely: a
+well-formed `msiexec /i <pkg> /qn` and a doubled `/qn /qn` both parse identically (1619 against a
+deliberately missing package), while `/qn <a URL>` **never returns at all**. The first submission's
+install did not fail — it hung, which is why all three checks came back unanswered rather than
+failed. `/qn` is therefore the safe value for Partner Center's required Installer-parameters field:
+harmless if the Store appends it to its own switch, correct if it replaces it.
+
 ### Added — Windows installer: MSI + bootstrapper EXE (packaging only; no code change)
 
 - **New `installer\` tree and `scripts\Build-Installer.ps1`** produce

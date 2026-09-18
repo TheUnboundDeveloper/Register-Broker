@@ -6,6 +6,16 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\rc-logo.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+
+    <!-- Assembly/PE metadata. The console ships inside the installer, so the
+         file a customer launches has to name its publisher and version like
+         every other binary in the package. Version tracks the broker release
+         the console was built alongside. -->
+    <Version>1.6.0</Version>
+    <Product>Register Broker</Product>
+    <AssemblyTitle>Register Broker Reference Console</AssemblyTitle>
+    <Company>UNBOUNDED ENGINEERING LLC</Company>
+    <Copyright>Copyright (c) 2026 nvaitehiarna. AGPL-3.0 with Commercial Exception.</Copyright>
   </PropertyGroup>
 
   <ItemGroup>

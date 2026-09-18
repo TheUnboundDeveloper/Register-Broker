@@ -92,12 +92,17 @@ jobs:
         shell: pwsh
         run: .\scripts\Build-Installer.ps1
 
-      # The runner has no driver, so the package must come out "unsigned" with the
-      # kernel feature off by default. Asserting the expected state (rather than
-      # whatever it happens to be) is what makes this a gate.
+      # The runner has no driver, so the package must come out with sign state
+      # "none" and the kernel feature disabled. Asserting the expected state
+      # (rather than whatever it happens to be) is what makes this a gate.
+      #
+      # -ExpectPublisher pins the Add/Remove Programs "Publisher" string. A
+      # placeholder there is invisible locally and comes back from a Store
+      # submission as an app name and publisher that "could not be identified",
+      # so it is worth failing the build over. See docs/STORE-SUBMISSION.md.
       - name: Packaging gates
         shell: pwsh
-        run: .\scripts\Test-Installer.ps1 -ExpectSignState unsigned
+        run: .\scripts\Test-Installer.ps1 -ExpectSignState none -ExpectPublisher 'UNBOUNDED ENGINEERING LLC\'
 
       # Deliberately NOT uploading the package as an artifact. It carries no driver
       # and so cannot touch hardware, but the project's packaging gate is that no

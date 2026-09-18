@@ -21,6 +21,13 @@
   required before it will install. This is the packaging gate expressed in the
   build rather than in a README: see docs\SIGNING-AND-DEPLOYMENT.md.
 
+  PUBLISHER IDENTITY. -Manufacturer becomes the "Publisher" string in Add/Remove
+  Programs, and it has to be the same publisher a validator can see elsewhere -
+  the signing certificate's subject organization and the Microsoft Store
+  publisher display name. When -EvThumbprint is given the two are cross-checked
+  here, because a mismatch is invisible until a submission comes back saying the
+  app name and publisher "could not be identified". See docs\STORE-SUBMISSION.md.
+
   Does NOT need elevation - it only builds. Installing the result does.
   Does NOT touch the running services or the dev-box publish\ tree.
 
@@ -30,6 +37,7 @@
       .\scripts\Build-Installer.ps1
       .\scripts\Build-Installer.ps1 -SkipPublish            # re-package staged bits
       .\scripts\Build-Installer.ps1 -EvThumbprint <thumb>   # EV-sign both artifacts
+      .\scripts\Build-Installer.ps1 -Store -EvThumbprint <thumb>   # Store submission build
 #>
 [CmdletBinding()]
 param(
@@ -42,9 +50,15 @@ param(
     # The driver binary to package. Default is the direct-link build output.
     [string]$SysPath = '',
 
-    # production | test | unsigned. Detected from the .sys unless overridden.
-    [ValidateSet('', 'production', 'test', 'unsigned')]
+    # production | test | unsigned | none. Detected from the .sys unless
+    # overridden; "none" means the package carries no driver payload at all.
+    [ValidateSet('', 'production', 'test', 'unsigned', 'none')]
     [string]$DriverSignState = '',
+
+    # The publisher identity: the MSI's Manufacturer and the bundle's, which is
+    # exactly what Add/Remove Programs shows as "Publisher". It must be the
+    # legal publisher name rather than a handle - see the header note.
+    [string]$Manufacturer = 'UNBOUNDED ENGINEERING LLC',
 
     [string]$OutDir = '',
 
@@ -54,6 +68,18 @@ param(
 
     # Build only the .msi.
     [switch]$NoBundle,
+
+    # Sign every PE file in the staged payload that is not signed already (this
+    # repo's own managed assemblies, Avalonia, NAudio). The Microsoft Store
+    # requires the installer AND every PE it carries to chain to a trusted root;
+    # a normal release only needs the two artifacts signed. Implied by -Store.
+    [switch]$SignPayload,
+
+    # Build the artifact for a Microsoft Store submission: EV-signed end to end
+    # (installer plus payload) and carrying no kernel driver unless the .sys is
+    # production-signed, because a test-signed binary cannot chain to a
+    # Microsoft-trusted root. See docs\STORE-SUBMISSION.md.
+    [switch]$Store,
 
     # EV code signing (DigiCert KeyLocker cloud HSM - see
     # docs\DRIVER-SIGNING-ATTESTATION.md for the smctl/KSP setup). Signs the
@@ -102,6 +128,20 @@ if ($v.Major -gt 255 -or $v.Minor -gt 255 -or $v.Build -gt 65535) {
 }
 Write-Info "Version        : $Version"
 
+if (-not $Manufacturer.Trim()) { throw "-Manufacturer cannot be empty: it is the Add/Remove Programs 'Publisher' string." }
+Write-Info "Publisher      : $Manufacturer"
+
+if ($Store) {
+    # Every PE in a Store package has to be signed, so there is no such thing as
+    # an unsigned Store build - fail now rather than after a five-minute publish.
+    if (-not $EvThumbprint) {
+        throw ("-Store requires -EvThumbprint: the Store requires the installer and every PE file it " +
+               "carries to be signed by a certificate chaining to a Microsoft-trusted root.")
+    }
+    $SignPayload = $true
+    Write-Info "Mode           : Microsoft Store submission build"
+}
+
 if (-not $SysPath) { $SysPath = Join-Path $RepoRoot 'BrokerSmbusDriver\x64\Release\BrokerSmbus.sys' }
 $haveDriver = Test-Path $SysPath
 if ($haveDriver) {
@@ -129,8 +169,11 @@ if ($DriverSignState) {
     $signState = $DriverSignState
 }
 elseif (-not $haveDriver) {
-    $signState = 'unsigned'
-    Write-Info "No driver staged -> 'unsigned'."
+    # "none", not "unsigned": there is no binary to describe. The distinction
+    # matters because a package that claims a sign state must carry the .sys,
+    # and Test-Installer.ps1 gates on exactly that.
+    $signState = 'none'
+    Write-Info "No driver staged -> 'none'."
 }
 else {
     $sig = Get-AuthenticodeSignature $SysPath
@@ -155,9 +198,113 @@ else {
     }
 }
 
-$driverFeatureLevel = if ($signState -eq 'production') { '1' } else { '1000' }
+# A Store package must not carry a driver Windows would refuse: the Store's own
+# requirement is that every PE chains to a Microsoft-trusted root, and a
+# test-signed .sys chains to a local test root. Leave it out rather than ship a
+# feature that cannot work on a customer's machine.
+if ($Store -and $signState -ne 'production') {
+    if ($haveDriver) {
+        Write-Warning ("Store build: the staged driver is $signState-signed, so it is being LEFT OUT of the package. " +
+                       "The broker services and console install and run; the sensor catalog reports no hardware " +
+                       "until an attestation-signed driver is packaged. See docs\SIGNING-AND-DEPLOYMENT.md.")
+    }
+    $haveDriver = $false
+    $signState  = 'none'
+}
+if ($signState -eq 'none') { $haveDriver = $false }
+
+# 1 = on by default (production only); 1000 = listed but off; 0 = disabled and
+# hidden, which is the only honest level for a package with no driver payload.
+$driverFeatureLevel = switch ($signState) {
+    'production' { '1' }
+    'none'       { '0' }
+    default      { '1000' }
+}
 Write-Info "Sign state     : $signState"
-Write-Info "Driver feature : $(if ($driverFeatureLevel -eq '1') { 'selected by default' } else { 'listed, OFF by default (explicit opt-in required)' })"
+Write-Info ("Driver feature : {0}" -f $(switch ($driverFeatureLevel) {
+    '1'     { 'selected by default' }
+    '0'     { 'disabled and hidden (no driver in this package)' }
+    default { 'listed, OFF by default (explicit opt-in required)' }
+}))
+
+#--------------------------------------------------------------------------
+# 1b. Signing preflight
+#
+# Resolved BEFORE anything is published or staged: a bad thumbprint, a stale
+# KeyLocker client certificate or a publisher that disagrees with the
+# certificate should cost a second, not a full rebuild. The payload signer needs
+# these helpers too, and PowerShell binds functions at execution time, so they
+# have to exist before the staging step runs.
+#--------------------------------------------------------------------------
+function Get-SignTool {
+    $kit = 'C:\Program Files (x86)\Windows Kits\10\bin'
+    if (-not (Test-Path $kit)) { throw "Windows Kits not found at $kit - signtool is part of the WDK/SDK." }
+    $candidates = Get-ChildItem $kit -Directory -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Name -match '^10\.' } |
+                  Sort-Object Name -Descending
+    foreach ($c in $candidates) {
+        $st = Join-Path $c.FullName 'x64\signtool.exe'
+        if (Test-Path $st) { return $st }
+    }
+    throw "signtool.exe not found under $kit."
+}
+
+function Invoke-Sign([string]$Path, [string]$SignTool, [string]$Description) {
+    Write-Info "sign: $(Split-Path $Path -Leaf)"
+    & $SignTool sign /sha1 $EvThumbprint /fd sha256 /td sha256 /tr $TimestampUrl /d $Description $Path | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "signtool failed on $Path (exit $LASTEXITCODE)." }
+}
+
+# The subject organization of the signing certificate. An RDN value containing a
+# comma would be quoted and would need a real parser; no code-signing subject
+# here does, and a miss only skips the cross-check.
+function Get-CertSubjectOrg([string]$Thumbprint) {
+    foreach ($store in @('Cert:\CurrentUser\My', 'Cert:\LocalMachine\My')) {
+        $cert = Get-ChildItem $store -ErrorAction SilentlyContinue | Where-Object { $_.Thumbprint -eq $Thumbprint }
+        if ($cert) {
+            foreach ($rdn in ($cert.Subject -split ',')) {
+                if ($rdn.Trim() -match '^O=(.+)$') { return $matches[1].Trim().Trim('"') }
+            }
+        }
+    }
+    return ''
+}
+
+$signTool = $null
+if ($EvThumbprint) {
+    Write-Step "Signing preflight"
+
+    # The DigiCert KeyLocker KSP reads SM_* from the environment, and if the
+    # client-auth certificate is missing or stale, signtool fails with an opaque
+    # SignerSign() 0x8009002d rather than anything that names the cause.
+    $smCert = $env:SM_CLIENT_CERT_FILE
+    if ($smCert -and -not (Test-Path $smCert)) {
+        throw ("SM_CLIENT_CERT_FILE points at '$smCert', which does not exist. " +
+               "The KeyLocker KSP cannot authenticate without it and signtool would fail with " +
+               "'SignerSign() failed' (0x8009002d). Point SM_CLIENT_CERT_FILE at the client-auth .p12 and retry.")
+    }
+    if (-not $env:SM_API_KEY) {
+        Write-Warning "SM_API_KEY is not set in this process. If the certificate's key lives in a cloud HSM, signing will fail."
+    }
+
+    $signTool = Get-SignTool
+    Write-Info "signtool: $signTool"
+
+    # Publisher vs. certificate. Add/Remove Programs showing a publisher that
+    # does not match the signature is exactly what Store validation reports as
+    # an unidentifiable app name and publisher.
+    $certOrg = Get-CertSubjectOrg $EvThumbprint
+    if (-not $certOrg) {
+        Write-Warning ("Could not read a subject organization for $EvThumbprint from the local certificate stores, " +
+                       "so the publisher cross-check was skipped. Confirm by hand that the certificate is issued to '$Manufacturer'.")
+    } elseif ($certOrg -ne $Manufacturer) {
+        throw ("Publisher mismatch: -Manufacturer is '$Manufacturer' but the signing certificate is issued to '$certOrg'. " +
+               "Add/Remove Programs would then advertise a publisher the signature does not back, which fails Microsoft " +
+               "Store package validation. Re-run with -Manufacturer '$certOrg', or sign with the matching certificate.")
+    } else {
+        Write-Info "Publisher matches the signing certificate: $certOrg"
+    }
+}
 
 #--------------------------------------------------------------------------
 # 2. Stage the payload
@@ -236,6 +383,55 @@ $stagedMb    = [math]::Round(((Get-ChildItem $StageDir -Recurse -File | Measure-
 Write-Info "Staged $stagedFiles files, $stagedMb MB."
 
 #--------------------------------------------------------------------------
+# 2b. Sign the payload
+#
+# "The binary and all of its Portable Executable (PE) files must be digitally
+# signed with a code signing certificate that chains up to a certificate issued
+# by a CA that is part of the Microsoft Trusted Root Program" - the Store's
+# requirement covers what is INSIDE the installer, not just the installer.
+#
+# A self-contained publish is mostly Microsoft-signed runtime files, which are
+# left exactly as they are: re-signing them would replace Microsoft's signature
+# with ours. Only files that carry no signature at all are signed here, and they
+# are signed BEFORE the MSI is built, because the package stores file hashes.
+#--------------------------------------------------------------------------
+if ($SignPayload) {
+    if (-not $EvThumbprint) { throw "-SignPayload needs -EvThumbprint." }
+    Write-Step "Signing the payload"
+
+    $pe = @(Get-ChildItem $StageDir -Recurse -File -Include *.exe, *.dll)
+    $unsigned = New-Object System.Collections.ArrayList
+    $other    = New-Object System.Collections.ArrayList
+    foreach ($f in $pe) {
+        $status = (Get-AuthenticodeSignature $f.FullName).Status
+        if ($status -eq 'NotSigned') { [void]$unsigned.Add($f.FullName) }
+        elseif ($status -ne 'Valid') { [void]$other.Add(('{0} ({1})' -f $f.Name, $status)) }
+    }
+    Write-Info ("PE files: {0} total, {1} unsigned" -f $pe.Count, $unsigned.Count)
+    if ($other.Count) {
+        Write-Warning ("Left alone because they are signed but do not verify here: " + ($other -join ', '))
+    }
+
+    # Batched: signtool takes many files per invocation, and each invocation is a
+    # separate authentication round trip to the cloud HSM.
+    $batch = 40
+    for ($i = 0; $i -lt $unsigned.Count; $i += $batch) {
+        $slice = @($unsigned.GetRange($i, [math]::Min($batch, $unsigned.Count - $i)))
+        Write-Info ("sign: {0} file(s) [{1}/{2}]" -f $slice.Count, ([math]::Min($i + $batch, $unsigned.Count)), $unsigned.Count)
+        & $signTool sign /sha1 $EvThumbprint /fd sha256 /td sha256 /tr $TimestampUrl /d 'Register Broker' @slice | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw "signtool failed while signing the payload (exit $LASTEXITCODE)." }
+    }
+
+    $stillUnsigned = @(Get-ChildItem $StageDir -Recurse -File -Include *.exe, *.dll |
+                       Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -eq 'NotSigned' })
+    if ($stillUnsigned.Count) {
+        throw ("{0} payload PE file(s) are still unsigned after signing, starting with {1}." -f
+               $stillUnsigned.Count, $stillUnsigned[0].Name)
+    }
+    Write-Info "Every PE file in the payload carries a signature."
+}
+
+#--------------------------------------------------------------------------
 # 3. License.rtf, generated from LICENSE so the two cannot drift
 #--------------------------------------------------------------------------
 Write-Step "Generating License.rtf from LICENSE"
@@ -270,6 +466,7 @@ $msiArgs = @(
     '-c', $Configuration,
     '--nologo',
     "-p:ProductVersion=$Version",
+    "-p:Manufacturer=$Manufacturer",
     "-p:DriverSignState=$signState",
     "-p:DriverFeatureLevel=$driverFeatureLevel"
 )
@@ -289,46 +486,11 @@ Write-Info ("MSI: {0} ({1} MB)" -f $msiPath, [math]::Round((Get-Item $msiPath).L
 #--------------------------------------------------------------------------
 # 5. Sign the MSI (before bundling: Burn hashes the payload it embeds, so a
 #    package signed after bundling would not match the bundle's manifest).
+#    The signing helpers and credential preflight live in step 1b, because the
+#    payload signer needs them before staging.
 #--------------------------------------------------------------------------
-function Get-SignTool {
-    $kit = 'C:\Program Files (x86)\Windows Kits\10\bin'
-    if (-not (Test-Path $kit)) { throw "Windows Kits not found at $kit - signtool is part of the WDK/SDK." }
-    $candidates = Get-ChildItem $kit -Directory -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Name -match '^10\.' } |
-                  Sort-Object Name -Descending
-    foreach ($c in $candidates) {
-        $st = Join-Path $c.FullName 'x64\signtool.exe'
-        if (Test-Path $st) { return $st }
-    }
-    throw "signtool.exe not found under $kit."
-}
-
-function Invoke-Sign([string]$Path, [string]$SignTool, [string]$Description) {
-    Write-Info "sign: $(Split-Path $Path -Leaf)"
-    & $SignTool sign /sha1 $EvThumbprint /fd sha256 /td sha256 /tr $TimestampUrl /d $Description $Path | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "signtool failed on $Path (exit $LASTEXITCODE)." }
-}
-
-$signTool = $null
 if ($EvThumbprint) {
-    Write-Step "Signing (EV)"
-
-    # Preflight the cloud-HSM credentials. The DigiCert KeyLocker KSP reads
-    # SM_* from the environment, and if the client-auth certificate is missing
-    # or stale, signtool fails with an opaque SignerSign() 0x8009002d rather
-    # than anything that names the cause. Check it up front instead.
-    $smCert = $env:SM_CLIENT_CERT_FILE
-    if ($smCert -and -not (Test-Path $smCert)) {
-        throw ("SM_CLIENT_CERT_FILE points at '$smCert', which does not exist. " +
-               "The KeyLocker KSP cannot authenticate without it and signtool would fail with " +
-               "'SignerSign() failed' (0x8009002d). Point SM_CLIENT_CERT_FILE at the client-auth .p12 and retry.")
-    }
-    if (-not $env:SM_API_KEY) {
-        Write-Warning "SM_API_KEY is not set in this process. If the certificate's key lives in a cloud HSM, signing will fail."
-    }
-
-    $signTool = Get-SignTool
-    Write-Info "signtool: $signTool"
+    Write-Step "Signing the MSI (EV)"
     Invoke-Sign -Path $msiPath -SignTool $signTool -Description 'Register Broker'
 }
 
@@ -345,6 +507,7 @@ if (-not $NoBundle) {
         '-c', $Configuration,
         '--nologo',
         "-p:ProductVersion=$Version",
+        "-p:Manufacturer=$Manufacturer",
         "-p:MsiPath=$msiPath"
     )
     if ($Clean) { $bundleArgs += '-t:Rebuild' }
@@ -409,10 +572,30 @@ foreach ($a in $artifacts) {
 }
 
 Write-Host ""
-Write-Host "Driver: $signState-signed." -ForegroundColor $(if ($signState -eq 'production') { 'Green' } else { 'Yellow' })
-if ($signState -ne 'production') {
-    Write-Host "  The kernel driver feature is OFF by default and requires explicit acknowledgement."
-    Write-Host "  Silent install with the driver: msiexec /i <msi> /qn ACCEPTTESTSIGNEDDRIVER=1 ADDLOCAL=ALL"
+Write-Host "Publisher: $Manufacturer" -ForegroundColor Cyan
+Write-Host "  Shown as the Add/Remove Programs 'Publisher'. It must match the Microsoft Store"
+Write-Host "  publisher display name exactly - see docs\STORE-SUBMISSION.md."
+
+Write-Host ""
+if ($signState -eq 'none') {
+    Write-Host "Driver: NOT included in this package." -ForegroundColor Yellow
+    Write-Host "  The kernel-driver feature is disabled and hidden. Sensors and RGB report no"
+    Write-Host "  hardware until a package built around a production-signed .sys is installed."
+} else {
+    Write-Host "Driver: $signState-signed." -ForegroundColor $(if ($signState -eq 'production') { 'Green' } else { 'Yellow' })
+    if ($signState -ne 'production') {
+        Write-Host "  The kernel driver feature is OFF by default and requires explicit acknowledgement."
+        Write-Host "  Silent install with the driver: msiexec /i <msi> /qn ACCEPTTESTSIGNEDDRIVER=1 ADDLOCAL=ALL"
+    }
+}
+
+if ($Store) {
+    Write-Host ""
+    Write-Host "Store submission build." -ForegroundColor Cyan
+    Write-Host "  Verify it the way Microsoft does before submitting (ELEVATED, installs and uninstalls):"
+    Write-Host "    .\scripts\Test-StoreValidation.ps1 -ExpectPublisher '$Manufacturer'"
+    Write-Host "  Partner Center: app type MSI needs NO installer parameters (the Store uses /qn);"
+    Write-Host "  app type EXE takes /quiet. Never put a documentation URL in that field."
 }
 if (-not $EvThumbprint) {
     Write-Host ""

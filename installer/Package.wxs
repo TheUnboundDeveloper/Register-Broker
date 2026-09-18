@@ -52,9 +52,29 @@
          are then silently dropped from the package. -->
     <PropertyRef Id="DRIVERSIGNSTATE" />
 
+    <!--===================================================================
+        Add/Remove Programs identity.
+
+        Store package validation reads this row back and rejects a "blank or
+        unrelated Name or Publisher", so it is a shipping requirement rather
+        than cosmetics (docs\STORE-SUBMISSION.md):
+
+            Name      <- Package/@Name                  "Register Broker"
+            Publisher <- Package/@Manufacturer           the legal publisher,
+                         cross-checked against the signing certificate by
+                         Build-Installer.ps1
+            Version   <- Package/@Version
+
+        The support links are filled in for the same reason: an entry a human
+        (or a validator) can trace back to a real publisher.
+        ===================================================================-->
     <Icon Id="RegisterBroker.ico" SourceFile="$(var.ConsoleIcon)" />
     <Property Id="ARPPRODUCTICON" Value="RegisterBroker.ico" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/TheUnboundDeveloper/Register-Broker" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/TheUnboundDeveloper/Register-Broker/issues" />
+    <Property Id="ARPURLUPDATEINFO" Value="https://github.com/TheUnboundDeveloper/Register-Broker/releases" />
+    <Property Id="ARPCONTACT" Value="$(var.Manufacturer)" />
+    <Property Id="ARPCOMMENTS" Value="Secure, audited low-level hardware access (sensors and RGB) for non-admin applications." />
     <Property Id="ARPNOREPAIR" Value="1" />
 
     <!--===================================================================
