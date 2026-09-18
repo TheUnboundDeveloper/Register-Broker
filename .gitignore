@@ -60,5 +60,4 @@ desktop.ini
 /installer/obj/
 /installer/bundle/bin/
 /installer/bundle/obj/
-/dist/
 /installer/cabcache/
